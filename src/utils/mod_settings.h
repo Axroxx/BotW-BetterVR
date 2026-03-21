@@ -12,61 +12,81 @@ public:
 
     virtual void Reset() = 0;
 
-    ~ModSettingBase() = default;
+    virtual ~ModSettingBase() = default;
 };
 
 template <typename T>
 class ModSetting : public ModSettingBase {
 private:
-    std::atomic<T> atomicValue;
+    std::atomic<T> m_value;
 
 public:
     const T defaultValue;
 
-    ModSetting(const char* name, T defaultValue): ModSettingBase(name), defaultValue(defaultValue) {
-        atomicValue = defaultValue;
+    ModSetting(const char* name, T defaultValue): ModSettingBase(name), m_value(defaultValue), defaultValue(defaultValue) {}
+
+    T load(std::memory_order order = std::memory_order_seq_cst) const {
+        return m_value.load(order);
     }
 
-    const T Get() const {
-        return atomicValue.load();
+    void store(const T value, std::memory_order order = std::memory_order_seq_cst) {
+        Set(value, order);
     }
 
-    virtual void Set(const T value) {
-        atomicValue.store(value);
+    T exchange(const T value, std::memory_order order = std::memory_order_seq_cst) {
+        const T newValue = NormalizeValue(value);
+        return m_value.exchange(newValue, order);
+    }
+
+    operator T() const {
+        return load();
+    }
+
+    T operator=(const T value) {
+        store(value);
+        return load();
+    }
+
+    virtual T NormalizeValue(T value) const {
+        return value;
+    }
+
+    virtual void Set(const T value, std::memory_order order = std::memory_order_seq_cst) {
+        m_value.store(NormalizeValue(value), order);
     }
 
     void Reset() override {
-        Set(defaultValue);
+        store(defaultValue);
     }
-
-    ~ModSetting() = default;
 };
 
 template <typename T>
 requires(std::is_integral_v<T> && std::is_signed_v<T>)
 class IntSetting : public ModSetting<T> {
 public:
+    using ModSetting<T>::operator=;
+
     const T min;
     const T max;
 
-    IntSetting(const char* name, T defaultValue, T min = std::numeric_limits<T>::min(), T max = std::numeric_limits<T>::max()): ModSetting<T>(name, defaultValue), min(min), max(max) {}
+    IntSetting(const char* name, T defaultValue, T min = std::numeric_limits<T>::min(), T max = std::numeric_limits<T>::max()): ModSetting<T>(name, defaultValue), min(min), max(max) {
+        this->store(defaultValue);
+    }
 
-    void Set(T value) override {
+    T NormalizeValue(T value) const override {
         if (value < min) {
             Log::print<ERROR>("Tried to set {} to too low value {}, setting to minimum value {} instead", this->name, value, min);
-            ModSetting<T>::Set(min);
+            return min;
         }
-        else if (value > max) {
+        if (value > max) {
             Log::print<ERROR>("Tried to set {} to too high value {}, setting to maximum value {} instead", this->name, value, max);
-            ModSetting<T>::Set(max);
+            return max;
         }
-        else {
-            ModSetting<T>::Set(value);
-        }
+        return value;
     }
 
     std::string Serialize() override {
-        return std::to_string(this->Get());
+        return std::to_string(T(*this));
     }
 
     void Deserialize(std::string valueString) override {
@@ -80,22 +100,22 @@ public:
         }
         else if ((errnoRef == ERANGE && parsed < 0) || parsed < min) {
             Log::print<ERROR>("{} had too low value \"{}\". Setting to minimum value \"{}\"", this->name, valueString, min);
-            this->Set(min);
+            *this = min;
         }
         else if ((errnoRef == ERANGE && parsed > 0) || parsed > max) {
             Log::print<ERROR>("{} had too high value \"{}\". Setting to maximum value \"{}\"", this->name, valueString, max);
-            this->Set(max);
+            *this = max;
         }
         else {
-            this->Set(parsed);
+            *this = T(parsed);
         }
     }
 
-    void AddSliderToGUI(bool* changed, int min = int(this->min), int max = int(this->max), std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
-        int value = int(this->Get());
+    void AddSliderToGUI(bool* changed, int min = (int)this->min, int max = (int)this->max, std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+        int value = int(T(*this));
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::SliderInt(idStr.c_str(), &value, min, max, format(value).c_str())) {
-            this->Set(T(value));
+            *this = T(value);
             *changed = true;
         }
     }
@@ -103,7 +123,7 @@ public:
     void AddSetToGUI(bool* changed, const char* label, T value) {
         std::string idStr = std::format("{}##{}", label, this->name);
         if (ImGui::Button(idStr.c_str())) {
-            this->Set(value);
+            *this = value;
             *changed = true;
         }
     }
@@ -123,42 +143,35 @@ public:
         ImGui::SameLine();
         AddResetToGUI(changed);
     }
-
-    operator T() const {
-        return this->Get();
-    }
-
-    T operator=(const T value) {
-        this->Set(value);
-        return this->Get();
-    }
 };
 
 template <typename T>
 requires(std::is_integral_v<T> && !std::is_signed_v<T>)
 class UIntSetting : public ModSetting<T> {
 public:
+    using ModSetting<T>::operator=;
+
     const T min;
     const T max;
 
-    UIntSetting(const char* name, T defaultValue, T min = 0, T max = std::numeric_limits<T>::max()): ModSetting<T>(name, defaultValue), min(min), max(max) {}
+    UIntSetting(const char* name, T defaultValue, T min = 0, T max = std::numeric_limits<T>::max()): ModSetting<T>(name, defaultValue), min(min), max(max) {
+        this->store(defaultValue);
+    }
 
-    void Set(const T value) override {
+    T NormalizeValue(T value) const override {
         if (value < min) {
             Log::print<ERROR>("Tried to set {} to too low value {}, setting to minimum value {} instead", this->name, value, min);
-            ModSetting<T>::Set(min);
+            return min;
         }
-        else if (value > max) {
+        if (value > max) {
             Log::print<ERROR>("Tried to set {} to too high value {}, setting to maximum value {} instead", this->name, value, max);
-            ModSetting<T>::Set(max);
+            return max;
         }
-        else {
-            ModSetting<T>::Set(value);
-        }
+        return value;
     }
 
     std::string Serialize() override {
-        return std::to_string(this->Get());
+        return std::to_string(T(*this));
     }
 
     void Deserialize(std::string valueString) override {
@@ -172,22 +185,22 @@ public:
         }
         else if (parsed < min) {
             Log::print<ERROR>("{} had too low value \"{}\". Setting to minimum value \"{}\"", this->name, valueString, min);
-            this->Set(min);
+            *this = min;
         }
         else if (errnoRef == ERANGE || parsed > max) {
             Log::print<ERROR>("{} had too high value \"{}\". Setting to maximum value \"{}\"", this->name, valueString, max);
-            this->Set(max);
+            *this = max;
         }
         else {
-            this->Set(parsed);
+            *this = T(parsed);
         }
     }
 
     void AddSliderToGUI(bool* changed, int min = int(this->min), int max = int(this->max), std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
-        int value = int(this->Get());
+        int value = int(T(*this));
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::SliderInt(idStr.c_str(), &value, min, max, format(value).c_str())) {
-            this->Set(T(value));
+            *this = T(value);
             *changed = true;
         }
     }
@@ -195,7 +208,7 @@ public:
     void AddSetToGUI(bool* changed, const char* label, T value) {
         std::string idStr = std::format("{}##{}", label, this->name);
         if (ImGui::Button(idStr.c_str())) {
-            this->Set(value);
+            *this = value;
             *changed = true;
         }
     }
@@ -215,44 +228,37 @@ public:
         ImGui::SameLine();
         AddResetToGUI(changed);
     }
-
-    operator T() const {
-        return this->Get();
-    }
-
-    T operator=(const T value) {
-        this->Set(value);
-        return this->Get();
-    }
 };
 
 template <typename T>
 requires(std::is_floating_point_v<T>)
 class FloatSetting : public ModSetting<T> {
 public:
+    using ModSetting<T>::operator=;
+
     const T min;
     const T max;
 
-    FloatSetting(const char* name, T defaultValue, T min = -std::numeric_limits<T>::infinity(), T max = std::numeric_limits<T>::infinity()): ModSetting<T>(name, defaultValue), min(min), max(max) {}
+    FloatSetting(const char* name, T defaultValue, T min = -std::numeric_limits<T>::infinity(), T max = std::numeric_limits<T>::infinity()): ModSetting<T>(name, defaultValue), min(min), max(max) {
+        this->store(defaultValue);
+    }
 
-    void Set(const T value) override {
+    T NormalizeValue(T value) const override {
         if (value < min) {
             Log::print<ERROR>("Tried to set {} to too low value {}, setting to minimum value {} instead", this->name, value, min);
-            ModSetting<T>::Set(min);
+            return min;
         }
-        else if (value > max) {
+        if (value > max) {
             Log::print<ERROR>("Tried to set {} to too high value {}, setting to maximum value {} instead", this->name, value, max);
-            ModSetting<T>::Set(max);
+            return max;
         }
-        else {
-            ModSetting<T>::Set(value);
-        }
+        return value;
     }
 
     std::string Serialize() override {
         //use stringstream to avoid trailing zeros
         std::stringstream ss;
-        ss << this->Get();
+        ss << T(*this);
         return ss.str();
     }
 
@@ -271,22 +277,22 @@ public:
         }
         else if (parsed < min) {
             Log::print<ERROR>("{} had too low value \"{}\". Setting to minimum value \"{}\"", this->name, valueString, min);
-            this->Set(min);
+            *this = min;
         }
         else if (parsed > max) {
             Log::print<ERROR>("{} had too high value \"{}\". Setting to maximum value \"{}\"", this->name, valueString, max);
-            this->Set(max);
+            *this = max;
         }
         else {
-            this->Set(parsed);
+            *this = T(parsed);
         }
     }
 
     void AddSliderToGUI(bool* changed, float min, float max, std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
-        float value = float(this->Get());
+        float value = float(T(*this));
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::SliderFloat(idStr.c_str(), &value, min, max, format(value).c_str())) {
-            this->Set(T(value));
+            *this = T(value);
             *changed = true;
         }
     }
@@ -294,7 +300,7 @@ public:
     void AddSetToGUI(bool* changed, const char* label, T value) {
         std::string idStr = std::format("{}##{}", label, this->name);
         if (ImGui::Button(idStr.c_str())) {
-            this->Set(value);
+            *this = value;
             *changed = true;
         }
     }
@@ -314,31 +320,24 @@ public:
         ImGui::SameLine();
         AddResetToGUI(changed);
     }
-
-    operator T() const {
-        return this->Get();
-    }
-
-    T operator=(const T value) {
-        this->Set(value);
-        return this->Get();
-    }
 };
 
 class BoolSetting : public ModSetting<bool> {
 public:
+    using ModSetting<bool>::operator=;
+
     BoolSetting(const char* name, bool defaultValue): ModSetting<bool>(name, defaultValue) {}
 
     std::string Serialize() override {
-        return this->Get() ? "true" : "false";
+        return bool(*this) ? "true" : "false";
     }
 
     void Deserialize(std::string valueString) override {
         const char* valueChars = valueString.c_str();
         if (stricmp(valueChars, "true") == 0)
-            this->Set(true);
+            *this = true;
         else if (stricmp(valueChars, "false") == 0)
-            this->Set(false);
+            *this = false;
         else {
             //numeric load backup for older syntax
             char* parseEnd;
@@ -348,27 +347,18 @@ public:
                 this->Reset();
             }
             else {
-                this->Set(parsed);
+                *this = parsed != 0;
             }
         }
     }
 
     void AddToGUI(bool* changed) {
-        bool value = this->Get();
+        bool value = *this;
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::Checkbox(idStr.c_str(), &value)) {
-            this->Set(value);
+            *this = value;
             *changed = true;
         }
-    }
-
-    operator bool() const {
-        return this->Get();
-    }
-
-    bool operator=(const bool value) {
-        this->Set(value);
-        return value;
     }
 };
 
@@ -379,36 +369,40 @@ template <typename T>
 requires(IsEnum<T>)
 class EnumSetting : public ModSetting<T> {
 public:
+    using ModSetting<T>::operator=;
+
     const char* (*getName)(T);
     const std::vector<T> values;
 
     EnumSetting(const char* name, T defaultValue, const char* (*getName)(T), std::initializer_list<T> values): ModSetting<T>(name, defaultValue), getName(getName), values(values) {
         for (T value : values) {
-            if (value == defaultValue) return;
+            if (value == defaultValue) {
+                this->store(defaultValue);
+                return;
+            }
         }
         throw std::invalid_argument("Received illegal default value");
     }
 
-    void Set(const T value) override {
+    T NormalizeValue(T value) const override {
         for (T value2 : values) {
             if (value2 == value) {
-                ModSetting<T>::Set(value);
-                return;
+                return value;
             }
         }
         Log::print<ERROR>("Tried to set {} to an invalid value, resetting to default value {} instead", this->name, getName(this->defaultValue));
-        this->Reset();
+        return this->defaultValue;
     }
 
     std::string Serialize() override {
-        return std::string(getName(this->Get()));
+        return std::string(getName(T(*this)));
     }
 
     void Deserialize(std::string valueString) override {
         const char* valueChars = valueString.c_str();
         for (T value : values) {
             if (stricmp(getName(value), valueChars) == 0) {
-                this->Set(value);
+                *this = value;
                 return;
             }
         }
@@ -424,7 +418,7 @@ public:
         else {
             for (T value : values) {
                 if (parsed == std::to_underlying(value)) {
-                    this->Set(value);
+                    *this = value;
                     return;
                 }
             }
@@ -435,7 +429,7 @@ public:
 
     void AddRadioToGUI(bool* changed, const char* (*getDisplayName)(T)) {
         bool first = true;
-        int val = int(std::to_underlying(this->Get()));
+        int val = int(std::to_underlying(T(*this)));
         for (T value : values) {
             if (first) {
                 first = false;
@@ -445,14 +439,14 @@ public:
             }
             std::string idStr = std::format("{}##{}", getDisplayName(value), this->name);
             if (ImGui::RadioButton(idStr.c_str(), &val, int(std::to_underlying(value)))) {
-                this->Set(value);
+                *this = value;
                 *changed = true;
             }
         }
     }
 
     void AddComboToGUI(bool* changed, const char* (*getDisplayName)(T)) {
-        T cur = this->Get();
+        T cur = *this;
         int index;
         std::string idStr = std::format("##{}", this->name);
         std::string idComboStr = "";
@@ -464,18 +458,9 @@ public:
             idComboStr = std::format("{}{}{}", idComboStr, getDisplayName(value), '\0');
         }
         if (ImGui::Combo(idStr.c_str(), &index, idComboStr.c_str())) {
-            this->Set(values[index]);
+            *this = values[index];
             *changed = true;
         }
-    }
-
-    operator T() const {
-        return this->Get();
-    }
-
-    T operator=(const T value) {
-        this->Set(value);
-        return this->Get();
     }
 };
 
@@ -726,9 +711,9 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Cutscene Camera Mode: {}\n", toDisplayString(GetCutsceneCameraMode()));
         std::format_to(std::back_inserter(buffer), " - Show Black Bars for Third-Person Cutscenes: {}\n", UseBlackBarsForCutscenes() ? "Yes" : "No");
         std::format_to(std::back_inserter(buffer), " - Performance Overlay: {}\n", toDisplayString(performanceOverlay));
-        std::format_to(std::back_inserter(buffer), " - Performance Overlay Frequency: {} Hz\n", performanceOverlayFrequency.Get());
-        std::format_to(std::back_inserter(buffer), " - Stick Direction Threshold: {}\n", axisThreshold.Get());
-        std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", stickDeadzone.Get());
+        std::format_to(std::back_inserter(buffer), " - Performance Overlay Frequency: {} Hz\n", uint32_t(performanceOverlayFrequency));
+        std::format_to(std::back_inserter(buffer), " - Stick Direction Threshold: {}\n", float(axisThreshold));
+        std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
         return buffer;
     }
 };

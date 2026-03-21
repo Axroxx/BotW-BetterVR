@@ -194,6 +194,7 @@ lwz r3, 0x86C(r3)
 li r4, 1
 stb r4, 0x318(r3)
 
+; also uses r0 which contains the LR register to decide if this is the camera or a save game snapshot
 lis r4, currentFrameCounter@ha
 lwz r4, currentFrameCounter@l(r4)
 lis r5, currentEyeSide@ha

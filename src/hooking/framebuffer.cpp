@@ -45,11 +45,12 @@ void VkDeviceOverrides::DestroyImage(const vkroots::VkDeviceDispatch& pDispatch,
 void CemuHooks::hook_FixCameraSaveFilesAndInventory(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
+    uint32_t originCaller = hCPU->gpr[0];
     uint32_t isEnabling3DFramebufferCapture = hCPU->gpr[3];
     EyeSide side = (EyeSide)hCPU->gpr[4];
     uint32_t frameIdx = hCPU->gpr[5];
 
-    Log::print<PPC>("hook_FixCameraSaveFilesAndInventory: isEnabling3DFramebufferCapture={}, side={}, frameIdx={}", isEnabling3DFramebufferCapture, side, frameIdx);
+    Log::print<PPC>("[{:08X}] hook_FixCameraSaveFilesAndInventory: isEnabling3DFramebufferCapture={:08X}, side={}, frameIdx={}", originCaller, isEnabling3DFramebufferCapture, side, frameIdx);
     VRManager::instance().XR->GetRenderer()->SignalGameCapturing3DFrameBuffer();
 }
 

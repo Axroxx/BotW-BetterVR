@@ -453,7 +453,7 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
     glm::vec3 headPosition = (ToGLM(leftPose.position) + ToGLM(rightPose.position)) * 0.5f;
     glm::quat headOrientation = glm::slerp(ToGLM(leftPose.orientation), ToGLM(rightPose.orientation), 0.5f);
 
-    const float DISTANCE = GetSettings().hudDistance.Get();
+    const float DISTANCE = GetSettings().hudDistance;
     constexpr float LERP_SPEED = 0.05f;
 
     XrPosef layerPose = { { 0.0f, 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 0.0f } };
@@ -492,7 +492,7 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
     const float height = aspectRatio <= 1.0f ? 1.0f / aspectRatio : 1.0f;
 
     // todo: change space to head space if we want to follow the head
-    const float LAYER_SIZE = GetSettings().hudSize.Get();
+    const float LAYER_SIZE = GetSettings().hudSize;
 
     std::vector<XrCompositionLayerQuad> layers;
 

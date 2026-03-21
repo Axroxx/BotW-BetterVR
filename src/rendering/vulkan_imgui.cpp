@@ -667,12 +667,12 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     auto DrawLayerSettingsRow = [&](const char* label, bool* changed, FloatSetting<float>& distanceSetting, FloatSetting<float>& scaleSetting) {
         DrawSettingRow(label, [&]() {
             auto applyValues = [&](float distance, float scale) {
-                distanceSetting.Set(distance);
-                scaleSetting.Set(scale);
+                distanceSetting = distance;
+                scaleSetting = scale;
             };
 
-            float distance = distanceSetting.Get();
-            float scale = scaleSetting.Get();
+            float distance = distanceSetting;
+            float scale = scaleSetting;
             std::string distanceIdStr = std::format("##{}_Distance", label);
             std::string scaleIdStr = std::format("##{}_Scale", label);
 
@@ -683,7 +683,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
 
             ImGui::PushItemWidth(sliderWidth);
             if (ImGui::SliderFloat(distanceIdStr.c_str(), &distance, distanceSetting.min, distanceSetting.max, formatDistance(distance).c_str())) {
-                applyValues(std::clamp(distance, distanceSetting.min, distanceSetting.max), scaleSetting.Get());
+                applyValues(std::clamp(distance, distanceSetting.min, distanceSetting.max), scaleSetting);
                 *changed = true;
             }
             ImGui::PopItemWidth();
@@ -691,7 +691,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
 
             ImGui::PushItemWidth(sliderWidth);
             if (ImGui::SliderFloat(scaleIdStr.c_str(), &scale, scaleSetting.min, scaleSetting.max, "%.2fx scale")) {
-                applyValues(distanceSetting.Get(), std::clamp(scale, scaleSetting.min, scaleSetting.max));
+                applyValues(distanceSetting, std::clamp(scale, scaleSetting.min, scaleSetting.max));
                 *changed = true;
             }
             ImGui::PopItemWidth();
@@ -726,7 +726,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                 ImGui::PopStyleVar();
                 if (DrawStyledTab(ICON_KI_COG "Settings", 0)) {
                     ImGui::Separator();
-                    CameraMode cameraMode = settings.cameraMode.Get();
+                    CameraMode cameraMode = settings.cameraMode;
                     DrawSettingRow("Camera Mode", [&]() {
                         settings.cameraMode.AddRadioToGUI(&changed, ModSettings::toDisplayString);
                     });
@@ -878,8 +878,8 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                     });
 
                     if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
-                        static const int freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
-                        int currentFreq = (int)settings.performanceOverlayFrequency.Get();
+                        static const uint32_t freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
+                        uint32_t currentFreq = settings.performanceOverlayFrequency;
                         int freqIdx = 5; // Default to 90
                         for (int i = 0; i < std::size(freqOptions); i++) {
                             if (freqOptions[i] == currentFreq) {
