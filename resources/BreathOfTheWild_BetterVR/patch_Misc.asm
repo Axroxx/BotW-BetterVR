@@ -3,6 +3,9 @@ moduleMatches = 0x6267BFD0
 
 .origin = codecave
 
+; disable sideOffsetBowCus
+;0x02C01A5C = bla import.coreinit.hook_OverwriteCameraParam
+
 ; disable agl::fx::Cloud::drawSunOcc which uses texture readback
 ;0x0340425C = cmpwi r1, 0
 

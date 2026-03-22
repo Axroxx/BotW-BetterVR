@@ -181,14 +181,6 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         }
 
 
-        if (auto eventSettings = GetFirstPersonSettingsForActiveEvent()) {
-            if (eventSettings->ignoreCameraRotation) {
-                glm::fquat playerRot = mtx.getRotLE();
-                auto [swing, baseYaw] = swingTwistY(playerRot);
-                s_wsCameraRotation = baseYaw * glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
-            }
-        }
-
         if (s_isLadderClimbing > 0) {
             s_isLadderClimbing--;
         }
@@ -320,15 +312,6 @@ void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
         }
 
         basePos = playerPos;
-        if (auto eventSettings = GetFirstPersonSettingsForActiveEvent()) {
-
-            if (eventSettings->ignoreCameraRotation) {
-                glm::fquat playerRot = playerMtx.getRotLE();
-                auto [swing, yaw] = swingTwistY(playerRot);
-                baseYaw = yaw * glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
-                baseYawWithoutClimbingFix = yaw * glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
-            }
-        }
     }
 
     s_lastCameraMtx = glm::fmat4x3(glm::translate(glm::identity<glm::fmat4>(), basePos) * glm::mat4(baseYawWithoutClimbingFix));
@@ -556,15 +539,6 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
             // take link's direction, then rotate the headset position
             BEMatrix34 playerMtx = {};
             readMemory(s_playerMtxAddress, &playerMtx);
-
-            if (auto eventSettings = GetFirstPersonSettingsForActiveEvent()) {
-
-                if (eventSettings->ignoreCameraRotation) {
-                    glm::fquat playerRot = playerMtx.getRotLE();
-                    auto [swing, yaw] = swingTwistY(playerRot);
-                    baseYaw = yaw * glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
-                }
-            }
         }
 
         // vr camera
@@ -667,13 +641,6 @@ std::pair<glm::vec3, glm::fquat> CemuHooks::CalculateVRWorldPose(const BESeadLoo
         }
 
         basePos = playerPos;
-        if (auto eventSettings = GetFirstPersonSettingsForActiveEvent()) {
-            if (eventSettings->ignoreCameraRotation) {
-                glm::fquat playerRot = playerMtx.getRotLE();
-                auto [swing, yaw] = swingTwistY(playerRot);
-                baseYaw = yaw * glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
-            }
-        }
     }
 
     // vr camera
@@ -943,6 +910,23 @@ void CemuHooks::hook_GetEventName(PPCInterpreter_t* hCPU) {
     }
 }
 
+void CemuHooks::hook_ShouldSkipEventCamera(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    if (IsFirstPerson()) {
+        // disable camera rotation for first-person events, according to the event settings
+        if (auto eventSettings = GetFirstPersonSettingsForActiveEvent()) {
+            if (eventSettings->ignoreCameraRotation) {
+                hCPU->gpr[3] = 1;
+                return;
+            }
+        }
+    }
+
+    // return 0 to just follow regular camera rotation
+    hCPU->gpr[3] = 0;
+}
+
 struct CameraParamValueOffset {
     std::string name;
     uint32_t offsetInsideCamera;
@@ -995,6 +979,8 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     constexpr uint32_t kCameraTailVtbl = 0x101BC278;
     constexpr uint32_t kCameraAiming2Vtbl = 0X101B2EB4;
     constexpr uint32_t kCameraMagneCatchVtbl = 0x101BAB4C;
+
+    //hCPU->gpr[3] = cameraChaseInstance;
 
     if (hCPU->gpr[5] == kCameraMagneCatchVtbl) {
         if (IsFirstPerson()) {

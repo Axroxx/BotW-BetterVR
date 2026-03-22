@@ -48,6 +48,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_UseCameraDistance", &hook_UseCameraDistance);
         osLib_registerHLEFunction("coreinit", "hook_ReplaceCameraMode", &hook_ReplaceCameraMode);
         osLib_registerHLEFunction("coreinit", "hook_GetEventName", &hook_GetEventName);
+        osLib_registerHLEFunction("coreinit", "hook_ShouldSkipEventCamera", &hook_ShouldSkipEventCamera);
         osLib_registerHLEFunction("coreinit", "hook_OverwriteCameraParam", &hook_OverwriteCameraParam);
         osLib_registerHLEFunction("coreinit", "hook_PlayerLadderFix", &hook_PlayerLadderFix);
         osLib_registerHLEFunction("coreinit", "hook_PlayerIsRiding", &hook_PlayerIsRiding);
@@ -253,6 +254,7 @@ private:
     static void hook_UseCameraDistance(PPCInterpreter_t* hCPU);
     static void hook_ReplaceCameraMode(PPCInterpreter_t* hCPU);
     static void hook_GetEventName(PPCInterpreter_t* hCPU);
+    static void hook_ShouldSkipEventCamera(PPCInterpreter_t* hCPU);
     static void hook_OverwriteCameraParam(PPCInterpreter_t* hCPU);
     static void hook_PlayerLadderFix(PPCInterpreter_t* hCPU);
     static void hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU);

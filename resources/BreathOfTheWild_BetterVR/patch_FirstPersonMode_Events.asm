@@ -3,6 +3,60 @@ moduleMatches = 0x6267BFD0
 
 .origin = codecave
 
+
+0x02C036E4 = act__getCamera:
+0x030EA2CC = ksys__act__ai__ActionBase__setFinished:
+
+hook_calcCameraDuringEvent_trampoline:
+; at entry r3 = this+0x10 (arg for getCamera), LR = return addr in caller
+mflr r0
+stwu r1, -0x10(r1)
+stw r0, 0x14(r1)
+stw r3, 0x0C(r1)
+
+; c++ hook decides whether to skip the event camera updates based on the current event's settings
+bla import.coreinit.hook_ShouldSkipEventCamera
+
+cmpwi r3, 0
+bne skipEventCamera
+
+; run regular camera update
+lwz r3, 0x0C(r1)
+lis r4, act__getCamera@ha
+addi r4, r4, act__getCamera@l
+mtctr r4
+bctrl
+b done_calcCameraDuringEvent_trampoline
+
+skipEventCamera:
+; mark the action as finished so the game doesn't get stuck waiting for it, and return 0 to skip the camera update
+lwz r3, 0x0C(r1)
+addi r3, r3, -0x10 ; r3 = ActionBase this (getCamera arg was this+0x10)
+lis r4, ksys__act__ai__ActionBase__setFinished@ha
+addi r4, r4, ksys__act__ai__ActionBase__setFinished@l
+mtctr r4
+bctrl
+li r3, 0
+
+done_calcCameraDuringEvent_trampoline:
+lwz r0, 0x14(r1)
+addi r1, r1, 0x10
+mtlr r0
+blr
+
+; patch CameraEventAnim::m_43_calcCameraDuringEvent
+0x02BA3214 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventMovePos::m_43_calcCameraDuringEvent
+0x02BB9D30 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventMovePos::m_42_calcCameraDuringEvent
+0x02BB7034 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventMove::m_43_calcCameraDuringEvent
+0x02BB1F68 = bla hook_calcCameraDuringEvent_trampoline
+
+
+; --------------------------------------------------------------------------------------
+; run a function every frame to check the current event and update settings accordingly
+
 0x1046D3AC = EventMgr__sInstance:
 0x031CA1C0 = EventMgr__getActiveEventName:
 
