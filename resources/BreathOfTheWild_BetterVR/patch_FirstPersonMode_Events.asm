@@ -46,10 +46,10 @@ blr
 
 ; patch CameraEventAnim
 0x02BA3214 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventMovePos (specifically CameraEventMovePos::m_42)
-; 0x02BB9D30 = bla hook_calcCameraDuringEvent_trampoline
 ; patch CameraEventMovePos
-0x02BB7034 = bla hook_calcCameraDuringEvent_trampoline
+0x02BB9D30 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventMovePos (specifically CameraEventMovePos::m_42)
+; 0x02BB7034 = bla hook_calcCameraDuringEvent_trampoline
 ; patch CameraEventMove
 0x02BB1F68 = bla hook_calcCameraDuringEvent_trampoline
 ; patch CameraEventGameOver
