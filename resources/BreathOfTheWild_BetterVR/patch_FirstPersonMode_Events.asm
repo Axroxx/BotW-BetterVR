@@ -44,14 +44,26 @@ addi r1, r1, 0x10
 mtlr r0
 blr
 
-; patch CameraEventAnim::m_43_calcCameraDuringEvent
+; patch CameraEventAnim
 0x02BA3214 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventMovePos::m_43_calcCameraDuringEvent
-0x02BB9D30 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventMovePos::m_42_calcCameraDuringEvent
+; patch CameraEventMovePos (specifically CameraEventMovePos::m_42)
+; 0x02BB9D30 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventMovePos
 0x02BB7034 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventMove::m_43_calcCameraDuringEvent
+; patch CameraEventMove
 0x02BB1F68 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventGameOver
+0x02BAA378 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventLook and CameraEventLookDirect
+0x02BACE10 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventMultiTalk
+0x02BBE844 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventTalk
+0x02BC7014 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventTurn
+0x02BCD3F4 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventPolarCoordPlayerRel
+0x02BC1A28 = bla hook_calcCameraDuringEvent_trampoline
 
 
 ; --------------------------------------------------------------------------------------
