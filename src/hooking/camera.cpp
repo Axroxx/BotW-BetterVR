@@ -734,13 +734,13 @@ void CemuHooks::hook_EndCameraSide(PPCInterpreter_t* hCPU) {
 
     // todo: sometimes this can deadlock apparently?
     if (VRManager::instance().XR->GetRenderer()->IsInitialized() && side == OpenXR::EyeSide::RIGHT) {
-        CemuHooks::m_heldWeaponsLastUpdate[0] = CemuHooks::m_heldWeaponsLastUpdate[0]++;
-        CemuHooks::m_heldWeaponsLastUpdate[1] = CemuHooks::m_heldWeaponsLastUpdate[1]++;
-        if (CemuHooks::m_heldWeaponsLastUpdate[0] >= 6) {
-            CemuHooks::m_heldWeapons[0] = 0;
+        m_heldWeaponsLastUpdate[0]++;
+        m_heldWeaponsLastUpdate[1]++;
+        if (m_heldWeaponsLastUpdate[0] >= 6) {
+            m_heldWeapons[0] = 0;
         }
-        if (CemuHooks::m_heldWeaponsLastUpdate[1] >= 6) {
-            CemuHooks::m_heldWeapons[1] = 0;
+        if (m_heldWeaponsLastUpdate[1] >= 6) {
+            m_heldWeapons[1] = 0;
         }
     }
 

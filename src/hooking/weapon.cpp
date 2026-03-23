@@ -389,6 +389,9 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
         return;
     }
 
+    // Weapons not currently bound to a VR hand (e.g. sheathed on back) must never
+    // have their attack sensor activated, otherwise they cut grass / hit NPCs.
+    bool isHandBoundWeapon = (weaponPtr == m_heldWeapons[0] || weaponPtr == m_heldWeapons[1]);
 
     //AttackSensorInitArg arg = weapon.setupAttackSensor;
     //std::string attackSensorInitStr;
@@ -426,7 +429,7 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
     // Use the analysed motion to determine whether the weapon is swinging or stabbing, and whether the attackSensor should be active this frame
     bool CHEAT_alwaysEnableWeaponCollision = false;
-    if (isHeldByPlayer && (m_motionAnalyzers[heldIndex].IsAttacking() || CHEAT_alwaysEnableWeaponCollision)) {
+    if (isHandBoundWeapon && isHeldByPlayer && (m_motionAnalyzers[heldIndex].IsAttacking() || CHEAT_alwaysEnableWeaponCollision)) {
         m_motionAnalyzers[heldIndex].SetHitboxEnabled(true);
         //Log::print("!! Activate sensor for {}: isHeldByPlayer={}, weaponType={}", heldIndex, isHeldByPlayer, (int)weaponType);
         weapon.setupAttackSensor.resetAttack = 1;
@@ -459,7 +462,7 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
         writeMemory(weaponPtr, &weapon);
     }
-    else if (m_motionAnalyzers[heldIndex].IsHitboxEnabled()) {
+    else if (!isHandBoundWeapon || m_motionAnalyzers[heldIndex].IsHitboxEnabled()) {
         m_motionAnalyzers[heldIndex].SetHitboxEnabled(false);
         //Log::print("!! Deactivate sensor for {}: isHeldByPlayer={}, weaponType={}", heldIndex, isHeldByPlayer, (int)weaponType);
 
