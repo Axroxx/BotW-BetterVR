@@ -4,6 +4,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <mutex>
+#include <string>
 #include <vector>
 
 class DebugDraw {
@@ -20,6 +21,7 @@ public:
     void Box(const glm::vec3& min, const glm::vec3& max, uint32_t color = IM_COL32(0, 255, 0, 255), float thickness = 1.0f);
     void Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color = IM_COL32(0, 255, 0, 255), float thickness = 1.0f);
     void Frustum(const glm::mat4& viewProjection, uint32_t color = IM_COL32(255, 255, 0, 255), float thickness = 1.0f);
+    void Text(const glm::vec3& position, std::string text, uint32_t color = IM_COL32(255, 255, 255, 255), const ImVec2& pixelOffset = ImVec2(0.0f, 0.0f), float fontScale = 0.7f);
 
     // -- VP matrix for rendering (set from camera hooks) --
     // Stores the view-projection matrix used for rendering debug primitives.
@@ -47,6 +49,7 @@ private:
         AABB,
         ORIENTED_BOX,
         FRUSTUM,
+        TEXT,
     };
 
     struct DebugPrimitive {
@@ -66,6 +69,9 @@ private:
         float radius = 1.0f;
         int segments = 0;
         bool filled = false;
+        std::string text;
+        ImVec2 pixelOffset = ImVec2(0.0f, 0.0f);
+        float fontScale = 0.7f;
     };
 
     std::mutex m_mutex;

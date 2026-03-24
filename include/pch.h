@@ -53,7 +53,6 @@ using Microsoft::WRL::ComPtr;
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
-#include <implot3d.h>
 #include <implot.h>
 
 // glm includes

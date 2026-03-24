@@ -37,7 +37,6 @@ find_package(OpenXR CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
-find_package(implot3d CONFIG REQUIRED)
 
 # Add DLL target
 add_library(BetterVR_Layer SHARED)
@@ -122,7 +121,6 @@ target_include_directories(BetterVR_Layer SYSTEM PRIVATE ${VULKAN_HEADERS_INCLUD
 target_link_libraries(BetterVR_Layer PRIVATE glm::glm)
 target_link_libraries(BetterVR_Layer PRIVATE imgui::imgui)
 target_link_libraries(BetterVR_Layer PRIVATE implot::implot)
-target_link_libraries(BetterVR_Layer PRIVATE implot3d::implot3d)
 
 
 # Add manual dependencies for DLL

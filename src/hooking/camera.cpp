@@ -1085,6 +1085,10 @@ void CemuHooks::hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU) {
         return;
     }
 
+    if (!VRManager::instance().Hooks->m_entityDebugger || !VRManager::instance().Hooks->m_entityDebugger->ShouldDrawRaycastLines()) {
+        return;
+    }
+
     uint32_t rayCastResultPtr = hCPU->gpr[3];
     glm::fvec3 raycastHitPos = getMemory<BEVec3>(hCPU->gpr[4]).getLE();
 

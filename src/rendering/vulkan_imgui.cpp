@@ -49,7 +49,6 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     SetupImGuiStyle();
 
     ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    ImPlot3D::CreateContext();
     ImPlot::CreateContext();
 
     VkQueue queue = nullptr;
@@ -277,7 +276,6 @@ RND_Renderer::ImGuiOverlay::~ImGuiOverlay() {
 
     ImGui_ImplVulkan_Shutdown();
     ImPlot::DestroyContext();
-    ImPlot3D::DestroyContext();
     ImGui::DestroyContext();
 }
 

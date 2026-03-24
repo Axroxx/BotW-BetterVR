@@ -2,6 +2,10 @@
 
 bool shouldAdjustArrowTarget = false;
 
+// CarryBox is used to carry all the veggies in the game while cooking
+// GameSceneSubsys12::x(GameSceneSubsys12::sInstance) returns 0 for carryable, 1 is for carryable
+
+
 void CemuHooks::hook_LoadDynamicBool(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
     hCPU->sprNew.LR = hCPU->gpr[0];

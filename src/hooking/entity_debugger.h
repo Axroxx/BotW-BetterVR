@@ -23,6 +23,7 @@ public:
 
     void UpdateKeyboardControls();
     void DrawEntityInspector();
+    bool ShouldDrawRaycastLines() const { return m_showRaycastLines; }
     static void DrawFPSOverlay(class RND_Renderer* renderer);
     static void DrawFPSOverlayContent(class RND_Renderer* renderer, bool renderText);
 
@@ -47,12 +48,11 @@ public:
 
     std::unordered_map<uint32_t, Entity> m_entities;
     glm::fvec3 m_playerPos = {};
-    bool m_resetPlot = false;
 
 private:
     std::string m_filter = std::string(256, '\0');
-    bool m_disablePoints = true;
-    bool m_disableTexts = false;
-    bool m_disableRotations = true;
-    bool m_disableAABBs = false;
+    bool m_showWorldLabels = false;
+    bool m_showWorldAABBs = false;
+    float m_worldAABBMaxDistance = 100.0f;
+    bool m_showRaycastLines = false;
 };

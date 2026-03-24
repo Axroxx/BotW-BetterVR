@@ -5,7 +5,6 @@
 
 #include <imgui_memory_editor.h>
 
-#include "implot3d_internal.h"
 #include "utils/debug_draw.h"
 
 std::mutex g_actorListMutex;
@@ -89,9 +88,6 @@ void EntityDebugger::UpdateEntityMemory() {
         if (actorData.first == "GameROMPlayer") {
             CemuHooks::readMemory(actorData.second + offsetof(ActorWiiU, mtx), &playerPos);
             glm::fvec3 newPlayerPos = playerPos.getPos().getLE();
-            if (glm::distance(newPlayerPos, m_playerPos) > 25.0f) {
-                m_resetPlot = true;
-            }
             m_playerPos = newPlayerPos;
 
             // // set invisibility flag
@@ -194,19 +190,39 @@ void EntityDebugger::UpdateEntityMemory() {
             SetAABB(actorId, aabbMin.getLE(), aabbMax.getLE());
         }
 
-        if (float distance = glm::distance(m_playerPos, mtx.getPos().getLE()); distance <= 100.0f) {
-            glm::fvec3 pos = mtx.getPos().getLE();
-            glm::fquat rot = mtx.getRotLE();
+        float distance = glm::distance(m_playerPos, mtx.getPos().getLE());
+        glm::fvec3 pos = mtx.getPos().getLE();
+        glm::fquat rot = mtx.getRotLE();
 
-            glm::fvec3 localMin = aabbMin.getLE();
-            glm::fvec3 localMax = aabbMax.getLE();
-            glm::fvec3 localCenter = (localMin + localMax) * 0.5f;
-            glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
+        glm::fvec3 localMin = aabbMin.getLE();
+        glm::fvec3 localMax = aabbMax.getLE();
+        glm::fvec3 localCenter = (localMin + localMax) * 0.5f;
+        glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
+        bool matchesFilter = m_filter.empty() || actorName.find(m_filter) != std::string::npos;
 
-            // Transform local AABB center to world space
-            glm::fvec3 worldCenter = pos + glm::mat3_cast(rot) * localCenter;
+        if (m_showWorldLabels && matchesFilter && distance <= 100.0f) {
+            float labelFontScale = 0.325f;
+            if (distance <= 8.0f) {
+                labelFontScale = 0.72f;
+            }
+            else if (distance <= 16.0f) {
+                labelFontScale = 0.6f;
+            }
+            else if (distance <= 40.0f) {
+                labelFontScale = 0.45f;
+            }
 
-            DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255/10), 1.0f);
+            DebugDraw::instance().Text(pos, actorName, IM_COL32(255, 255, 255, 255), ImVec2(6.0f, -18.0f), labelFontScale);
+        }
+
+        if (m_showWorldAABBs && matchesFilter && distance <= m_worldAABBMaxDistance) {
+            if (glm::all(glm::greaterThan(halfExtents, glm::vec3(0.0f)))) {
+                glm::fvec3 worldCenter = pos + glm::mat3_cast(rot) * localCenter;
+                DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 10), 1.0f);
+            }
+            else {
+                DebugDraw::instance().Dot(pos, 3.0f, IM_COL32(255, 255, 255, 180));
+            }
         }
 
         // uint32_t physicsMtxPtr = 0;
@@ -275,41 +291,6 @@ void EntityDebugger::UpdateEntityMemory() {
         }
     }
 }
-
-
-void DrawAABBInPlot(glm::fvec3 pos, glm::fvec3& min, glm::fvec3& max, glm::fquat& rotation) {
-    glm::fvec3 corners[8] = {
-        {min.x, min.y, min.z},
-        {max.x, min.y, min.z},
-        {max.x, max.y, min.z},
-        {min.x, max.y, min.z},
-        {min.x, min.y, max.z},
-        {max.x, min.y, max.z},
-        {max.x, max.y, max.z},
-        {min.x, max.y, max.z}
-    };
-
-    glm::mat4 transform = glm::translate(glm::mat4(1.0f), pos) * glm::mat4_cast(rotation);
-
-    ImPlot3DPoint aabbPoints[8];
-    for (int i = 0; i < 8; ++i) {
-        glm::vec4 worldPos = transform * glm::vec4(corners[i], 1.0f);
-        aabbPoints[i] = ImPlot3DPoint(worldPos.x, worldPos.z, worldPos.y);
-    }
-
-    int edges[12][2] = {
-        {0, 1}, {1, 2}, {2, 3}, {3, 0}, // near plane
-        {4, 5}, {5, 6}, {6, 7}, {7, 4}, // far plane
-        {0, 4}, {1, 5}, {2, 6}, {3, 7}  // connecting edges
-    };
-
-    for (const auto& edge : edges) {
-        ImVec2 p0 = ImPlot3D::PlotToPixels(aabbPoints[edge[0]]);
-        ImVec2 p1 = ImPlot3D::PlotToPixels(aabbPoints[edge[1]]);
-        ImPlot3D::GetPlotDrawList()->AddLine(p0, p1, IM_COL32(255, 0, 0, 255));
-    }
-}
-
 void EntityDebugger::DrawEntityInspector() {
     ImGui::Begin("BetterVR Debugger");
 
@@ -319,54 +300,14 @@ void EntityDebugger::DrawEntityInspector() {
 
     ImGui::BeginChild("ScrollArea", ImVec2(0, 0));
 
-    if (ImGui::CollapsingHeader("World Space Inspector")) {
-        ImGui::Checkbox("Disable Points For Entities", &m_disablePoints);
-        ImGui::Checkbox("Disable Text For Entities", &m_disableTexts);
-        ImGui::Checkbox("Disable Rotations For Entities", &m_disableRotations);
-        ImGui::Checkbox("Disable AABBs For Entities", &m_disableAABBs);
-
-        if (ImPlot3D::BeginPlot("##plot", ImVec2(-1, 0), ImPlot3DFlags_NoLegend | ImPlot3DFlags_NoTitle)) {
-            // add -50 and 50 to playerPos to make the plot centered around the player
-            constexpr float zoomOutAxis = 30.0f;
-            ImPlot3D::SetupAxesLimits(
-                -zoomOutAxis, +zoomOutAxis,
-                -zoomOutAxis, +zoomOutAxis,
-                -zoomOutAxis, +zoomOutAxis,
-                ImPlot3DCond_Once
-            );
-            ImPlot3D::SetupAxes("X", "Z", "Y");
-
-            if (m_resetPlot) {
-                ImPlot3D::GetCurrentPlot()->Axes[ImAxis3D_X].SetRange(m_playerPos.x-zoomOutAxis, m_playerPos.x+zoomOutAxis);
-                ImPlot3D::GetCurrentPlot()->Axes[ImAxis3D_Y].SetRange(m_playerPos.z-zoomOutAxis, m_playerPos.z+zoomOutAxis);
-                ImPlot3D::GetCurrentPlot()->Axes[ImAxis3D_Z].SetRange(m_playerPos.y-zoomOutAxis, m_playerPos.y+zoomOutAxis);
-                m_resetPlot = false;
-            }
-
-            // plot entities in 3D space
-            for (auto& entity : m_entities | std::views::values) {
-                if (!m_disableTexts) {
-                    ImPlot3D::PlotText(entity.name.c_str(), entity.position.x.getLE(), entity.position.z.getLE(), entity.position.y.getLE(), 0, ImVec2(0, 5));
-                }
-                if (!m_disablePoints) {
-                    ImVec2 cntr = ImPlot3D::PlotToPixels(ImPlot3DPoint(entity.position.x.getLE(), entity.position.z.getLE(), entity.position.y.getLE()));
-                    ImPlot3D::GetPlotDrawList()->AddCircleFilled(cntr, 2, IM_COL32(255, 255, 0, 255), 8);
-                }
-                if (!m_disableRotations) {
-                    glm::fvec3 start = entity.position.getLE();
-                    glm::fvec3 end = entity.rotation * entity.position.getLE() * 0.05f;
-                    float xList[] = { start.x, end.x };
-                    float yList[] = { start.z, end.z };
-                    float zList[] = { start.y, end.y };
-                    ImPlot3D::PlotLine(entity.name.c_str(), xList, yList, zList, 2);
-                }
-                if (!m_disableAABBs) {
-                    DrawAABBInPlot(entity.position.getLE(), entity.aabbMin, entity.aabbMax, entity.rotation);
-                }
-            }
-
-            ImPlot3D::EndPlot();
+    if (ImGui::CollapsingHeader("World Space Overlay", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Show Entity Names In 3D View", &m_showWorldLabels);
+        ImGui::Checkbox("Show Entity Boxes In 3D View", &m_showWorldAABBs);
+        if (m_showWorldAABBs) {
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::DragFloat("3D Box Distance", &m_worldAABBMaxDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
         }
+        ImGui::Checkbox("Show Raycast Lines", &m_showRaycastLines);
     }
 
     // display entities

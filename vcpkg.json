@@ -21,10 +21,6 @@
       "version>=": "1.91.9#0"
     },
     {
-      "name": "implot3d",
-      "version>=": "0.2"
-    },
-    {
       "name": "implot",
       "version>=": "0.16"
     }

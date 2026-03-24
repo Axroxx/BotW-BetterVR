@@ -37,6 +37,15 @@ void DebugDraw::Frustum(const glm::mat4& viewProjection, uint32_t color, float t
     m_primitives.push_back({ PrimitiveType::FRUSTUM, color, thickness, {}, {}, glm::identity<glm::quat>(), inv });
 }
 
+void DebugDraw::Text(const glm::vec3& position, std::string text, uint32_t color, const ImVec2& pixelOffset, float fontScale) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::TEXT, color, 1.0f, position };
+    primitive.text = std::move(text);
+    primitive.pixelOffset = pixelOffset;
+    primitive.fontScale = fontScale;
+    m_primitives.push_back(std::move(primitive));
+}
+
 // -----------------------------------------------------------------------
 // Projection helpers
 // -----------------------------------------------------------------------
@@ -254,6 +263,19 @@ void DebugDraw::Render(const glm::vec2& viewportPos, const glm::vec2& viewportSi
                 }
 
                 DrawEdges(drawList, viewProjection, viewportPos, viewportSize, uvMin, uvMax, corners, BOX_EDGES, 12, prim.color, prim.thickness);
+                break;
+            }
+
+            case PrimitiveType::TEXT: {
+                glm::vec4 clipCenter;
+                ImVec2 screenPos;
+                if (!ProjectPoint(viewProjection, viewportPos, viewportSize, uvMin, uvMax, prim.a, clipCenter, screenPos)) {
+                    break;
+                }
+
+                screenPos.x += prim.pixelOffset.x;
+                screenPos.y += prim.pixelOffset.y;
+                drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize() * prim.fontScale, screenPos, prim.color, prim.text.c_str());
                 break;
             }
         }

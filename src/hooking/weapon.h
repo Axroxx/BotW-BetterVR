@@ -424,79 +424,6 @@ public:
 
         const auto oldestIdx = [this](uint32_t j) { return (m_lastSampleIdx + j) % MAX_SAMPLES; };
 
-        auto drawSnapshot = [](const char* title, const glm::vec3& currDir, glm::vec3& lastDir, bool& lastValid, float threshold, const ImVec4& colLast, const ImVec4& colCurr) {
-            const float mag = glm::length(currDir);
-            glm::vec3 unit = mag > 0.f ? currDir / mag : glm::vec3{ 0 };
-            if (mag >= threshold) {
-                lastDir = unit;
-                lastValid = true;
-            }
-
-            const float lastS[6] = { 0, 0, 0, lastDir.x, lastDir.z, lastDir.y };
-            const float currS[6] = { 0, 0, 0, unit.x, unit.z, unit.y };
-
-            if (ImPlot3D::BeginPlot(title, { 0, 230 }, ImPlot3DFlags_NoTitle)) {
-                ImPlot3D::SetupAxes("X", "Z", "Y", ImPlot3DAxisFlags_LockMin | ImPlot3DAxisFlags_LockMax, ImPlot3DAxisFlags_LockMin | ImPlot3DAxisFlags_LockMax, ImPlot3DAxisFlags_LockMin | ImPlot3DAxisFlags_LockMax);
-                ImPlot3D::SetupAxisLimits(ImAxis3D_X, -1.1f, 1.1f, ImPlot3DCond_Always);
-                ImPlot3D::SetupAxisLimits(ImAxis3D_Y, -1.1f, 1.1f, ImPlot3DCond_Always);
-                ImPlot3D::SetupAxisLimits(ImAxis3D_Z, -1.1f, 1.1f, ImPlot3DCond_Always);
-
-                if (lastValid) {
-                    ImPlot3D::SetNextLineStyle(colLast, 3);
-                    ImPlot3D::PlotLine("Last", lastS, lastS + 1, lastS + 2, 2, ImPlot3DLineFlags_Segments, 0, sizeof(float) * 3);
-                }
-                if (mag > 0) {
-                    ImPlot3D::SetNextLineStyle(colCurr, 2);
-                    ImPlot3D::PlotLine("Curr", currS, currS + 1, currS + 2, 2, ImPlot3DLineFlags_Segments, 0, sizeof(float) * 3);
-                }
-                ImPlot3D::EndPlot();
-            }
-            ImGui::SameLine();
-        };
-
-        std::array<float, MAX_SAMPLES> posX{}, posY{}, posZ{};
-        std::array<float, MAX_SAMPLES * 2> velLineX{}, velLineY{}, velLineZ{};
-        float xMin = FLT_MAX, xMax = -FLT_MAX, yMin = FLT_MAX, yMax = -FLT_MAX, zMin = FLT_MAX, zMax = -FLT_MAX;
-
-        for (uint32_t j = 0; j < MAX_SAMPLES; ++j) {
-            const auto& s = m_rollingSamples[oldestIdx(j)];
-
-            posX[j] = s.position.x;
-            posY[j] = s.position.z; // swap Y/Z for nicer view
-            posZ[j] = s.position.y;
-
-            xMin = std::min(xMin, posX[j]);
-            xMax = std::max(xMax, posX[j]);
-            yMin = std::min(yMin, posY[j]);
-            yMax = std::max(yMax, posY[j]);
-            zMin = std::min(zMin, posZ[j]);
-            zMax = std::max(zMax, posZ[j]);
-
-            const auto av = s.rotatedAngularVelocity() * 0.05f;
-
-            velLineX[j * 2] = posX[j];
-            velLineX[j * 2 + 1] = posX[j] + av.x;
-            velLineY[j * 2] = posY[j];
-            velLineY[j * 2 + 1] = posY[j] + av.y;
-            velLineZ[j * 2] = posZ[j];
-            velLineZ[j * 2 + 1] = posZ[j] + av.z;
-        }
-
-        if (ImPlot3D::BeginPlot("Weapon Motion", { 0, 300 }, ImPlot3DFlags_NoTitle)) {
-            ImPlot3D::SetupAxes("X", "Z", "Y", ImPlot3DAxisFlags_LockMin | ImPlot3DAxisFlags_LockMax, ImPlot3DAxisFlags_LockMin | ImPlot3DAxisFlags_LockMax, ImPlot3DAxisFlags_LockMin | ImPlot3DAxisFlags_LockMax);
-            ImPlot3D::SetupAxisLimits(ImAxis3D_X, xMin - 0.1f, xMax + 0.1f, ImPlot3DCond_Always);
-            ImPlot3D::SetupAxisLimits(ImAxis3D_Y, yMin - 0.1f, yMax + 0.1f, ImPlot3DCond_Always);
-            ImPlot3D::SetupAxisLimits(ImAxis3D_Z, zMin - 0.1f, zMax + 0.1f, ImPlot3DCond_Always);
-
-            ImPlot3D::SetNextMarkerStyle(ImPlot3DMarker_Circle, 1.5f);
-            ImPlot3D::PlotScatter("Pos", posX.data(), posY.data(), posZ.data(), MAX_SAMPLES);
-
-            ImPlot3D::SetNextLineStyle(ImVec4(0, 1, 0.5f, 0.5f), 1.2f);
-            ImPlot3D::PlotLine("AngVel", velLineX.data(), velLineY.data(), velLineZ.data(), MAX_SAMPLES * 2, ImPlot3DLineFlags_Segments);
-            ImPlot3D::EndPlot();
-        }
-        ImGui::SameLine();
-
         {
             std::array<float, MAX_SAMPLES> t{}, avX{}, avY{}, avZ{}, maskSlash{}, maskStab{}, velLengthTriggered{};
             for (uint32_t j = 0; j < MAX_SAMPLES; ++j) {
@@ -533,7 +460,6 @@ public:
 
         {
             std::array<float, MAX_SAMPLES> t{}, avX{}, avY{}, avZ{}, avddX{}, maskSlash{}, maskStab{};
-            XrTime prevDelta = 0;
             for (uint32_t j = 0; j < MAX_SAMPLES; ++j) {
                 const auto& s = m_rollingSamples[oldestIdx(j)];
                 t[j] = static_cast<float>(j);
@@ -564,18 +490,6 @@ public:
             }
             ImGui::SameLine();
         }
-
-        // pass references to be manipulated in the drawSnapshot function
-        glm::vec3& lastAngDir = m_debugLastAngDir;
-        bool& angValid = m_debugAngValid;
-        glm::vec3& lastLinDir = m_debugLastLinDir;
-        bool& linValid = m_debugLinValid;
-
-        const glm::vec3 currAng = m_rollingSamples[m_lastSampleIdx].rotatedAngularVelocity();
-        const glm::vec3 currLin = glm::inverse(m_rollingSamples[m_lastSampleIdx].rotation) * m_rollingSamples[m_lastSampleIdx].linearVelocity;
-
-        drawSnapshot("AngVel Snapshot", currAng, lastAngDir, angValid, 1.5f, ImVec4(1, 0, 0, 1), ImVec4(0.4f, 0.7f, 1, 0.25f));
-        drawSnapshot("LinVel Snapshot", currLin, lastLinDir, linValid, 1.5f, ImVec4(0, 1, 0, 1), ImVec4(1, 0.7f, 0.2f, 0.25f));
     }
 
 private:
@@ -597,8 +511,4 @@ private:
     uint32_t m_goodStabSampleCtr = 0;
     uint32_t m_badStabSampleCtr = 0;
 
-    mutable glm::vec3 m_debugLastAngDir = {1, 0, 0};
-    mutable bool m_debugAngValid = false;
-    mutable glm::vec3 m_debugLastLinDir = { 1, 0, 0 };
-    mutable bool m_debugLinValid = false;
 };

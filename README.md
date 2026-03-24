@@ -156,5 +156,4 @@ This project is licensed under the MIT license.
 BetterVR also uses the following libraries:
  - [vkroots (MIT licensed)](https://github.com/Joshua-Ashton/vkroots/blob/main/LICENSES/MIT.txt)
  - [imgui (MIT licensed)](https://github.com/ocornut/imgui/blob/master/LICENSE.txt)
- - [ImPlot3D (MIT licensed)](https://github.com/brenocq/implot3d/blob/main/LICENSE)
  - [ImPlot (MIT licensed)](https://github.com/epezent/implot/blob/master/LICENSE)
