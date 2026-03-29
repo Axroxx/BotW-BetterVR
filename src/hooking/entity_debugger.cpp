@@ -200,7 +200,7 @@ void EntityDebugger::UpdateEntityMemory() {
         glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
         bool matchesFilter = m_filter.empty() || actorName.find(m_filter) != std::string::npos;
 
-        if (m_showWorldLabels && matchesFilter && distance <= 100.0f) {
+        if (m_showWorldLabels && matchesFilter && distance <= m_worldAABBMaxDistance) {
             float labelFontScale = 0.325f;
             if (distance <= 8.0f) {
                 labelFontScale = 0.72f;

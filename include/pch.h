@@ -10,6 +10,9 @@
 #include <unordered_set>
 #include <queue>
 #include <iostream>
+#include <vector>
+#include <algorithm>
+#include <thread>
 
 #include <Windows.h>
 #include <winrt/base.h>

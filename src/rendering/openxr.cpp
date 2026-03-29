@@ -1,70 +1,12 @@
 #include "openxr.h"
 #include "instance.h"
 
-
-static std::string GetActiveRuntimePath() {
-    auto getKey = [](HKEY hKeyRoot, const char* subKey) -> std::string {
-        HKEY hKey;
-        if (RegOpenKeyExA(hKeyRoot, subKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            char value[MAX_PATH];
-            DWORD size = sizeof(value);
-            if (RegQueryValueExA(hKey, "ActiveRuntime", NULL, NULL, (LPBYTE)value, &size) == ERROR_SUCCESS) {
-                RegCloseKey(hKey);
-                return std::string(value);
-            }
-            RegCloseKey(hKey);
-        }
-        return "";
-    };
-
-    std::string path = getKey(HKEY_LOCAL_MACHINE, "SOFTWARE\\Khronos\\OpenXR\\1");
-    if (path.empty()) path = getKey(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Khronos\\OpenXR\\1");
-    return path;
-}
-
-static bool IsSteamVRRunning() {
-    HKEY hKey;
-    DWORD running = 0;
-    DWORD size = sizeof(running);
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Valve\\Steam\\Apps\\250820", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        if (RegQueryValueExA(hKey, "Running", NULL, NULL, (LPBYTE)&running, &size) == ERROR_SUCCESS) {
-            RegCloseKey(hKey);
-            return running == 1;
-        }
-        RegCloseKey(hKey);
-    }
-    return false;
-}
-
 static XrBool32 XR_DebugUtilsMessengerCallback(XrDebugUtilsMessageSeverityFlagsEXT messageSeverity, XrDebugUtilsMessageTypeFlagsEXT messageType, const XrDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData) {
     Log::print<XR_DEBUGUTILS>("[XR Debug Utils] Function {}: {}", callbackData->functionName, callbackData->message);
     return XR_FALSE;
 }
 
 OpenXR::OpenXR() {
-    char envBuffer[MAX_PATH];
-    DWORD envResult = GetEnvironmentVariableA("XR_RUNTIME_JSON", envBuffer, sizeof(envBuffer));
-    bool isRuntimeOverridden = (envResult > 0 && envResult < sizeof(envBuffer));
-
-    if (!isRuntimeOverridden) {
-        std::string runtimePath = GetActiveRuntimePath();
-        if (runtimePath.empty()) {
-            MessageBoxA(NULL, "No OpenXR runtime found.\n\nPlease set an OpenXR runtime using https://academy.vrex.no/knowledge-base/openxr/ \n\nVirtual Desktop can also be used with its included VDXR runtime for better performance.", "OpenXR Error", MB_OK | MB_ICONERROR);
-        }
-        else {
-            std::string runtimeLower = runtimePath;
-            std::transform(runtimeLower.begin(), runtimeLower.end(), runtimeLower.begin(), ::tolower);
-            if (runtimeLower.find("steamvr") != std::string::npos) {
-                if (!IsSteamVRRunning()) {
-                    int msgBoxID = MessageBoxA(NULL, "SteamVR is set as the active runtime but does not appear to be running.\n\nDo you want to launch SteamVR?", "Launch SteamVR?", MB_YESNO | MB_ICONQUESTION);
-                    if (msgBoxID == IDYES) {
-                        ShellExecuteA(NULL, "open", "steam://run/250820", NULL, NULL, SW_SHOW);
-                    }
-                }
-            }
-        }
-    }
-
     uint32_t xrExtensionCount = 0;
     xrEnumerateInstanceExtensionProperties(NULL, 0, &xrExtensionCount, NULL);
     std::vector<XrExtensionProperties> instanceExtensions;

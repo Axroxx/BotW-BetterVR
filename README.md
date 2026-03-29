@@ -49,12 +49,12 @@ While more integrated solutions are being found out, there's probably ways to se
 > Meta/Oculus Link has terrible frame interpolation that will make game appear to run much worse while also making the grass and arms glitchy, even while using a cable.
 > Its HIGHLY recommended to use [ALVR](https://github.com/alvr-org/ALVR) (free, both wired and wireless), [Virtual Desktop](https://www.meta.com/en-gb/experiences/virtual-desktop/2017050365004772/) (paid, wireless) or [Steam Link](https://www.meta.com/en-gb/experiences/steam-link/5841245619310585/) (free, wireless) instead for Meta Quest headsets.
 
-1. Download the latest release of the mod from the [Releases](https://github.com/Crementif/BotW-BetterVR/releases) page.
+1. Download the latest `BetterVR_Launcher.exe` release from the [Releases](https://github.com/Crementif/BotW-BetterVR/releases) page.
 
-2. Extract the contents of the downloaded `.zip` file into the same folder where your `Cemu.exe` is stored.
-   There should now be **at least** .dll, .json and multiple .bat files in the same folder as your `Cemu.exe`.
+2. Move the downloaded `BetterVR_Launcher.exe` into the same folder where your `Cemu.exe` is stored.
+   There should now be **at least** `BetterVR_Launcher.exe` next to your `Cemu.exe`.
    
-3. Open Cemu normally through the `Cemu.exe` (not the .bat file!).
+3. Open Cemu normally through the `Cemu.exe`.
     - Cemu's window title should state Cemu 2.6 or newer. Any older version isn't supported.
     - The game should say V208 inside the update column in Cemu's game list. Otherwise it's outdated/not updated, and won't work.
     - Under `Debug`, disable `Accurate Barriers (Vulkan)` for more performance.
@@ -62,7 +62,7 @@ While more integrated solutions are being found out, there's probably ways to se
     
     If all that is true, continue to the next step by closing the settings window and then Cemu entirely. Otherwise, fix those issues before continuing.
 
-4. Double-click on `BetterVR LAUNCH CEMU IN VR.bat` to start Cemu. This'll install the graphic pack automatically to the right folder.
+4. Double-click on `BetterVR_Launcher.exe` to start Cemu. The launcher installs or refreshes the BetterVR graphic pack automatically, writes startup details to `BetterVR.txt`, checks for updates, and keeps running while Cemu is open.
 
 5. Go to `Options`-> `Graphic packs`-> `The Legend of Zelda: Breath of the Wild` and make sure that the graphic pack named `BetterVR` is enabled.
    **You'll also want to enable the FPS++ graphic pack under the Mods category, or else the game will crash!**  
@@ -78,9 +78,9 @@ While more integrated solutions are being found out, there's probably ways to se
 
 7. Close the settings and start the game like normal from Cemu's game list. You can now put on your VR headset and if installed correctly it should now work!
 
-From now on you can play the game in VR by just starting the `BetterVR LAUNCH CEMU IN VR.bat` file.  
-If you want to undo the installation (temporarily) to play the game without VR, use the `BetterVR UNINSTALL.bat` file.  
-You can just use the `BetterVR LAUNCH CEMU IN VR.bat` file to reinstall and start the VR mod again.
+From now on you can play the game in VR by just starting `BetterVR_Launcher.exe` from your Cemu folder.  
+If you want to undo the installation (temporarily) to play the game without VR, run `BetterVR_Launcher.exe --uninstall`.  
+You can just use `BetterVR_Launcher.exe` again to reinstall or update and start the VR mod.
 
 
 ### Controls
@@ -136,9 +136,8 @@ There's enough that was skipped over or left out in this explanation.
 
 5. Use Clion or Visual Studio to open the CMake project. Make sure that it's compiling a x64 build.
 
-6. If you want to use it outside visual studio, you can go to the `/[cmake-output-folder]/bin/` folder for the BetterVR_Layer.dll.
-   The `BetterVR_Layer.json` and `Launch_BetterVR.bat` can be found in the [resources](/resources) folder.
-   Then you can launch Cemu with the hook using the Launch_BetterVR.bat file to start Cemu with the hook.
+6. If you want to use it outside Visual Studio, the build installs `BetterVR_Launcher.exe` into the `Cemu` folder.
+   Start Cemu through `BetterVR_Launcher.exe` so the launcher can extract the bundled layer and graphic pack, write `BetterVR.txt`, and then keep running while Cemu is open.
 
 
 ### Credits

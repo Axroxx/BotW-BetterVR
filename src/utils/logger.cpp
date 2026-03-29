@@ -36,9 +36,11 @@ Log::Log() {
     AllocConsole();
     SetConsoleTitleA("BetterVR Debugging Console");
     consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-#ifndef _DEBUG
-    logFile.open("BetterVR.txt", std::ios::out | std::ios::trunc);
-#endif
+    logFile.open("BetterVR.txt", std::ios::out | std::ios::app);
+    if (logFile.is_open()) {
+        logFile << "[Layer] Attached to BetterVR log" << std::endl;
+        logFile.flush();
+    }
     Log::print<INFO>("Successfully started BetterVR!");
     LogSystemHardwareInfo();
 
@@ -50,11 +52,9 @@ Log::Log() {
 Log::~Log() {
     Log::print<INFO>("Shutting down BetterVR debugging console...");
     FreeConsole();
-#ifndef _DEBUG
     if (logFile.is_open()) {
         logFile.close();
     }
-#endif
 }
 
 void Log::printTimeElapsed(const char* message_prefix, LARGE_INTEGER time) {

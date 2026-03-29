@@ -812,7 +812,25 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                         ImGui::Text("");
                     }
 
+                    if (settings.bootDirectlyIntoGame) {
+                        CemuHooks* hooks = VRManager::instance().Hooks.get();
+                        if (hooks != nullptr) {
+                            const uint64_t currentTitleId = hooks->GetCurrentTitleId();
+                            if (currentTitleId != 0) {
+                                const std::string titleId = formatTitleId(currentTitleId);
+                                if (settings.GetBootDirectlyTitleId() != titleId) {
+                                    settings.SetBootDirectlyTitleId(titleId);
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+
                     if (ImGui::CollapsingHeader("Advanced Settings")) {
+                        DrawSettingRow("Boot Directly Into BotW", [&]() {
+                            settings.bootDirectlyIntoGame.AddToGUI(&changed);
+                        });
+
                         DrawSettingRow("Crop VR Image To 16:9 For Cemu Window", [&]() {
                             settings.cropFlatTo16x9.AddToGUI(&changed);
                         });

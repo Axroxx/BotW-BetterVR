@@ -214,6 +214,14 @@ public:
 
     static void DrawDebugOverlays();
 
+    uint64_t GetCurrentTitleId() const {
+        if (gameMeta_getTitleId == nullptr) {
+            return 0;
+        }
+
+        return gameMeta_getTitleId();
+    }
+
 private:
     HMODULE m_cemuHandle;
 
