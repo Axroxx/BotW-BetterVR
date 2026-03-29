@@ -37,10 +37,6 @@ Log::Log() {
     SetConsoleTitleA("BetterVR Debugging Console");
     consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     logFile.open("BetterVR.txt", std::ios::out | std::ios::app);
-    if (logFile.is_open()) {
-        logFile << "[Layer] Attached to BetterVR log" << std::endl;
-        logFile.flush();
-    }
     Log::print<INFO>("Successfully started BetterVR!");
     LogSystemHardwareInfo();
 

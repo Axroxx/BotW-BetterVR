@@ -160,7 +160,7 @@ inline LauncherPaths DetectPaths() {
     }
 
     paths.targetPack = paths.targetBase / fs::path("BreathOfTheWild_BetterVR");
-    paths.downloadedGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt";
+    paths.downloadedGraphicsRules = paths.targetBase / "graphicPacks" / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt";
     paths.runtimeLayerDll = paths.targetPack / "BetterVR_Layer.dll";
     paths.runtimeLayerJson = paths.targetPack / "BetterVR_Layer.json";
     return paths;
@@ -172,9 +172,22 @@ inline void InitLog(const LauncherPaths& paths) {
     LogLine("BetterVR launcher started");
     LogLine("Version: " + std::string(BETTERVR_LAUNCHER_VERSION));
     LogLine("Launcher: " + Narrow(paths.launcherExe));
+    LogLine("Cemu log.txt: " + Narrow(paths.cemuExe.parent_path() / "log.txt"));
     LogLine("Cemu mode: " + ModeName(paths.mode));
     LogLine("Graphic pack target: " + Narrow(paths.targetPack));
     LogLine("Runtime directory: " + Narrow(paths.targetPack));
+}
+
+inline void CloseLog() {
+    std::lock_guard<std::mutex> lock(g_launcherLogMutex);
+    if (g_launcherLog.is_open()) {
+        g_launcherLog.close();
+    }
+}
+
+inline void ReopenLog(const LauncherPaths& paths) {
+    std::lock_guard<std::mutex> lock(g_launcherLogMutex);
+    g_launcherLog.open(paths.launcherLog, std::ios::out | std::ios::app);
 }
 
 inline bool EnsureDirectory(const fs::path& directory, const char* failurePrefix) {

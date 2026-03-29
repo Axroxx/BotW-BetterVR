@@ -3,10 +3,16 @@
   "layer": {
     "name": "VK_LAYER_CREMENTIF_bettervr",
     "type": "GLOBAL",
-    "library_path": "BetterVR_Layer.dll",
+    "library_path": "${BETTERVR_LAYER_DLL_PATH}",
     "api_version": "1.2.0",
     "implementation_version": "1",
     "description": "Vulkan layer used to breath some VR into BotW for Cemu, using OpenXR!",
+    "enable_environment": {
+      "ENABLE_BETTERVR_MOD": "1"
+    },
+    "disable_environment": {
+      "DISABLE_BETTERVR_MOD": "1"
+    },
     "functions": {
       "vkNegotiateLoaderLayerInterfaceVersion": "VRLayer_NegotiateLoaderLayerInterfaceVersion",
       "vkGetInstanceProcAddr": "VRLayer_GetInstanceProcAddr",

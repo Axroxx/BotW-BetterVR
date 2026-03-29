@@ -724,6 +724,12 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                 ImGui::PopStyleVar();
                 if (DrawStyledTab(ICON_KI_COG "Settings", 0)) {
                     ImGui::Separator();
+                    DrawSettingRow("Boot Directly Into BotW", [&]() {
+                        settings.bootDirectlyIntoGame.AddToGUI(&changed);
+                    });
+
+                    ImGui::Spacing();
+                    ImGui::Separator();
                     CameraMode cameraMode = settings.cameraMode;
                     DrawSettingRow("Camera Mode", [&]() {
                         settings.cameraMode.AddRadioToGUI(&changed, ModSettings::toDisplayString);
@@ -817,9 +823,9 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                         if (hooks != nullptr) {
                             const uint64_t currentTitleId = hooks->GetCurrentTitleId();
                             if (currentTitleId != 0) {
-                                const std::string titleId = formatTitleId(currentTitleId);
-                                if (settings.GetBootDirectlyTitleId() != titleId) {
-                                    settings.SetBootDirectlyTitleId(titleId);
+                                const std::string formattedTitleId = std::format("{:016X}", currentTitleId);
+                                if (settings.bootDirectlyTitleId.Get() != formattedTitleId) {
+                                    settings.bootDirectlyTitleId.Set(formattedTitleId);
                                     changed = true;
                                 }
                             }
@@ -827,10 +833,6 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                     }
 
                     if (ImGui::CollapsingHeader("Advanced Settings")) {
-                        DrawSettingRow("Boot Directly Into BotW", [&]() {
-                            settings.bootDirectlyIntoGame.AddToGUI(&changed);
-                        });
-
                         DrawSettingRow("Crop VR Image To 16:9 For Cemu Window", [&]() {
                             settings.cropFlatTo16x9.AddToGUI(&changed);
                         });

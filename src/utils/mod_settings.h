@@ -400,38 +400,6 @@ public:
     }
 };
 
-class TitleIdSetting : public StringSetting {
-public:
-    using StringSetting::StringSetting;
-
-    std::string NormalizeValue(std::string value) const override {
-        value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char character) {
-            return std::isspace(character) != 0;
-        }), value.end());
-
-        if (value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0) {
-            value.erase(0, 2);
-        }
-
-        std::ranges::transform(value, value.begin(), [](unsigned char character) {
-            return char(std::toupper(character));
-        });
-
-        if (value.empty()) {
-            return value;
-        }
-
-        if (value.size() != 16 || !std::ranges::all_of(value, [](unsigned char character) {
-            return std::isxdigit(character) != 0;
-        })) {
-            Log::print<ERROR>("{} had invalid title id value \"{}\". Resetting to default value", this->name, value);
-            return defaultValue;
-        }
-
-        return value;
-    }
-};
-
 template <typename T>
 concept IsEnum = std::is_enum_v<T>;
 
@@ -713,7 +681,7 @@ struct ModSettings {
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
     BoolSetting tutorialPromptShown = BoolSetting("TutorialPromptShown", false);
     BoolSetting bootDirectlyIntoGame = BoolSetting("BootDirectlyIntoGame", false);
-    TitleIdSetting bootDirectlyTitleId = TitleIdSetting("BootDirectlyTitleId", "");
+    StringSetting bootDirectlyTitleId = StringSetting("BootDirectlyTitleId", "");
 
     // Input settings
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
@@ -769,8 +737,6 @@ struct ModSettings {
 
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
-    const std::string& GetBootDirectlyTitleId() const { return bootDirectlyTitleId.Get(); }
-    void SetBootDirectlyTitleId(const std::string& titleId) { bootDirectlyTitleId.Set(titleId); }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
 
     // By default BotW's camera uses 0.1f for near plane and 25000.0f for far plane, except maybe some indoor areas? But for simplicity, we'll use the default values everywhere.
@@ -786,8 +752,8 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Crop Flat to 16:9: {}\n", ShouldFlatPreviewBeCroppedTo16x9() ? "Yes" : "No");
         std::format_to(std::back_inserter(buffer), " - Debug Overlay: {}\n", ShowDebugOverlay() ? "Enabled" : "Disabled");
         std::format_to(std::back_inserter(buffer), " - Boot Directly Into BotW: {}\n", ShouldBootDirectlyIntoGame() ? "Enabled" : "Disabled");
-        if (!GetBootDirectlyTitleId().empty()) {
-            std::format_to(std::back_inserter(buffer), " - Saved Direct Boot Title ID: {}\n", GetBootDirectlyTitleId());
+        if (!bootDirectlyTitleId.Get().empty()) {
+            std::format_to(std::back_inserter(buffer), " - Saved Direct Boot Title ID: {}\n", bootDirectlyTitleId.Get());
         }
         std::format_to(std::back_inserter(buffer), " - Cutscene Camera Mode: {}\n", toDisplayString(GetCutsceneCameraMode()));
         std::format_to(std::back_inserter(buffer), " - Show Black Bars for Third-Person Cutscenes: {}\n", UseBlackBarsForCutscenes() ? "Yes" : "No");

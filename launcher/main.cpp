@@ -3,7 +3,7 @@
 #include "embedded_assets.h"
 #include "launcher_common.h"
 
-static constexpr wchar_t VulkanExplicitLayersRegistryPath[] = L"SOFTWARE\\Khronos\\Vulkan\\ExplicitLayers";
+static constexpr wchar_t VulkanImplicitLayersRegistryPath[] = L"SOFTWARE\\Khronos\\Vulkan\\ImplicitLayers";
 static constexpr std::string_view BundledGraphicPackName = "BreathOfTheWild_BetterVR";
 static constexpr std::string_view BundledGraphicPackPrefix = "BreathOfTheWild_BetterVR/";
 
@@ -191,14 +191,14 @@ static bool IsBetterVRRegistryValue(const std::wstring& valueName) {
     return lowered.find("bettervr") != std::string::npos && lowered.ends_with("bettervr_layer.json");
 }
 
-static bool RemoveBetterVRLayerRegistryEntries() {
+static bool RemoveBetterVREntriesFromRegistryKey(const wchar_t* registryPath) {
     HKEY key = nullptr;
-    const LONG openResult = RegOpenKeyExW(HKEY_CURRENT_USER, VulkanExplicitLayersRegistryPath, 0, KEY_READ | KEY_SET_VALUE, &key);
+    const LONG openResult = RegOpenKeyExW(HKEY_CURRENT_USER, registryPath, 0, KEY_READ | KEY_SET_VALUE, &key);
     if (openResult == ERROR_FILE_NOT_FOUND) {
         return true;
     }
     if (openResult != ERROR_SUCCESS) {
-        LogLine("Failed to open Vulkan ExplicitLayers registry key");
+        LogLine("Failed to open registry key: " + Narrow(std::wstring(registryPath)));
         return false;
     }
 
@@ -227,10 +227,10 @@ static bool RemoveBetterVRLayerRegistryEntries() {
     for (const std::wstring& valueName : valuesToDelete) {
         const LONG deleteResult = RegDeleteValueW(key, valueName.c_str());
         if (deleteResult == ERROR_SUCCESS || deleteResult == ERROR_FILE_NOT_FOUND) {
-            LogLine("Removed explicit Vulkan layer registration: " + Narrow(valueName));
+            LogLine("Removed Vulkan layer registration: " + Narrow(valueName));
         }
         else {
-            LogLine("Failed to remove explicit Vulkan layer registration: " + Narrow(valueName));
+            LogLine("Failed to remove Vulkan layer registration: " + Narrow(valueName));
             success = false;
         }
     }
@@ -239,16 +239,29 @@ static bool RemoveBetterVRLayerRegistryEntries() {
     return success;
 }
 
-static bool RegisterExplicitLayer(const LauncherPaths& paths) {
+static bool RemoveBetterVRLayerRegistryEntries() {
+    bool success = true;
+    // Clean up entries from the current implicit layers location
+    if (!RemoveBetterVREntriesFromRegistryKey(VulkanImplicitLayersRegistryPath)) {
+        success = false;
+    }
+    // Also clean up stale entries from the old explicit layers location
+    if (!RemoveBetterVREntriesFromRegistryKey(L"SOFTWARE\\Khronos\\Vulkan\\ExplicitLayers")) {
+        success = false;
+    }
+    return success;
+}
+
+static bool RegisterImplicitLayer(const LauncherPaths& paths) {
     if (!RemoveBetterVRLayerRegistryEntries()) {
         return false;
     }
 
     HKEY key = nullptr;
     DWORD disposition = 0;
-    const LONG createResult = RegCreateKeyExW(HKEY_CURRENT_USER, VulkanExplicitLayersRegistryPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, &disposition);
+    const LONG createResult = RegCreateKeyExW(HKEY_CURRENT_USER, VulkanImplicitLayersRegistryPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, &disposition);
     if (createResult != ERROR_SUCCESS) {
-        LogLine("Failed to create Vulkan ExplicitLayers registry key");
+        LogLine("Failed to create Vulkan ImplicitLayers registry key");
         return false;
     }
 
@@ -258,11 +271,11 @@ static bool RegisterExplicitLayer(const LauncherPaths& paths) {
     RegCloseKey(key);
 
     if (setResult != ERROR_SUCCESS) {
-        LogLine("Failed to register explicit Vulkan layer: " + Narrow(paths.runtimeLayerJson));
+        LogLine("Failed to register implicit Vulkan layer: " + Narrow(paths.runtimeLayerJson));
         return false;
     }
 
-    LogLine("Registered explicit Vulkan layer: " + Narrow(paths.runtimeLayerJson));
+    LogLine("Registered implicit Vulkan layer: " + Narrow(paths.runtimeLayerJson));
     return true;
 }
 
@@ -279,6 +292,57 @@ static std::vector<fs::path> CollectInstalledGraphicPackPaths(const LauncherPath
     return result;
 }
 
+static bool PatchLayerManifest(const LauncherPaths& paths) {
+    std::ifstream input(paths.runtimeLayerJson, std::ios::binary);
+    if (!input.is_open()) {
+        LogLine("Failed to open layer manifest for patching: " + Narrow(paths.runtimeLayerJson));
+        return false;
+    }
+
+    std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    input.close();
+
+    // note: hardcodes an absolute path, since I think some older versions didn't support the old relative paths the .json used.
+    // this resulted in the vulkan loader blindly ignoring the .DLL, but it'd log in the vulkan loader log that LoadLibrary fails with ERROR_INVALID_PARAMETER (87).
+
+    const std::string absoluteDllPath = Narrow(paths.runtimeLayerDll);
+    std::string escapedDllPath;
+    escapedDllPath.reserve(absoluteDllPath.size() + 16);
+    for (char character : absoluteDllPath) {
+        if (character == '\\') {
+            escapedDllPath += "\\\\";
+        }
+        else {
+            escapedDllPath += character;
+        }
+    }
+
+    const std::string oldValue = "\"library_path\": \"${BETTERVR_LAYER_DLL_PATH}\"";
+    const std::string newValue = "\"library_path\": \"" + escapedDllPath + "\"";
+    const size_t position = contents.find(oldValue);
+    if (position == std::string::npos) {
+        LogLine("Could not find library_path in layer manifest to patch");
+        return false;
+    }
+
+    contents.replace(position, oldValue.size(), newValue);
+
+    std::ofstream output(paths.runtimeLayerJson, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        LogLine("Failed to open layer manifest for writing: " + Narrow(paths.runtimeLayerJson));
+        return false;
+    }
+
+    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    if (!output.good()) {
+        LogLine("Failed to write patched layer manifest");
+        return false;
+    }
+
+    LogLine("Patched layer manifest library_path to: " + absoluteDllPath);
+    return true;
+}
+
 static bool PrepareInstalledAssets(const LauncherPaths& paths) {
     if (!InstallGraphicPack(paths)) {
         return false;
@@ -286,7 +350,10 @@ static bool PrepareInstalledAssets(const LauncherPaths& paths) {
     if (!ExtractRuntimeFiles(paths)) {
         return false;
     }
-    if (!RegisterExplicitLayer(paths)) {
+    if (!PatchLayerManifest(paths)) {
+        return false;
+    }
+    if (!RegisterImplicitLayer(paths)) {
         return false;
     }
 
@@ -391,10 +458,6 @@ static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResu
     LogLine("Patched BOTW Graphics rules: " + Narrow(paths.downloadedGraphicsRules));
 }
 
-static bool IsValidBotWTitleId(const std::string& titleId) {
-    return titleId == "00050000101C9300" || titleId == "00050000101C9400" || titleId == "00050000101C9500";
-}
-
 static std::string Trim(std::string value) {
     const size_t first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -443,9 +506,6 @@ static std::optional<std::string> ReadDirectBootTitleId(const LauncherPaths& pat
         }
         else if (_stricmp(key.c_str(), "BootDirectlyTitleId") == 0) {
             directBootTitleId = value;
-            std::ranges::transform(directBootTitleId, directBootTitleId.begin(), [](unsigned char character) {
-                return char(std::toupper(character));
-            });
         }
     }
 
@@ -453,7 +513,7 @@ static std::optional<std::string> ReadDirectBootTitleId(const LauncherPaths& pat
         return std::nullopt;
     }
 
-    if (!IsValidBotWTitleId(directBootTitleId)) {
+    if (directBootTitleId.empty()) {
         LogLine("Direct boot is enabled but the saved BotW title ID is missing or invalid");
         return std::nullopt;
     }
@@ -538,15 +598,49 @@ static void LogVulkanDetails() {
     FreeLibrary(vulkanModule);
 }
 
-static void SetLaunchEnvironment(const LauncherPaths& paths) {
-    const std::wstring layerPath = paths.targetPack.wstring() + L";";
-    SetEnvironmentVariableW(L"VK_LAYER_PATH", layerPath.c_str());
-    SetEnvironmentVariableW(L"VK_INSTANCE_LAYERS", L"VK_LAYER_CREMENTIF_bettervr");
+static void EmbedCemuLog(const LauncherPaths& paths) {
+    const fs::path cemuLogPath = paths.cemuExe.parent_path() / "log.txt";
+    std::ifstream cemuLog(cemuLogPath, std::ios::in);
+    if (!cemuLog.is_open()) {
+        LogLine("Cemu log.txt was not found at: " + Narrow(cemuLogPath));
+        return;
+    }
+
+    LogLine("========================================");
+    LogLine("Cemu log.txt contents (" + Narrow(cemuLogPath) + "):");
+    LogLine("========================================");
+
+    std::string line;
+    while (std::getline(cemuLog, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        std::lock_guard<std::mutex> lock(g_launcherLogMutex);
+        if (g_launcherLog.is_open()) {
+            g_launcherLog << "[Cemu] " << line << '\n';
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_launcherLogMutex);
+        if (g_launcherLog.is_open()) {
+            g_launcherLog.flush();
+        }
+    }
+
+    LogLine("========================================");
+    LogLine("End of Cemu log.txt");
+    LogLine("========================================");
+}
+
+static void SetLaunchEnvironment() {
+    SetEnvironmentVariableW(L"ENABLE_BETTERVR_MOD", L"1");
     SetEnvironmentVariableW(L"DISABLE_VULKAN_OBS_CAPTURE", L"1");
 }
 
 static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::wstring>& forwardedArgs) {
-    SetLaunchEnvironment(paths);
+    SetLaunchEnvironment();
 
     std::wstring commandLine = L"\"" + paths.cemuExe.wstring() + L"\"";
     bool hasExplicitTitleId = false;
@@ -575,7 +669,12 @@ static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::
         return 1;
     }
 
+    LogLine("Closing launcher log to hand off to the VR layer");
+    CloseLog();
+
     WaitForSingleObject(processInfo.hProcess, INFINITE);
+
+    ReopenLog(paths);
 
     DWORD exitCode = 1;
     GetExitCodeProcess(processInfo.hProcess, &exitCode);
@@ -592,11 +691,16 @@ int wmain(int argc, wchar_t** argv) {
         InitLog(paths);
 
         bool uninstallRequested = false;
+        bool keepInstalled = false;
         std::vector<std::wstring> forwardedArgs;
         forwardedArgs.reserve(static_cast<size_t>(std::max(argc - 1, 0)));
         for (int index = 1; index < argc; ++index) {
             if (_wcsicmp(argv[index], L"--uninstall") == 0) {
                 uninstallRequested = true;
+                continue;
+            }
+            if (_wcsicmp(argv[index], L"--keep-installed") == 0) {
+                keepInstalled = true;
                 continue;
             }
 
@@ -609,7 +713,7 @@ int wmain(int argc, wchar_t** argv) {
                 return 1;
             }
 
-            ShowInfoMessage("BetterVR was removed from the graphic pack folders, Vulkan explicit layer registry, and local runtime cache.");
+            ShowInfoMessage("BetterVR was removed from the graphic pack folders, Vulkan layer registry, and local runtime cache.");
             return 0;
         }
 
@@ -638,7 +742,19 @@ int wmain(int argc, wchar_t** argv) {
         PatchGraphicsRules(paths, probeResult);
         LogVulkanDetails();
 
-        return LaunchCemuAndWait(paths, forwardedArgs);
+        const int exitCode = LaunchCemuAndWait(paths, forwardedArgs);
+
+        EmbedCemuLog(paths);
+
+        if (!keepInstalled) {
+            LogLine("Cleaning up installed assets after Cemu exit...");
+            RemoveInstalledAssets(paths);
+        }
+        else {
+            LogLine("Skipping cleanup because --keep-installed was specified");
+        }
+
+        return exitCode;
     }
     catch (const std::exception& exception) {
         ShowErrorMessage(std::string("BetterVR Launcher failed: ") + exception.what());

@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "cemu_hooks.h"
 #include "imgui_internal.h"
 #include "instance.h"
@@ -49,8 +51,7 @@ static void Settings_ReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
                 Log::print<ERROR>("Failed to parse option line \"{}\": missing value", line);
                 return;
             }
-            std::string valueStr = std::string(valueView);
-            option->Deserialize(valueStr);
+            option->Deserialize(std::string(valueView));
             //Log::print<INFO>("Deserialized \"{}\" to \"{}\" from line \"{}\"", option->name, option->Serialize(), line);
             return;
         }
