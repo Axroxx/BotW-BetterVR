@@ -30,6 +30,7 @@ struct LauncherPaths {
     fs::path targetPack;
     fs::path downloadedGraphicsRules;
     fs::path backupGraphicsRules;
+    fs::path graphicsRulesPatchState;
     fs::path launcherLog;
     fs::path updateIgnoreFile;
     fs::path runtimeLayerDll;
@@ -141,7 +142,7 @@ inline LauncherPaths DetectPaths() {
     paths.launcherDir = paths.launcherExe.parent_path();
     paths.cemuExe = paths.launcherDir / "Cemu.exe";
     paths.settingsIni = paths.launcherDir / "BetterVR_settings.ini";
-    paths.launcherLog = paths.launcherDir / "BetterVR.txt";
+    paths.launcherLog = paths.launcherDir / "BetterVR_log.txt";
     paths.updateIgnoreFile = paths.launcherDir / "BetterVR_update_ignore_once.txt";
 
     if (fs::is_directory(paths.launcherDir / "portable")) {
@@ -163,6 +164,7 @@ inline LauncherPaths DetectPaths() {
     paths.targetPack = paths.targetBase / fs::path("BreathOfTheWild_BetterVR");
     paths.downloadedGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt";
     paths.backupGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt.bettervr.backup";
+    paths.graphicsRulesPatchState = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt.bettervr.state";
     paths.runtimeLayerDll = paths.targetPack / "BetterVR_Layer.dll";
     paths.runtimeLayerJson = paths.targetPack / "BetterVR_Layer.json";
     return paths;

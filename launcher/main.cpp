@@ -428,34 +428,72 @@ static bool ReplaceRuleValue(std::string& contents, const std::string& key, cons
     return replacedAny;
 }
 
+static uint64_t ComputeRuleFileHash(std::string_view contents) {
+    uint64_t hash = 14695981039346656037ull;
+    for (unsigned char character : contents) {
+        hash ^= character;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static std::optional<std::string> ReadTextFile(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        return std::nullopt;
+    }
+
+    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+}
+
+static void DeleteGraphicsRulesPatchState(const LauncherPaths& paths) {
+    std::error_code ec;
+    fs::remove(paths.graphicsRulesPatchState, ec);
+    if (ec) {
+        LogLine("Failed to remove graphics rules patch state: " + ec.message());
+    }
+}
+
+static void DeleteGraphicsRulesBackupFiles(const LauncherPaths& paths) {
+    std::error_code ec;
+    fs::remove(paths.backupGraphicsRules, ec);
+    if (ec) {
+        LogLine("Failed to remove BOTW Graphics rules backup: " + ec.message());
+    }
+
+    DeleteGraphicsRulesPatchState(paths);
+}
+
+static bool WriteGraphicsRulesPatchState(const LauncherPaths& paths, uint64_t patchedHash) {
+    std::ofstream output(paths.graphicsRulesPatchState, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        LogLine("Failed to open graphics rules patch state file");
+        return false;
+    }
+
+    const std::string value = std::to_string(patchedHash);
+    output.write(value.data(), static_cast<std::streamsize>(value.size()));
+    if (!output.good()) {
+        LogLine("Failed to write graphics rules patch state file");
+        return false;
+    }
+
+    return true;
+}
+
 static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResult& probeResult) {
     if (!fs::exists(paths.downloadedGraphicsRules)) {
         LogLine("Downloaded BOTW Graphics rules were not found: " + Narrow(paths.downloadedGraphicsRules));
         return;
     }
 
-    std::error_code backupEc;
-    if (!fs::exists(paths.backupGraphicsRules, backupEc)) {
-        fs::copy_file(paths.downloadedGraphicsRules, paths.backupGraphicsRules, backupEc);
-        if (backupEc) {
-            LogLine("Failed to back up BOTW Graphics rules: " + backupEc.message());
-        }
-        else {
-            LogLine("Backed up BOTW Graphics rules to: " + Narrow(paths.backupGraphicsRules));
-        }
-    }
-    else {
-        LogLine("Backup already exists (previous session may not have cleaned up): " + Narrow(paths.backupGraphicsRules));
-    }
-
-    std::ifstream input(paths.downloadedGraphicsRules, std::ios::binary);
-    if (!input.is_open()) {
+    const std::optional<std::string> originalContents = ReadTextFile(paths.downloadedGraphicsRules);
+    if (!originalContents.has_value()) {
         LogLine("Failed to open downloaded BOTW Graphics rules");
         return;
     }
 
-    std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    input.close();
+    std::string contents = *originalContents;
 
     bool coreVarsFound = false;
     if (probeResult.leftWidth != 0 && probeResult.leftHeight != 0) {
@@ -476,6 +514,35 @@ static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResu
             MB_OK | MB_ICONWARNING
         );
         return;
+    }
+
+    std::error_code backupEc;
+    bool backupExists = fs::exists(paths.backupGraphicsRules, backupEc);
+    bool stateExists = fs::exists(paths.graphicsRulesPatchState, backupEc);
+    bool needsFreshBackup = !backupExists || !stateExists;
+    if (!needsFreshBackup && stateExists) {
+        const std::optional<std::string> expectedHashText = ReadTextFile(paths.graphicsRulesPatchState);
+        if (!expectedHashText.has_value()) {
+            needsFreshBackup = true;
+        }
+        else if (*expectedHashText != std::to_string(ComputeRuleFileHash(*originalContents))) {
+            LogLine("Discarding stale BOTW Graphics rules backup because the source file changed since the previous patch session");
+            needsFreshBackup = true;
+        }
+    }
+
+    if (needsFreshBackup) {
+        DeleteGraphicsRulesBackupFiles(paths);
+        fs::copy_file(paths.downloadedGraphicsRules, paths.backupGraphicsRules, backupEc);
+        if (backupEc) {
+            LogLine("Failed to back up BOTW Graphics rules: " + backupEc.message());
+        }
+        else {
+            LogLine("Backed up BOTW Graphics rules to: " + Narrow(paths.backupGraphicsRules));
+        }
+    }
+    else {
+        LogLine("Backup already exists (previous session may not have cleaned up): " + Narrow(paths.backupGraphicsRules));
     }
 
     const fs::path tempPath = paths.downloadedGraphicsRules.wstring() + L".bettervr.tmp";
@@ -501,15 +568,42 @@ static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResu
         return;
     }
 
+    if (!WriteGraphicsRulesPatchState(paths, ComputeRuleFileHash(contents))) {
+        LogLine("Continuing without graphics rules restore tracking; the original rules will not be restored automatically");
+        DeleteGraphicsRulesBackupFiles(paths);
+        return;
+    }
+
     LogLine("Patched BOTW Graphics rules: " + Narrow(paths.downloadedGraphicsRules));
 }
 
 static void RestoreGraphicsRules(const LauncherPaths& paths) {
     std::error_code ec;
     if (!fs::exists(paths.backupGraphicsRules, ec)) {
+        DeleteGraphicsRulesPatchState(paths);
         return;
     }
-    
+
+    const std::optional<std::string> expectedHashText = ReadTextFile(paths.graphicsRulesPatchState);
+    if (!expectedHashText.has_value()) {
+        LogLine("Skipping BOTW Graphics rules restore because the patch state file is missing");
+        DeleteGraphicsRulesBackupFiles(paths);
+        return;
+    }
+
+    const std::optional<std::string> currentContents = ReadTextFile(paths.downloadedGraphicsRules);
+    if (!currentContents.has_value()) {
+        LogLine("Skipping BOTW Graphics rules restore because the current rules file could not be read");
+        DeleteGraphicsRulesBackupFiles(paths);
+        return;
+    }
+
+    if (*expectedHashText != std::to_string(ComputeRuleFileHash(*currentContents))) {
+        LogLine("Skipping BOTW Graphics rules restore because the file changed after BetterVR patched it");
+        DeleteGraphicsRulesBackupFiles(paths);
+        return;
+    }
+
     fs::copy_file(paths.backupGraphicsRules, paths.downloadedGraphicsRules, fs::copy_options::overwrite_existing, ec);
     if (ec) {
         LogLine("Failed to restore BOTW Graphics rules from backup: " + ec.message());
@@ -517,6 +611,8 @@ static void RestoreGraphicsRules(const LauncherPaths& paths) {
     else {
         LogLine("Restored BOTW Graphics rules from backup");
     }
+
+    DeleteGraphicsRulesBackupFiles(paths);
 }
 
 static std::string Trim(std::string value) {
@@ -771,7 +867,7 @@ int wmain(int argc, wchar_t** argv) {
         if (uninstallRequested) {
             RestoreGraphicsRules(paths);
             if (!RemoveInstalledAssets(paths)) {
-                ShowErrorMessage("BetterVR uninstall did not complete cleanly. Check BetterVR.txt for details.");
+                ShowErrorMessage("BetterVR uninstall did not complete cleanly. Check BetterVR_log.txt for details.");
                 return 1;
             }
 
@@ -791,13 +887,13 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         if (!PrepareInstalledAssets(paths)) {
-            ShowErrorMessage("BetterVR could not install its bundled runtime files. Check BetterVR.txt for details.");
+            ShowErrorMessage("BetterVR could not install its bundled runtime files. Check BetterVR_log.txt for details.");
             return 1;
         }
 
         const OpenXRProbeResult probeResult = ProbeOpenXR();
         if (!probeResult.errorMessage.empty()) {
-            ShowErrorMessage(probeResult.errorMessage + "\n\nCheck BetterVR.txt for more details.");
+            ShowErrorMessage(probeResult.errorMessage + "\n\nCheck BetterVR_log.txt for more details.");
             return 1;
         }
 

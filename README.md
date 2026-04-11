@@ -47,41 +47,52 @@ While more integrated solutions are being found out, there's probably ways to se
 
 > [!TIP]
 > Meta/Oculus Link has terrible frame interpolation that will make game appear to run much worse while also making the grass and arms glitchy, even while using a cable.
-> Its HIGHLY recommended to use [ALVR](https://github.com/alvr-org/ALVR) (free, both wired and wireless), [Virtual Desktop](https://www.meta.com/en-gb/experiences/virtual-desktop/2017050365004772/) (paid, wireless) or [Steam Link](https://www.meta.com/en-gb/experiences/steam-link/5841245619310585/) (free, wireless) instead for Meta Quest headsets.
+> Its HIGHLY recommended to use [ALVR](https://github.com/alvr-org/ALVR) (free, both wired and wireless), [Virtual Desktop](https://www.meta.com/en-gb/experiences/virtual-desktop/2017050365004772/) (paid, wireless, most performant) or [Steam Link](https://www.meta.com/en-gb/experiences/steam-link/5841245619310585/) (free, wireless) instead for Meta Quest headsets.
 
 1. Download the latest `BetterVR_Launcher.exe` release from the [Releases](https://github.com/Crementif/BotW-BetterVR/releases) page.
 
-2. Move the downloaded `BetterVR_Launcher.exe` into the same folder where your `Cemu.exe` is stored.
-   There should now be **at least** `BetterVR_Launcher.exe` next to your `Cemu.exe`.
-   
-3. Open Cemu normally through the `Cemu.exe`.
-    - Cemu's window title should state Cemu 2.6 or newer. Any older version isn't supported.
-    - The game should say V208 inside the update column in Cemu's game list. Otherwise it's outdated/not updated, and won't work.
-    - Under `Debug`, disable `Accurate Barriers (Vulkan)` for more performance.
-    - Go to `Options`->`General Settings`, and then under the `Graphics` tab make sure that you're using Vulkan, that the right GPU is selected and that VSync is turned off.
-    
-    If all that is true, continue to the next step by closing the settings window and then Cemu entirely. Otherwise, fix those issues before continuing.
+2. Move `BetterVR_Launcher.exe` into the same folder as `Cemu.exe`.
 
-4. Double-click on `BetterVR_Launcher.exe` to start Cemu. The launcher installs or refreshes the BetterVR graphic pack automatically, writes startup details to `BetterVR.txt`, checks for updates, and keeps running while Cemu is open.
+3. Modify the general Cemu settings first by launching the `Cemu.exe` and looking for the following things.
+   - Cemu's window title says your Cemu is version 2.6 or newer.
+   - Breath of the Wild is inside your game list, and lists update `V208` in the update column.
+   - Go to `Debug` -> `Accurate Barriers (Vulkan)` and make sure it is disabled for better performance.
+   - Go to `Options` -> `General Settings` -> `Graphics`. Make sure that the Renderer is set to Vulkan, that the correct GPU is selected, and VSync is off. Close the settings window.
+   - Go to `Options` -> `Graphic Packs` and click the `Download Community Graphic Packs` button to make sure that your graphic packs are up to date.
 
-5. Go to `Options`-> `Graphic packs`-> `The Legend of Zelda: Breath of the Wild` and make sure that the graphic pack named `BetterVR` is enabled.
-   **You'll also want to enable the FPS++ graphic pack under the Mods category, or else the game will crash!**  
-   **While you're inside the graphic packs menu, make sure that you've clicked on the Download Community Graphic Packs button to update your graphic packs!**  
-   **You can't change the BetterVR options while you're in-game.**  
+4. Close Cemu, connect your VR headset to your PC, start Virtual Desktop, SteamVR and and make sure that it has its OpenXR runtime set properly:
+    - For Virtual Desktop users: https://github.com/mbucchia/VirtualDesktop-OpenXR/wiki#download--installation
+	- For SteamVR, ALVR and Meta Quest Link users: https://academy.vrex.no/knowledge-base/openxr/
 
-6. For an enjoyable experience you should change some other graphic packs in this same window too:
-   - `Graphics` graphic pack: Use any (non-ultrawide!) resolution of 1440p (2k) or higher for clarity. Also change anti-aliasing to Nvidia FXAA.
-      **Make sure that you don't use a resolution under 1280x720, or else the game will never show up!**
-   - `FPS++` graphic pack: Change the FPS limit to at least 120FPS or 144FPS. The OpenXR headset will dictate the framerate anyway.
-   - `Enhancements`: graphic pack: Change anisotropic filtering to 16x and use your preferred preset.
-   - Any other settings like shadows, draw distance etc. You can always play around with this to see what the performance hit is.  
+5. Run BetterVR by using the `BetterVR_Launcher.exe`, then go to `Options` -> `Graphic packs` -> `The Legend of Zelda: Breath of the Wild` and make sure:
+   - `BetterVR` is enabled.
+   - `Mods` -> `FPS++` is enabled. The game will crash without it.
 
-7. Close the settings and start the game like normal from Cemu's game list. You can now put on your VR headset and if installed correctly it should now work!
+6. Besides those, there's some other recommended graphic pack settings to make your game run properly and look better in VR:
+   - `Graphics`:  
+	 - Set the VR Resolution Multiplier to change the resolution of the game when you're in VR. The mod is not very GPU intensive, so using a higher multiplier might not cost any performance.  
+	 - Set the Anti-Aliasing to `Nvidia FXAA` or `None` (if you are using 2x resolution multiplier or higher).
+   - `FPS++`: Set the FPS limit to at least 120 or 144. Your headset/runtime will still control the actual VR framerate.
+   - `Enhancements`: Set anisotropic filtering to 16x, and optionally set a Clarity preset to make the colors less washed out.
 
-From now on you can play the game in VR by just starting `BetterVR_Launcher.exe` from your Cemu folder.  
-If you want to undo the installation (temporarily) to play the game without VR, run `BetterVR_Launcher.exe --uninstall`.  
-You can just use `BetterVR_Launcher.exe` again to reinstall or update and start the VR mod.
+7. Double click the game in Cemu's game list while your VR headset is turned on and connected. If things went correctly, you should now be playing the game in VR!  
 
+Use the in-game BetterVR menu to see the BetterVR settings and controls guide (hold the X or equivalent button on your left VR controller, or long press the Menu button on your Xbox controller).  
+In the settings you can also enable an option to immediately start the game when you start the `BetterVR_Launcher.exe`. You can also add this executable to Virtual Desktop, SteamVR etc. as a non-official Steam game.
+
+
+#### Troubleshooting
+
+Here's some steps to help you debug issues when the game fails to launch:
+
+1. Verify that you've got a working game copy. Use Cemu.exe and launch the game normally. If you can load the game normally, it should work.
+2. Make sure that if you're using a laptop, both your integrated graphics card and your dedicated graphics card drivers are updated. Make sure that its also plugged into a wall outlet and that its NOT using a power saving setting.
+3. Unfortunately, some older AMD GPUs might have issues. See contact options below to help us squash these.
+4. Uninstall any Vulkan overlays or layers that might cause issues. Programs like Overwolf, RTSS and other things CAN cause issues, though certainly not guaranteed.
+5. Go over all the installation steps one more time and make sure that you didn't diverge from any of the steps. If you're seeing a green screen, it means that the Vulkan layer isn't enabled. This is likely due to using OpenGL in Cemu's settings.
+6. If Cemu shows a Vulkan error like -13, these issues are likely GPU driver related.
+
+If none of these steps helped, check the BotW support channel on the [Flat2VR Discord server](https://discord.com/invite/flat2vr) (recommended) or make a GitHub issue. Me and other people will try to help you in our spare time.
 
 ### Controls
 
@@ -136,11 +147,11 @@ There's enough that was skipped over or left out in this explanation.
 
 5. Use Visual Studio (Recommended) or Clion to open the CMake project. Make sure that it's compiling a x64 build.
 
-6. To quickly debug the C++ code, you'll want to set your IDE to install the BetterVR_Launcher.exe CMake target (which has the DLL embedded) so that its next to the right Cemu.exe, and launch it.
-   All you need is something like [`launch.vs.json`](resources/launch.vs.json), which tells Visual Studio to install and debug that installed target with various options.
-   The launcher is required to set the right registry values and fill in the BetterVR_layer.json so the BetterVR Vulkan layer is loaded into `Cemu.exe`.
+6. To quickly debug the C++ code, you'll want to set your IDE to install the `BetterVR_Launcher.exe` CMake target (which has the `BetterVR_Layer.dll` file embedded) so that its next to the right `Cemu.exe`, and launch it.
+   For Visual Studio, this basically means you'll want to go to `Debug`->`Debug And Launch Settings for...` and change that settings file to be something like [`launch.vs.json`](resources/launch.vs.json).
+   The launcher is required to set the right registry values and fill in the BetterVR_Layer.json so the BetterVR Vulkan layer is loaded into `Cemu.exe`.
 
-7. Make sure that your debugger is attached to the `Cemu.exe` process, and not *just* the `BetterVR_launcher.exe`.
+7. Make sure that your debugger is attached to the `Cemu.exe` process, and not *just* the `BetterVR_Launcher.exe`.
    Although you can just manually attach to Cemu.exe each time you start the launcher, its better to install the official [Microsoft Child Process Debugging Power Tool](https://marketplace.visualstudio.com/items?itemName=vsdbgplat.MicrosoftChildProcessDebuggingPowerTool2022) extension to just automatically attach to all processes. This workflow might be improved in the future to also be automatable when using CLion.
 
 
