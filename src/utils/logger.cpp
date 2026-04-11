@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "logger.h"
 
 HANDLE Log::consoleHandle = NULL;
@@ -36,7 +38,7 @@ Log::Log() {
     AllocConsole();
     SetConsoleTitleA("BetterVR Debugging Console");
     consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    logFile.open("BetterVR.txt", std::ios::out | std::ios::app);
+    logFile.open("BetterVR_log.txt", std::ios::out | std::ios::app);
     Log::print<INFO>("Successfully started BetterVR!");
     LogSystemHardwareInfo();
 

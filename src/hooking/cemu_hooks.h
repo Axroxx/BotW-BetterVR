@@ -211,6 +211,8 @@ public:
         return GetSettings().UseBlackBarsForCutscenes();
     }
     static bool IsScreenOpen(ScreenId screen);
+    static bool IsScreenVisible(ScreenId screen);
+    static bool IsAnyFadeScreenVisible();
 
     static void DrawDebugOverlays();
 
