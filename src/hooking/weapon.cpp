@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "instance.h"
 #include "cemu_hooks.h"
 #include "weapon.h"
@@ -181,7 +183,6 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
     glm::fvec3 cameraAt = camera.at.getLE();
     glm::fquat lookAtQuat = glm::quatLookAtRH(glm::normalize(cameraAt - cameraPos), { 0.0, 1.0, 0.0 });
     glm::fvec3 lookAtPos = cameraPos;
-    //lookAtPos.y += GetSettings().playerHeightOffset.getLE();
 
     // read bone name
     if (boneNamePtr == 0)
@@ -192,8 +193,6 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
     bool isHeldByPlayer = actorName.getLE() == "GameROMPlayer";
     bool isLeftHandWeapon = strcmp(boneName, "Weapon_L") == 0;
     bool isRightHandWeapon = strcmp(boneName, "Weapon_R") == 0;
-
-    //Log::print<INFO>("boneName : {}", boneName);
 
     if (!actorName.getLE().empty() && boneName[0] != '\0' && isHeldByPlayer && (isLeftHandWeapon || isRightHandWeapon)) {
         OpenXR::EyeSide side = isLeftHandWeapon ? OpenXR::EyeSide::LEFT : OpenXR::EyeSide::RIGHT;
@@ -207,23 +206,8 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
         BEMatrix34 modelBindInfoMtx = {};
         readMemory(modelBindInfoMtxPtr, &modelBindInfoMtx);
 
-        //ModifyWeaponMtxToVRPose(side, weaponMtx, lookAtQuat, lookAtPos);
-
         s_cameraPositions[side] = lookAtPos;
         s_cameraRotations[side] = lookAtQuat;
-
-
-        //// prevent weapon transparency
-        //BEType<float> modelOpacity = 1.0f;
-        //BEType<float> negativeOpacity = 0.0f;
-        //writeMemory(targetActorPtr + offsetof(ActorWiiU, modelOpacity), &modelOpacity);
-        //writeMemory(targetActorPtr + offsetof(ActorWiiU, startModelOpacity), &modelOpacity);
-        //writeMemory(targetActorPtr + offsetof(ActorWiiU, modelOpacityRelated), &negativeOpacity);
-        //uint8_t opacityOrDoFlushOpacityToGPU = 1;
-        //writeMemory(targetActorPtr + offsetof(ActorWiiU, opacityOrDoFlushOpacityToGPU), &opacityOrDoFlushOpacityToGPU);
-
-        //writeMemory(weaponMtxPtr, &weaponMtx);
-        //writeMemory(modelBindInfoMtxPtr, &modelBindInfoMtx);
 
         Weapon targetActor = {};
         readMemory(targetActorPtr, &targetActor);
@@ -249,9 +233,6 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
                 break;
         }
 
-       
-        //Log::print<INFO>("Equipped weapon {} with type of {} on side {}", targetActor.name.getLE().c_str(), (uint32_t)targetActor.type.getLE(), (uint32_t)side);
-
         if (isRightHandWeapon) {
             gameState.has_something_in_right_hand = true;
             
@@ -272,8 +253,6 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
         }
         VRManager::instance().XR->m_gameState.store(gameState);
 
-        
-
         // check if weapon is held and if a drop should be triggered
         auto input = VRManager::instance().XR->m_input.load();
         auto dropSide = input.inGame.drop_weapon[side];
@@ -285,17 +264,6 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
             hCPU->gpr[13] = isLeftHandWeapon ? 1 : 0; // set the hand index to 0 for left hand, 1 for right hand
             return;
         }
-        // Support for long press (placeholder)
-        //if (input.inGame.in_game && grabState.lastEvent == ButtonState::Event::LongPress) {
-        //    Log::print<CONTROLS>("Long press detected for {} (side {})", targetActor.name.getLE().c_str(), (int)side);
-        //    // TODO: Implement long press action (e.g., temporarily bind item)
-        //    //grabState.longPress = false;
-        //}
-        //// Support for short press (placeholder)
-        //if (input.inGame.in_game && grabState.lastEvent == ButtonState::Event::ShortPress) {
-        //    Log::print<CONTROLS>("Short press detected for {} (side {})", targetActor.name.getLE().c_str(), (int)side);
-        //    // TODO: Implement short press action (e.g., cycle weapon)
-        //}
 
         hCPU->gpr[9] = 1;
     }
@@ -316,15 +284,6 @@ void CemuHooks::hook_DropEquipment(PPCInterpreter_t* hCPU) {
 
     Weapon weapon = {};
     readMemory(weaponPtr, &weapon);
-
-    //// check if weapon is held and if the grip button is held, drop it
-    //auto input = VRManager::instance().XR->m_input.load();
-    //if (input.inGame.in_game && isHeldByPlayer && input.inGame.grab[heldIndex].currentState) {
-    //    // if the weapon is held by the player and the grip button is pressed, drop it
-    //    //Log::print("!! Dropping weapon {} because grip button is pressed", weapon.name.getLE());
-    //    hCPU->gpr[7] = 1;
-    //    return;
-    //}
 }
 
 
@@ -345,32 +304,12 @@ void CemuHooks::hook_GetContactLayerOfAttack(PPCInterpreter_t* hCPU) {
 
     uint32_t contactLayerValue = hCPU->gpr[3];
 
-    // hardcoded 0!!!
-    //if (m_motionAnalyzers[0].IsAttacking()) {
-    //    contactLayerValue = (uint32_t)ContactLayer::SensorAttackPlayer;
-    //}
-    //else {
-    //    //contactLayerValue = (uint32_t)ContactLayer::SensorChemical;
-    //}
-
-
-    //for (uint32_t i = 0; i < contactLayerNames.size(); i++) {
-    //    std::string& layerName = contactLayerNames[i];
-    //    if (layerName == "SensorNoHit") {
-    //        //Log::print<INFO>("Layer {} is {}", layerName, i);
-    //        contactLayerValue = i;
-    //    }
-    //}
-
     hCPU->gpr[3] = contactLayerValue;
-
-    //Log::print<INFO>("GetContactLayerOfAttack called by {} ({:08X}) with contact layer {} which is a value of {}", actor.name.getLE(), player, originalContactLayerStr, contactLayerValue);
 }
 
 
 void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
-
 
     if (GetSettings().GetCameraMode() == CameraMode::THIRD_PERSON)
         return;
@@ -385,21 +324,12 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
     WeaponType weaponType = weapon.type.getLE();
     if (weaponType == WeaponType::Bow || weaponType == WeaponType::Shield) {
-        //Log::print<INFO>("Skipping motion analysis for Bow/Shield (type: {}): {}", (int)weaponType, weapon.name.getLE());
         return;
     }
 
     // Weapons not currently bound to a VR hand (e.g. sheathed on back) must never
     // have their attack sensor activated, otherwise they cut grass / hit NPCs.
     bool isHandBoundWeapon = (weaponPtr == m_heldWeapons[0] || weaponPtr == m_heldWeapons[1]);
-
-    //AttackSensorInitArg arg = weapon.setupAttackSensor;
-    //std::string attackSensorInitStr;
-    //attackSensorInitStr += std::format("mode = {}, flags = {:08X}, mul = {}, scale = {}, shieldBreakPwr = {:08X}", arg.mode.getLE(), arg.flags.getLE(), arg.multiplier.getLE(), arg.scale.getLE(), arg.shieldBreakPower.getLE());
-    //attackSensorInitStr += std::format(", overrideImpact = {}, powerForPlayers = {}, impact = {}, field898 = {}, comboCount = {}, setContactLayer = {}", arg.overrideImpact.getLE(), arg.powerForPlayers.getLE(), arg.impact.getLE(), arg.unk_20.getLE(), arg.comboCount.getLE(), arg.isContactLayerInitialized.getLE());
-    //
-    //Log::print<INFO>(attackSensorInitStr.c_str());
-    //return;
 
     if (heldIndex >= m_motionAnalyzers.size()) {
         Log::print<CONTROLS>("Invalid heldIndex: {}. Skipping motion analysis.", heldIndex);
@@ -413,10 +343,8 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     }
     currFrame.ranMotionAnalysis[heldIndex] = true;
 
+    // Game's hand indexing is inverted relative to OpenXR's convention
     heldIndex = heldIndex == 0 ? 1 : 0;
-
-
-    //Log::print("!! Running weapon analysis for {}", heldIndex);
 
     auto inputs = VRManager::instance().XR->m_input.load();
     auto headset = VRManager::instance().XR->GetRenderer()->GetMiddlePose();
@@ -425,61 +353,36 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     }
 
     m_motionAnalyzers[heldIndex].ResetIfWeaponTypeChanged(weaponType);
+    m_motionAnalyzers[heldIndex].ApplyProfile(GetSettings().GetSwingSensitivity());
     m_motionAnalyzers[heldIndex].Update(inputs.shared.poseLocation[heldIndex], inputs.shared.poseVelocity[heldIndex], headset.value(), inputs.shared.inputTime);
 
-    // Use the analysed motion to determine whether the weapon is swinging or stabbing, and whether the attackSensor should be active this frame
-    bool CHEAT_alwaysEnableWeaponCollision = false;
-    if (isHandBoundWeapon && isHeldByPlayer && (m_motionAnalyzers[heldIndex].IsAttacking() || CHEAT_alwaysEnableWeaponCollision)) {
+    // Use the analysed motion to determine whether the weapon is swinging or stabbing
+    if (isHandBoundWeapon && isHeldByPlayer && m_motionAnalyzers[heldIndex].IsAttacking()) {
         m_motionAnalyzers[heldIndex].SetHitboxEnabled(true);
-        //Log::print("!! Activate sensor for {}: isHeldByPlayer={}, weaponType={}", heldIndex, isHeldByPlayer, (int)weaponType);
         weapon.setupAttackSensor.resetAttack = 1;
         weapon.setupAttackSensor.mode = 2;
         weapon.setupAttackSensor.isContactLayerInitialized = 0;
-        weapon.setupAttackSensor.shieldBreakPower = 2; // this is more like a damageType. 2 is required for trees to be chopped.
-        //weapon.setupAttackSensor.multiplier = 1; // this is multiplied by the weapon's damage number. Aka, a weapon that lists 69 is multiplied by this.
-        //weapon.setupAttackSensor.powerForPlayers = 1;
-        //weapon.setupAttackSensor.scale = 1;
+        weapon.setupAttackSensor.shieldBreakPower = 2; // damageType 2 required for chopping trees
 
-
-        //weapon.setupAttackSensor.mode = 2;
-        //weapon.setupAttackSensor.flags = 0;
-        //weapon.setupAttackSensor.multiplier = 1;
-        //weapon.setupAttackSensor.scale = 1;
-        //weapon.setupAttackSensor.shieldBreakPower = 0x01;
-        //weapon.setupAttackSensor.overrideImpact = 16;
-        //weapon.setupAttackSensor.powerForPlayers = 1;
-        //weapon.setupAttackSensor.unk_20 = 0;
-        //weapon.setupAttackSensor.comboCount = 1;
-        //weapon.setupAttackSensor.isContactLayerInitialized = 0;
-
-
-        //weapon.setupAttackSensor.overrideImpact = 1;
-        //weapon.setupAttackSensor.impact = 2312;
-        //weapon.setupAttackSensor.multiplier = 20.0f;
-        //weapon.setupAttackSensor.overrideImpact = 1;
-        //weapon.setupAttackSensor.multiplier = analyzer->GetDamage();
-        //weapon.setupAttackSensor.impact = analyzer->GetImpulse();
+        // Scale damage based on swing power (0.5x - 1.5x base weapon damage)
+        const float power = m_motionAnalyzers[heldIndex].GetSwingPower();
+        weapon.setupAttackSensor.multiplier = 0.5f + power;
 
         writeMemory(weaponPtr, &weapon);
     }
     else if (!isHandBoundWeapon || m_motionAnalyzers[heldIndex].IsHitboxEnabled()) {
         m_motionAnalyzers[heldIndex].SetHitboxEnabled(false);
-        //Log::print("!! Deactivate sensor for {}: isHeldByPlayer={}, weaponType={}", heldIndex, isHeldByPlayer, (int)weaponType);
-
         weapon.setupAttackSensor.resetAttack = 1;
         weapon.setupAttackSensor.mode = 1; // deactivate attack sensor
         weapon.setupAttackSensor.isContactLayerInitialized = 0;
         writeMemory(weaponPtr, &weapon);
     }
 
-    // rumbles
+    // Haptic feedback
     if (m_motionAnalyzers[heldIndex].IsAttacking()) {
-        float rumbleVelocity = m_motionAnalyzers[heldIndex].handVelocityLength - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD;
-        if (rumbleVelocity <= 0.0f) {
-            rumbleVelocity = 0.0f;
-        }
+        float rumbleVelocity = std::max(0.0f, m_motionAnalyzers[heldIndex].GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
 
-        static const RumbleParameters rumbleParams = {
+        const RumbleParameters rumbleParams = {
             false,
             1,
             RumbleType::Fixed,
@@ -500,17 +403,6 @@ void CemuHooks::hook_SetPlayerWeaponScale(PPCInterpreter_t* hCPU) {
     if (IsThirdPerson()) {
         return;
     }
-
-    //uint32_t weaponPtr = hCPU->gpr[31];
-    //Weapon weapon = {};
-    //readMemory(weaponPtr, &weapon);
-    //WeaponType weaponType = weapon.type.getLE();
-
-    ////Log::print<INFO>("Setting weapon scale to {} for weapon {} of type {}", weapon.originalScale.getLE(), weapon.name.getLE().c_str(), std::to_underlying(weaponType));
-    //
-    ////weapon.originalScale = glm::fvec3(0.9f, 0.9f, 0.9f);
-
-    //writeMemory(weaponPtr, &weapon);
 }
 
 void CemuHooks::hook_EquipWeapon(PPCInterpreter_t* hCPU) {
@@ -520,18 +412,8 @@ void CemuHooks::hook_EquipWeapon(PPCInterpreter_t* hCPU) {
     // Check both hands for a short press to pick up weapon
     for (int side = 0; side < 2; ++side) {
         auto& grabState = input.inGame.grabState[side];
-        // todo: Make sword smaller while its equipped. I think this might be a member value, but otherwise we can just scale the weapon matrix.
-
-        //if (input.inGame.in_game && grabState.shortPress) {
-        //    // Set the slot to equip based on which hand was pressed
-        //    hCPU->gpr[25] = side; // 0 = LEFT, 1 = RIGHT
-        //    Log::print("!! Short grip press detected on side {}: equipping weapon", side);
-        //    grabState.shortPress = false; // Reset after use
-        //    return;
-        //}
     }
     // Default behavior if no short press
-    // (leave as is, or add fallback logic if needed)
 }
 
 

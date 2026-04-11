@@ -78,6 +78,7 @@ public:
     void d3d12TransitionLayout(ID3D12GraphicsCommandList* cmdList, D3D12_RESOURCE_STATES state);
 
     ID3D12Resource* d3d12GetTexture() const { return m_d3d12Texture.Get(); }
+    ID3D12Fence* d3d12GetFence() const { return m_d3d12Fence.Get(); }
     DXGI_FORMAT d3d12GetFormat() const { return m_d3d12Format; }
 
     uint64_t GetLastSignalledValue() const { return m_fenceLastSignaledValue; }
@@ -85,7 +86,6 @@ public:
 
 protected:
     void SetLastSignalledValue(uint64_t value) {
-        // Track signal/wait pattern for debugging
         static uint32_t s_signalCount = 0;
         s_signalCount++;
         if (s_signalCount % 500 == 0 || m_fenceLastSignaledValue == value) {

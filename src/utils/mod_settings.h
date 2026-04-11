@@ -531,6 +531,12 @@ enum class PerformanceOverlayMode : int32_t {
     WINDOW_AND_VR = 2,
 };
 
+enum class SwingSensitivity : int32_t {
+    SWING_RELAXED = 0,
+    SWING_NORMAL = 1,
+    SWING_STRICT = 2,
+};
+
 struct ModSettings {
     static const char* toString(EventMode eventMode) {
         switch (eventMode) {
@@ -656,6 +662,32 @@ struct ModSettings {
         }
     }
 
+    static const char* toString(SwingSensitivity sensitivity) {
+        switch (sensitivity) {
+            case SwingSensitivity::SWING_RELAXED:
+                return "SWING_RELAXED";
+            case SwingSensitivity::SWING_NORMAL:
+                return "SWING_NORMAL";
+            case SwingSensitivity::SWING_STRICT:
+                return "STRICT";
+            default:
+                return "";
+        }
+    }
+
+    static const char* toDisplayString(SwingSensitivity sensitivity) {
+        switch (sensitivity) {
+            case SwingSensitivity::SWING_RELAXED:
+                return "Relaxed (Easier Swings)";
+            case SwingSensitivity::SWING_NORMAL:
+                return "Normal";
+            case SwingSensitivity::SWING_STRICT:
+                return "Strict (Fewer False Positives)";
+            default:
+                return "";
+        }
+    }
+
     static constexpr float kDefaultAxisThreshold = 0.5f;
     static constexpr float kDefaultStickDeadzone = 0.15f;
 
@@ -686,6 +718,7 @@ struct ModSettings {
     // Input settings
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
     FloatSetting<float> stickDeadzone = FloatSetting<float>("StickDeadzone", kDefaultStickDeadzone, 0.0f, 1.0f);
+    EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_RELAXED, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_STRICT });
 
     auto GetOptions() {
         return std::to_array<ModSettingBase*>({ 
@@ -708,7 +741,8 @@ struct ModSettings {
             &bootDirectlyIntoGame,
             &bootDirectlyTitleId,
             &axisThreshold,
-            &stickDeadzone 
+            &stickDeadzone,
+            &swingSensitivity
         });
     }
 
@@ -738,6 +772,7 @@ struct ModSettings {
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
+    SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
 
     // By default BotW's camera uses 0.1f for near plane and 25000.0f for far plane, except maybe some indoor areas? But for simplicity, we'll use the default values everywhere.
     float GetZNear() const { return 0.1f; }
@@ -761,6 +796,7 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Performance Overlay Frequency: {} Hz\n", uint32_t(performanceOverlayFrequency));
         std::format_to(std::back_inserter(buffer), " - Stick Direction Threshold: {}\n", float(axisThreshold));
         std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
+        std::format_to(std::back_inserter(buffer), " - Swing Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
         return buffer;
     }
 };

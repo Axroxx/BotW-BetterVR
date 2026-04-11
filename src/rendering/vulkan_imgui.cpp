@@ -813,6 +813,10 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                         DrawSettingRow("Stick Direction Threshold", [&]() {
                             settings.axisThreshold.AddToGUI(&changed, windowWidth.x, 0.1f, 0.9f);
                         });
+
+                        DrawSettingRow("Swing Sensitivity", [&]() {
+                            settings.swingSensitivity.AddRadioToGUI(&changed, ModSettings::toDisplayString);
+                        });
                     }
                     else {
                         ImGui::Text("");
