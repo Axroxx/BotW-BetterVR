@@ -3,7 +3,7 @@ add_library(BetterVR_Layer SHARED)
 file(GENERATE OUTPUT "$<TARGET_FILE_DIR:BetterVR_Layer>/BetterVR_Layer.json" INPUT "${CMAKE_SOURCE_DIR}/resources/BetterVR_Layer.json")
 
 set_target_properties(BetterVR_Layer PROPERTIES
-    VS_DEBUGGER_COMMAND "${CMAKE_INSTALL_PREFIX}/Cemu_relwithdebinfo.exe"
+    VS_DEBUGGER_COMMAND "${CMAKE_INSTALL_PREFIX}/Cemu.exe"
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_INSTALL_PREFIX}"
     VS_DEBUGGER_ENVIRONMENT "ENABLE_BETTERVR_MOD=1"
 )

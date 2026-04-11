@@ -1,0 +1,43 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BetterVR_Launcher.exe (Install)",
+      "name": "Run BetterVR With Meta XR Simulator Runtime",
+      "environment": [
+        {
+          "name": "XR_RUNTIME_JSON",
+          "value": "${env.META_XR_SIMULATOR_PATH}/meta_openxr_simulator.json"
+        },
+        {
+          "name": "VK_LOADER_DEBUG",
+          "value": "all"
+        }
+      ]
+    },
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BetterVR_Launcher.exe (Install)",
+      "name": "Run BetterVR With Meta XR Simulator Runtime (interpreter)",
+      "args": [
+        "--force-multicore-interpreter"
+      ],
+      "environment": [
+        {
+          "name": "XR_RUNTIME_JSON",
+          "value": "${env.META_XR_SIMULATOR_PATH}/meta_openxr_simulator.json"
+        }
+      ]
+    },
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BetterVR_Launcher.exe (Install)",
+      "name": "Run BetterVR Using Default OpenXR Runtime"
+    }
+  ]
+}
