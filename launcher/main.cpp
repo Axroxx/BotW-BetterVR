@@ -391,25 +391,61 @@ static bool RemoveInstalledAssets(const LauncherPaths& paths) {
 }
 
 static bool ReplaceRuleValue(std::string& contents, const std::string& key, const std::string& value) {
-    const std::string needle = key + " = ";
-    const size_t lineStart = contents.find(needle);
-    if (lineStart == std::string::npos) {
-        return false;
+    bool replacedAny = false;
+    size_t searchPosition = 0;
+
+    while (searchPosition < contents.size()) {
+        const size_t lineStart = searchPosition;
+        size_t lineEnd = contents.find_first_of("\r\n", lineStart);
+        if (lineEnd == std::string::npos) {
+            lineEnd = contents.size();
+        }
+
+        const std::string_view line(contents.data() + lineStart, lineEnd - lineStart);
+        const size_t keyStart = line.find_first_not_of(" \t");
+        if (keyStart != std::string_view::npos && line.compare(keyStart, key.size(), key) == 0) {
+            const size_t separatorStart = line.find_first_not_of(" \t", keyStart + key.size());
+            if (separatorStart != std::string_view::npos && line[separatorStart] == '=') {
+                const std::string replacement = std::string(line.substr(0, keyStart)) + key + " = " + value;
+                contents.replace(lineStart, lineEnd - lineStart, replacement);
+                lineEnd = lineStart + replacement.size();
+                replacedAny = true;
+            }
+        }
+
+        if (lineEnd == contents.size()) {
+            break;
+        }
+
+        if (contents[lineEnd] == '\r' && lineEnd + 1 < contents.size() && contents[lineEnd + 1] == '\n') {
+            searchPosition = lineEnd + 2;
+        }
+        else {
+            searchPosition = lineEnd + 1;
+        }
     }
 
-    size_t lineEnd = contents.find_first_of("\r\n", lineStart);
-    if (lineEnd == std::string::npos) {
-        lineEnd = contents.size();
-    }
-
-    contents.replace(lineStart, lineEnd - lineStart, needle + value);
-    return true;
+    return replacedAny;
 }
 
 static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResult& probeResult) {
     if (!fs::exists(paths.downloadedGraphicsRules)) {
         LogLine("Downloaded BOTW Graphics rules were not found: " + Narrow(paths.downloadedGraphicsRules));
         return;
+    }
+
+    std::error_code backupEc;
+    if (!fs::exists(paths.backupGraphicsRules, backupEc)) {
+        fs::copy_file(paths.downloadedGraphicsRules, paths.backupGraphicsRules, backupEc);
+        if (backupEc) {
+            LogLine("Failed to back up BOTW Graphics rules: " + backupEc.message());
+        }
+        else {
+            LogLine("Backed up BOTW Graphics rules to: " + Narrow(paths.backupGraphicsRules));
+        }
+    }
+    else {
+        LogLine("Backup already exists (previous session may not have cleaned up): " + Narrow(paths.backupGraphicsRules));
     }
 
     std::ifstream input(paths.downloadedGraphicsRules, std::ios::binary);
@@ -419,16 +455,26 @@ static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResu
     }
 
     std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    bool changed = false;
+    input.close();
 
+    bool coreVarsFound = false;
     if (probeResult.leftWidth != 0 && probeResult.leftHeight != 0) {
-        changed |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeWidth", std::to_string(probeResult.leftWidth));
-        changed |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeHeight", std::to_string(probeResult.leftHeight));
+        coreVarsFound |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeWidth", std::to_string(probeResult.leftWidth));
+        coreVarsFound |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeHeight", std::to_string(probeResult.leftHeight));
     }
-    changed |= ReplaceRuleValue(contents, "$betterVRExposeVROptions:int", "1");
+    coreVarsFound |= ReplaceRuleValue(contents, "$betterVRExposeVROptions:int", "1");
 
-    if (!changed) {
-        LogLine("No BetterVR-managed BOTW Graphics variables were found yet");
+    if (!coreVarsFound) {
+        LogLine("No BetterVR-managed BOTW Graphics variables were found");
+        MessageBoxA(
+            nullptr,
+            "Your BotW Graphics graphic pack doesn't have BetterVR support yet.\n\n"
+            "Please update your graphic packs in Cemu:\n"
+            "Options > Download community graphic packs\n\n"
+            "VR will still work, but the resolution may not be optimized for your headset.",
+            "BetterVR Launcher",
+            MB_OK | MB_ICONWARNING
+        );
         return;
     }
 
@@ -456,6 +502,21 @@ static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResu
     }
 
     LogLine("Patched BOTW Graphics rules: " + Narrow(paths.downloadedGraphicsRules));
+}
+
+static void RestoreGraphicsRules(const LauncherPaths& paths) {
+    std::error_code ec;
+    if (!fs::exists(paths.backupGraphicsRules, ec)) {
+        return;
+    }
+    
+    fs::copy_file(paths.backupGraphicsRules, paths.downloadedGraphicsRules, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        LogLine("Failed to restore BOTW Graphics rules from backup: " + ec.message());
+    }
+    else {
+        LogLine("Restored BOTW Graphics rules from backup");
+    }
 }
 
 static std::string Trim(std::string value) {
@@ -708,6 +769,7 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         if (uninstallRequested) {
+            RestoreGraphicsRules(paths);
             if (!RemoveInstalledAssets(paths)) {
                 ShowErrorMessage("BetterVR uninstall did not complete cleanly. Check BetterVR.txt for details.");
                 return 1;
@@ -745,6 +807,7 @@ int wmain(int argc, wchar_t** argv) {
         const int exitCode = LaunchCemuAndWait(paths, forwardedArgs);
 
         EmbedCemuLog(paths);
+        RestoreGraphicsRules(paths);
 
         if (!keepInstalled) {
             LogLine("Cleaning up installed assets after Cemu exit...");

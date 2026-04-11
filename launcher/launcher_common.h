@@ -29,6 +29,7 @@ struct LauncherPaths {
     fs::path targetBase;
     fs::path targetPack;
     fs::path downloadedGraphicsRules;
+    fs::path backupGraphicsRules;
     fs::path launcherLog;
     fs::path updateIgnoreFile;
     fs::path runtimeLayerDll;
@@ -160,7 +161,8 @@ inline LauncherPaths DetectPaths() {
     }
 
     paths.targetPack = paths.targetBase / fs::path("BreathOfTheWild_BetterVR");
-    paths.downloadedGraphicsRules = paths.targetBase / "graphicPacks" / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt";
+    paths.downloadedGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt";
+    paths.backupGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt.bettervr.backup";
     paths.runtimeLayerDll = paths.targetPack / "BetterVR_Layer.dll";
     paths.runtimeLayerJson = paths.targetPack / "BetterVR_Layer.json";
     return paths;

@@ -59,3 +59,5 @@ src/rendering/vc140.pdb
 enc_temp_folder/
 
 BetterVR.zip
+
+compile_commands.json
