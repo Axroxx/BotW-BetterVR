@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "d3d12.h"
 #include "instance.h"
 #include "texture.h"
@@ -72,7 +74,7 @@ RND_D3D12::~RND_D3D12() {
 }
 
 template <bool depth>
-RND_D3D12::PresentPipeline<depth>::PresentPipeline(RND_Renderer* pRenderer) {
+RND_D3D12::PresentPipeline<depth>::PresentPipeline(RND_Renderer* pRenderer): m_renderer(pRenderer) {
     // This needs to know the format of the swapchain images, thus needs to wait until the swapchain images are created
     m_vertexShader = D3D12Utils::CompileShader(depth ? presentDepthHLSL : presentHLSL, "VSMain", "vs_5_1");
     m_pixelShader = D3D12Utils::CompileShader(depth ? presentDepthHLSL : presentHLSL, "PSMain", "ps_5_1");
@@ -90,24 +92,15 @@ RND_D3D12::PresentPipeline<depth>::PresentPipeline(RND_Renderer* pRenderer) {
             }
         };
 
-        D3D12_ROOT_PARAMETER rootParams[] = {
-            {
-                D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-                {
-                    (UINT)std::size(pixelRange),
-                    pixelRange,
-                },
-                D3D12_SHADER_VISIBILITY_PIXEL
-            },
-            {
-                D3D12_ROOT_PARAMETER_TYPE_CBV,
-                {
-                    1,
-                    0
-                },
-                D3D12_SHADER_VISIBILITY_ALL
-            }
-        };
+        D3D12_ROOT_PARAMETER rootParams[2] = {};
+        rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[0].DescriptorTable.NumDescriptorRanges = (UINT)std::size(pixelRange);
+        rootParams[0].DescriptorTable.pDescriptorRanges = pixelRange;
+        rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[1].Descriptor.ShaderRegister = 1;
+        rootParams[1].Descriptor.RegisterSpace = 0;
+        rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         // clang-format on
 
         D3D12_STATIC_SAMPLER_DESC textureSampler = {
@@ -236,31 +229,39 @@ void RND_D3D12::PresentPipeline<depth>::BindDepthTarget(ID3D12Resource* dstTextu
 
 template <bool depth>
 void RND_D3D12::PresentPipeline<depth>::BindSettings(float screenWidth, float screenHeight) {
-    ComPtr<ID3D12Resource> newSettingsStaging;
-    ComPtr<ID3D12CommandAllocator> newSettingsAllocator;
-    {
-        ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
-        ID3D12CommandQueue* queue = VRManager::instance().D3D12->GetCommandQueue();
-        device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&newSettingsAllocator));
-        RND_D3D12::CommandContext<true> uploadBufferContext(device, queue, newSettingsAllocator.Get(), [this, device, &newSettingsStaging, screenWidth, screenHeight](RND_D3D12::CommandContext<true>* context) {
-            m_settingsBuffer = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_DEFAULT, sizeof(presentSettings));
+    m_renderWidth = screenWidth;
+    m_renderHeight = screenHeight;
+    m_settingsBuffer = D3D12Utils::CreateConstantBuffer(VRManager::instance().D3D12->GetDevice(), D3D12_HEAP_TYPE_UPLOAD, sizeof(presentSettings));
+}
 
-            newSettingsStaging = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(presentSettings));
-            void* data;
-            const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
-            checkHResult(newSettingsStaging->Map(0, &readRange, &data), "Failed to map memory for screen indices buffer!");
-            presentSettings settings = {
-                .renderWidth = screenWidth,
-                .renderHeight = screenHeight,
-                .swapchainWidth = screenWidth,
-                .swapchainHeight = screenHeight,
-            };
-            memcpy(data, &settings, sizeof(presentSettings));
-            newSettingsStaging->Unmap(0, nullptr);
+template <bool depth>
+void RND_D3D12::PresentPipeline<depth>::UpdateSettingsBuffer(ID3D12Resource* swapchain) {
+    presentSettings settings = {
+        .renderWidth = m_renderWidth,
+        .renderHeight = m_renderHeight,
+        .swapchainWidth = static_cast<float>(swapchain->GetDesc().Width),
+        .swapchainHeight = static_cast<float>(swapchain->GetDesc().Height),
+        .customFadeAmount = 0.0f,
+        .customFadeColorR = 0.0f,
+        .customFadeColorG = 0.0f,
+        .customFadeColorB = 0.0f,
+        .isFadeActive = 0.0f,
+    };
 
-            context->GetRecordList()->CopyBufferRegion(m_settingsBuffer.Get(), 0, newSettingsStaging.Get(), 0, sizeof(presentSettings));
-        });
+    if constexpr (depth) {
+        const RND_Renderer::CustomFade fade = m_renderer != nullptr ? m_renderer->GetCustomFade() : RND_Renderer::CustomFade{};
+        settings.customFadeAmount = fade.amount;
+        settings.customFadeColorR = fade.color.x;
+        settings.customFadeColorG = fade.color.y;
+        settings.customFadeColorB = fade.color.z;
+        settings.isFadeActive = m_renderer != nullptr && m_renderer->IsFadeActive() ? 1.0f : 0.0f;
     }
+
+    void* data = nullptr;
+    const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
+    checkHResult(m_settingsBuffer->Map(0, &readRange, &data), "Failed to map memory for present settings buffer!");
+    memcpy(data, &settings, sizeof(settings));
+    m_settingsBuffer->Unmap(0, nullptr);
 }
 
 template <bool depth>
@@ -354,6 +355,7 @@ void RND_D3D12::PresentPipeline<depth>::Render(ID3D12GraphicsCommandList* cmdLis
 
     // set settings
     checkAssert(m_settingsBuffer != nullptr, "Failed to present texture since graphics pipeline hasn't bound some settings yet!");
+    UpdateSettingsBuffer(swapchain);
     cmdList->SetGraphicsRootConstantBufferView(1, m_settingsBuffer->GetGPUVirtualAddress());
 
     // set shared texture

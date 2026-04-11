@@ -95,11 +95,22 @@ void RND_Renderer::EndFrame() {
     }
 
     if (frameIdx != -1) {
+        if (m_layer2D) {
+            m_layer2D->StartRendering();
+            m_layer2D->Render(frameIdx);
+            layer2DQuads = m_layer2D->FinishRendering(m_frameState.predictedDisplayTime, frameIdx);
+            m_presented2DLastFrame = true;
+        }
+
+        // check whether there's a fade screen that we have to apply for the 3D layer
+        SharedTexture* fadeTexture = m_layer2D ? m_layer2D->GetSharedTextures()[frameIdx].get() : nullptr;
+        m_isFadeActive.store(CemuHooks::IsAnyFadeScreenVisible(), std::memory_order_relaxed);
+
         if (m_layer3D) {
             if (m_renderFrames[frameIdx].Is3DComplete()) {
                 m_layer3D->StartRendering();
-                m_layer3D->Render(OpenXR::EyeSide::LEFT, frameIdx);
-                m_layer3D->Render(OpenXR::EyeSide::RIGHT, frameIdx);
+                m_layer3D->Render(OpenXR::EyeSide::LEFT, frameIdx, fadeTexture);
+                m_layer3D->Render(OpenXR::EyeSide::RIGHT, frameIdx, fadeTexture);
                 layer3DViews = m_layer3D->FinishRendering(frameIdx);
                 layer3D.layerFlags = 0;
                 layer3D.space = VRManager::instance().XR->m_stageSpace;
@@ -118,14 +129,9 @@ void RND_Renderer::EndFrame() {
             }
         }
 
-        if (m_layer2D) {
-            m_layer2D->StartRendering();
-            m_layer2D->Render(frameIdx);
-            layer2DQuads = m_layer2D->FinishRendering(m_frameState.predictedDisplayTime, frameIdx);
-            m_presented2DLastFrame = true;
-            for (auto& layer : layer2DQuads) {
-                compositionLayers.emplace_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
-            }
+        // add 2D layer after 3D layer so that it appears on top
+        for (auto& layer : layer2DQuads) {
+            compositionLayers.emplace_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
         }
 
         m_renderFrames[frameIdx].Reset();
@@ -261,15 +267,16 @@ void RND_Renderer::Layer3D::StartRendering() {
     this->m_depthSwapchains[OpenXR::EyeSide::RIGHT]->StartRendering();
 }
 
-void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx) {
+void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture) {
     ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
     ID3D12CommandQueue* queue = VRManager::instance().D3D12->GetCommandQueue();
     ID3D12CommandAllocator* allocator = VRManager::instance().D3D12->GetFrameAllocator();
 
-    RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, side, frameIdx](RND_D3D12::CommandContext<false>* context) {
+    RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, side, frameIdx, fadeTexture](RND_D3D12::CommandContext<false>* context) {
         context->GetRecordList()->SetName(L"RenderSharedTexture");
         auto& texture = m_textures[side][frameIdx];
         auto& depthTexture = m_depthTextures[side][frameIdx];
+        checkAssert(fadeTexture != nullptr, "Layer3D fade texture is missing!");
 
         context->WaitFor(texture.get(), texture->GetD3D12WaitValue());
         context->WaitFor(depthTexture.get(), depthTexture->GetD3D12WaitValue());
@@ -278,6 +285,7 @@ void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx) {
 
         m_presentPipelines[side]->BindAttachment(0, texture->d3d12GetTexture());
         m_presentPipelines[side]->BindAttachment(1, depthTexture->d3d12GetTexture(), DXGI_FORMAT_R32_FLOAT);
+        m_presentPipelines[side]->BindAttachment(2, fadeTexture->d3d12GetTexture());
         m_presentPipelines[side]->BindTarget(0, m_swapchains[side]->GetTexture(), m_swapchains[side]->GetFormat());
         m_presentPipelines[side]->BindDepthTarget(m_depthSwapchains[side]->GetTexture(), m_depthSwapchains[side]->GetFormat());
         m_presentPipelines[side]->Render(context->GetRecordList(), m_swapchains[side]->GetTexture());

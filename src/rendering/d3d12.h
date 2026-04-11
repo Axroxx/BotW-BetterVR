@@ -2,6 +2,8 @@
 
 #include "openxr.h"
 
+class RND_Renderer;
+
 class RND_D3D12 {
     friend class RND_Renderer;
 
@@ -47,6 +49,12 @@ public:
         void Render(ID3D12GraphicsCommandList* commandList, ID3D12Resource* swapchain);
 
     private:
+        void UpdateSettingsBuffer(ID3D12Resource* swapchain);
+
+        RND_Renderer* m_renderer = nullptr;
+        float m_renderWidth = 0.0f;
+        float m_renderHeight = 0.0f;
+
         void RecreatePipeline();
 
         ComPtr<ID3DBlob> m_vertexShader;
@@ -60,7 +68,7 @@ public:
         ComPtr<ID3D12RootSignature> m_signature;
         ComPtr<ID3D12PipelineState> m_pipelineState;
 
-        std::array<D3D12_CPU_DESCRIPTOR_HANDLE, depth ? 2 : 1> m_attachmentHandles = {};
+        std::array<D3D12_CPU_DESCRIPTOR_HANDLE, depth ? 3 : 1> m_attachmentHandles = {};
         std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 1> m_targetHandles = {};
         std::array<D3D12_CPU_DESCRIPTOR_HANDLE, depth ? 1 : 0> m_depthTargetHandles = {};
         ComPtr<ID3D12DescriptorHeap> m_attachmentHeap;

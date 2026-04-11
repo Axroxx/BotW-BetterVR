@@ -120,7 +120,7 @@ public:
         SharedTexture* CopyDepthToLayer(OpenXR::EyeSide side, VkCommandBuffer copyCmdBuffer, VkImage image, long frameIdx);
         void PrepareRendering(OpenXR::EyeSide side);
         void StartRendering();
-        void Render(OpenXR::EyeSide side, long frameIdx);
+        void Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture);
         const std::array<XrCompositionLayerProjectionView, 2>& FinishRendering(long frameIdx);
 
         float GetAspectRatio(OpenXR::EyeSide side) const { return m_recommendedAspectRatios[side]; }
@@ -223,6 +223,34 @@ public:
         m_cameraIsCapturing3DFrameBuffer = 1;
     }
 
+    void SetCustomFadeAmount(float amount) {
+        m_customFadeAmount.store(glm::clamp(amount, 0.0f, 1.0f), std::memory_order_relaxed);
+    }
+
+    void SetCustomFadeColor(const glm::fvec3& color) {
+        m_customFadeColorR.store(glm::clamp(color.x, 0.0f, 1.0f), std::memory_order_relaxed);
+        m_customFadeColorG.store(glm::clamp(color.y, 0.0f, 1.0f), std::memory_order_relaxed);
+        m_customFadeColorB.store(glm::clamp(color.z, 0.0f, 1.0f), std::memory_order_relaxed);
+    }
+
+    struct CustomFade {
+        float amount = 0.0f;
+        glm::fvec3 color = glm::fvec3(0.0f);
+    };
+
+    CustomFade GetCustomFade() const {
+        return {
+            .amount = m_customFadeAmount.load(std::memory_order_relaxed),
+            .color = {
+                m_customFadeColorR.load(std::memory_order_relaxed),
+                m_customFadeColorG.load(std::memory_order_relaxed),
+                m_customFadeColorB.load(std::memory_order_relaxed),
+            },
+        };
+    }
+
+    bool IsFadeActive() const { return m_isFadeActive.load(std::memory_order_relaxed); }
+
 protected:
     XrSession m_session;
     XrFrameState m_frameState = { XR_TYPE_FRAME_STATE };
@@ -232,6 +260,11 @@ protected:
     std::atomic_bool m_isInitialized = false;
     std::atomic_bool m_presented2DLastFrame = false;
     std::atomic_uint8_t m_cameraIsCapturing3DFrameBuffer = 0;
+    std::atomic_bool m_isFadeActive = false;
+    std::atomic<float> m_customFadeAmount = 0.0f;
+    std::atomic<float> m_customFadeColorR = 0.0f;
+    std::atomic<float> m_customFadeColorG = 0.0f;
+    std::atomic<float> m_customFadeColorB = 0.0f;
 
     // Full-frame timing derived from OpenXR timestamps (XrTime is in nanoseconds)
     XrTime m_lastPredictedDisplayTime = 0;
