@@ -2,7 +2,6 @@
 
 #include "d3d12.h"
 #include "instance.h"
-#include "texture.h"
 #include "utils/d3d12_utils.h"
 
 #include "shader.h"

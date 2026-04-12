@@ -234,7 +234,7 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                         // render imgui, and then copy the framebuffer to the 2D layer
                         imguiOverlay->Update();
                         imguiOverlay->Render(frameIdx, false);
-                        imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx);
+                        imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, false);
                         VulkanUtils::DebugPipelineBarrier(commandBuffer);
                     }
 
@@ -257,7 +257,7 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                     // render imgui, and then copy the framebuffer to the 2D layer
                     imguiOverlay->Render(frameIdx, true);
                     imguiOverlay->Update();
-                    imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx);
+                    imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, true);
 
                     // Clear debug draw primitives now that both eyes have been rendered
                     DebugDraw::instance().Clear();

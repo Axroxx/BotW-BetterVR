@@ -279,63 +279,95 @@ RND_Renderer::ImGuiOverlay::~ImGuiOverlay() {
     ImGui::DestroyContext();
 }
 
+static ImVec4 CalculateCenteredAspectRegion(const ImVec2& bounds, float targetAspect = 16.0f / 9.0f) {
+    ImVec4 region = ImVec4(0.0f, 0.0f, bounds.x, bounds.y);
+
+    if (bounds.x <= 0.0f || bounds.y <= 0.0f) {
+        return region;
+    }
+
+    float width = bounds.x;
+    float height = width / targetAspect;
+    if (height > bounds.y) {
+        height = bounds.y;
+        width = height * targetAspect;
+    }
+
+    region = ImVec4((bounds.x - width) * 0.5f, (bounds.y - height) * 0.5f, width, height);
+    return region;
+}
+
+static void TransformDrawList(ImDrawList* drawList, const ImVec2& scale, const ImVec2& offset) {
+    for (auto& vert : drawList->VtxBuffer) {
+        vert.pos.x = vert.pos.x * scale.x + offset.x;
+        vert.pos.y = vert.pos.y * scale.y + offset.y;
+    }
+
+    for (auto& cmd : drawList->CmdBuffer) {
+        cmd.ClipRect.x = cmd.ClipRect.x * scale.x + offset.x;
+        cmd.ClipRect.y = cmd.ClipRect.y * scale.y + offset.y;
+        cmd.ClipRect.z = cmd.ClipRect.z * scale.x + offset.x;
+        cmd.ClipRect.w = cmd.ClipRect.w * scale.y + offset.y;
+    }
+}
+
+
 void RND_Renderer::ImGuiOverlay::Update() {
     ImGui::GetIO().FontGlobalScale = 1.0f;
+    auto& io = ImGui::GetIO();
 
     POINT p;
     GetCursorPos(&p);
     ScreenToClient(CemuHooks::m_cemuRenderWindow, &p);
 
-    // calculate how many client side pixels are used on the border since its not a 16:9 aspect ratio
     RECT rect;
     GetClientRect(CemuHooks::m_cemuRenderWindow, &rect);
-    uint32_t nonCenteredWindowWidth = rect.right - rect.left;
-    uint32_t nonCenteredWindowHeight = rect.bottom - rect.top;
+    uint32_t windowWidth = rect.right - rect.left;
+    uint32_t windowHeight = rect.bottom - rect.top;
 
-    // calculate window size without black bars due to a non-16:9 aspect ratio
-    uint32_t renderPhysicalWidth = nonCenteredWindowWidth;
-    uint32_t renderPhysicalHeight = nonCenteredWindowHeight;
-    if (nonCenteredWindowWidth * 9 > nonCenteredWindowHeight * 16) {
-        renderPhysicalWidth = nonCenteredWindowHeight * 16 / 9;
+    float fbAspect = (float)m_outputRes.width / (float)m_outputRes.height;
+
+    // calculate the area within the window that Cemu uses to display the VR framebuffer
+    uint32_t renderPhysicalWidth = windowWidth;
+    uint32_t renderPhysicalHeight = windowHeight;
+    if ((float)windowWidth / (float)windowHeight > fbAspect) {
+        renderPhysicalWidth = (uint32_t)(windowHeight * fbAspect);
     }
     else {
-        renderPhysicalHeight = nonCenteredWindowWidth * 9 / 16;
+        renderPhysicalHeight = (uint32_t)(windowWidth / fbAspect);
     }
-    ImVec2 physicalRes = ImVec2(renderPhysicalWidth, renderPhysicalHeight);
+    ImVec2 physicalRes = ImVec2((float)renderPhysicalWidth, (float)renderPhysicalHeight);
     ImVec2 framebufferRes = ImVec2((float)m_outputRes.width, (float)m_outputRes.height);
+    ImVec4 physicalUiRegion = CalculateCenteredAspectRegion(physicalRes);
+    ImVec4 framebufferUiRegion = CalculateCenteredAspectRegion(framebufferRes);
 
-    // calculate a virtual resolution to keep UI size consistent
-    float uiScaleFactor = (float)renderPhysicalHeight / 1080.0f;
-    uiScaleFactor = std::max(uiScaleFactor, 0.1f);
+    // keep a shared 16:9 canvas with a 1080p minimum menu size
+    float uiScaleFactor = std::max(physicalUiRegion.w / 1080.0f, 1.0f);
 
     uiScaleFactor *= 2.0f;
 
-    ImVec2 logicalRes = ImVec2(physicalRes.x / uiScaleFactor, physicalRes.y / uiScaleFactor);
+    ImVec2 logicalRes = ImVec2(framebufferUiRegion.z / uiScaleFactor, framebufferUiRegion.w / uiScaleFactor);
 
-    ImGui::GetIO().DisplaySize = logicalRes;
+    io.DisplaySize = logicalRes;
 
-    // calculate the black bars
-    uint32_t blackBarWidth = (nonCenteredWindowWidth - renderPhysicalWidth) / 2;
-    uint32_t blackBarHeight = (nonCenteredWindowHeight - renderPhysicalHeight) / 2;
+    uint32_t blackBarWidth = (windowWidth - renderPhysicalWidth) / 2;
+    uint32_t blackBarHeight = (windowHeight - renderPhysicalHeight) / 2;
 
-    // adjust the framebuffer scale
-    ImGui::GetIO().DisplayFramebufferScale = framebufferRes / logicalRes;
+    io.DisplayFramebufferScale = framebufferRes / logicalRes;
 
-    // the actual window is centered, so add offsets to both x and y on both sides
-    p.x = p.x - blackBarWidth;
-    p.y = p.y - blackBarHeight;
+    ImVec2 physicalMenuScale = ImVec2(physicalUiRegion.z / logicalRes.x, physicalUiRegion.w / logicalRes.y);
 
-    // update mouse controls and keyboard input
+    // map desktop cursor input into the centered 16:9 menu region
+    p.x = p.x - blackBarWidth - (LONG)physicalUiRegion.x;
+    p.y = p.y - blackBarHeight - (LONG)physicalUiRegion.y;
+
     bool isWindowFocused = CemuHooks::m_cemuTopWindow == GetForegroundWindow();
-
-    //ImGui::GetIO().AddFocusEvent(true);
     if (isWindowFocused) {
-        // update mouse state depending on if the window is focused
-        ImGui::GetIO().AddMousePosEvent((float)p.x / uiScaleFactor, (float)p.y / uiScaleFactor);
+        io.AddMousePosEvent((float)p.x / physicalMenuScale.x, (float)p.y / physicalMenuScale.y);
 
-        ImGui::GetIO().AddMouseButtonEvent(0, GetAsyncKeyState(VK_LBUTTON) & 0x8000);
-        ImGui::GetIO().AddMouseButtonEvent(1, GetAsyncKeyState(VK_RBUTTON) & 0x8000);
-        ImGui::GetIO().AddMouseButtonEvent(2, GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+        io.AddMouseButtonEvent(0, GetAsyncKeyState(VK_LBUTTON) & 0x8000);
+        io.AddMouseButtonEvent(1, GetAsyncKeyState(VK_RBUTTON) & 0x8000);
+        io.AddMouseButtonEvent(2, GetAsyncKeyState(VK_MBUTTON) & 0x8000);
     }
 
     if (GetSettings().ShowDebugOverlay() && isWindowFocused) {
@@ -343,93 +375,60 @@ void RND_Renderer::ImGuiOverlay::Update() {
     }
 }
 
-constexpr ImGuiWindowFlags FULLSCREEN_WINDOW_FLAGS = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus;
-
 void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground) {
     auto* renderer = VRManager::instance().XR->GetRenderer();
     auto& frame = renderer->GetFrame(frameIdx);
 
-    // calculate width minus the retina scaling
     ImVec2 windowSize = ImGui::GetIO().DisplaySize;
-    //ImVec2 renderScale = ImGui::GetIO().DisplayFramebufferScale;
-    //ImVec2 imageScale = windowSize * renderScale;
-    //ImVec2 viewportWorkSize = ImGui::GetMainViewport()->WorkSize;
-    //ImVec2 framebufferSize = ImVec2(m_outputRes.width, m_outputRes.height);
-    //Log::print<INFO>("Window Size = {}x{} - Work Size = {}x{}", windowSize.x, windowSize.y, viewportWorkSize.x, viewportWorkSize.y);
+    ImDrawList* backgroundDrawList = ImGui::GetBackgroundDrawList();
 
-    auto renderHUDBackground = [&](bool withAlpha) {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(windowSize);
+    auto renderHUDBackground = [&](bool withAlpha, bool centerTo16x9) {
+        ImVec2 hudPos = ImVec2(0, 0);
+        ImVec2 hudSize = windowSize;
 
-        ImGui::Begin("HUD Background", nullptr, FULLSCREEN_WINDOW_FLAGS);
-        ImGui::Image((ImTextureID)(withAlpha ? frame.hudFramebufferDS : frame.hudWithoutAlphaFramebufferDS), windowSize);
-        ImGui::End();
+        if (centerTo16x9) {
+            ImVec2 framebufferRes = ImVec2((float)m_outputRes.width, (float)m_outputRes.height);
+            ImVec4 framebufferUiRegion = CalculateCenteredAspectRegion(framebufferRes);
+            ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
 
-        ImGui::PopStyleVar();
-        ImGui::PopStyleVar();
+            hudPos = ImVec2(framebufferUiRegion.x / fbScale.x, framebufferUiRegion.y / fbScale.y);
+            hudSize = ImVec2(framebufferUiRegion.z / fbScale.x, framebufferUiRegion.w / fbScale.y);
+        }
+
+        backgroundDrawList->AddImage((ImTextureID)(withAlpha ? frame.hudFramebufferDS : frame.hudWithoutAlphaFramebufferDS), hudPos, ImVec2(hudPos.x + hudSize.x, hudPos.y + hudSize.y));
     };
 
     if (renderBackground || CemuHooks::UseBlackBarsDuringEvents()) {
-        const bool shouldCrop3DTo16_9 = GetSettings().cropFlatTo16x9 == 1;
-
         bool shouldRender3DBackground = VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx) || CemuHooks::UseBlackBarsDuringEvents();
         bool shouldRenderHUDWithAlpha = shouldRender3DBackground && !CemuHooks::UseBlackBarsDuringEvents();
 
-        renderHUDBackground(shouldRenderHUDWithAlpha);
-
         if (shouldRender3DBackground) {
-            // center position using aspect ratio
-            ImVec2 centerPos = ImVec2((windowSize.x - windowSize.y * frame.mainFramebufferAspectRatio) / 2, 0);
-            ImVec2 squishedWindowSize = ImVec2(windowSize.y * frame.mainFramebufferAspectRatio, windowSize.y);
-
-            // calculate UVs for cropping to 16:9
             ImVec2 croppedUv0 = ImVec2(0.0f, 0.0f);
             ImVec2 croppedUv1 = ImVec2(1.0f, 1.0f);
-            if (shouldCrop3DTo16_9) {
-                ImVec2 displaySize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y / 2 / frame.mainFramebufferAspectRatio);
-                ImVec2 displayOffset = ImVec2(ImGui::GetIO().DisplaySize.x / 2 - (displaySize.x / 2), ImGui::GetIO().DisplaySize.y / 2 - (displaySize.y / 2));
-                ImVec2 textureSize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+            ImVec2 displaySize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y / 2 / frame.mainFramebufferAspectRatio);
+            ImVec2 displayOffset = ImVec2(ImGui::GetIO().DisplaySize.x / 2 - (displaySize.x / 2), ImGui::GetIO().DisplaySize.y / 2 - (displaySize.y / 2));
+            ImVec2 textureSize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
 
-                croppedUv0 = ImVec2(displayOffset.x / textureSize.x, displayOffset.y / textureSize.y);
-                croppedUv1 = ImVec2((displayOffset.x + displaySize.x) / textureSize.x, (displayOffset.y + displaySize.y) / textureSize.y);
-            }
+            croppedUv0 = ImVec2(displayOffset.x / textureSize.x, displayOffset.y / textureSize.y);
+            croppedUv1 = ImVec2((displayOffset.x + displaySize.x) / textureSize.x, (displayOffset.y + displaySize.y) / textureSize.y);
 
-            // render 3D background
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            ImGui::SetNextWindowPos(shouldCrop3DTo16_9 ? ImVec2(0, 0) : centerPos);
-            ImGui::SetNextWindowSize(windowSize);
+            // draw 3d first so the hud can blend on top of it
+            backgroundDrawList->AddImage((ImTextureID)frame.mainFramebufferDS, ImVec2(0, 0), windowSize, croppedUv0, croppedUv1);
 
-            ImGui::Begin("3D Background", nullptr, FULLSCREEN_WINDOW_FLAGS);
-            ImGui::Image((ImTextureID)frame.mainFramebufferDS, shouldCrop3DTo16_9 ? windowSize : squishedWindowSize, croppedUv0, croppedUv1);
-            ImGui::End();
-
-            ImGui::PopStyleVar();
-            ImGui::PopStyleVar();
-
-            // Render world-space debug primitives clipped to the 3D view region.
-            // When cropped to 16:9, the 3D image fills the full window; otherwise
-            // it is centered with the VR headset's aspect ratio.
-            if (shouldCrop3DTo16_9) {
-                DebugDraw::instance().Render(glm::vec2(0.0f, 0.0f), glm::vec2(windowSize.x, windowSize.y), glm::vec2(croppedUv0.x, croppedUv0.y), glm::vec2(croppedUv1.x, croppedUv1.y));
-            }
-            else {
-                DebugDraw::instance().Render(glm::vec2(centerPos.x, centerPos.y), glm::vec2(squishedWindowSize.x, squishedWindowSize.y));
-            }
+            // clip world-space debug draw to the cropped 3d view
+            DebugDraw::instance().Render(glm::vec2(0.0f, 0.0f), glm::vec2(windowSize.x, windowSize.y), glm::vec2(croppedUv0.x, croppedUv0.y), glm::vec2(croppedUv1.x, croppedUv1.y));
         }
+
+        renderHUDBackground(shouldRenderHUDWithAlpha, true);
     }
     else {
-        renderHUDBackground(VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx));
+        renderHUDBackground(VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx), false);
     }
 
     if (GetSettings().ShowDebugOverlay()) {
         VRManager::instance().Hooks->m_entityDebugger->DrawEntityInspector();
         VRManager::instance().Hooks->DrawDebugOverlays();
     }
-
-
 
     if (((renderBackground && GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_ONLY) || GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR) && !VRManager::instance().XR->m_isMenuOpen) {
         EntityDebugger::DrawFPSOverlay(renderer);
@@ -628,9 +627,8 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     }
 
     ImVec2 fullWindowWidth = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-    ImVec2 windowWidth = fullWindowWidth * ImVec2(0.75f, 1.0f);
+    ImVec2 windowWidth = fullWindowWidth;
 
-    // Layout helpers
     auto DrawSettingRow = [&](const char* label, auto drawWidget) {
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(label);
@@ -837,10 +835,6 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                     }
 
                     if (ImGui::CollapsingHeader("Advanced Settings")) {
-                        DrawSettingRow("Crop VR Image To 16:9 For Cemu Window", [&]() {
-                            settings.cropFlatTo16x9.AddToGUI(&changed);
-                        });
-
                         DrawSettingRow("Show Debugging Overlays (for developers)", [&]() {
                             settings.enableDebugOverlay.AddToGUI(&changed);
                         });
@@ -1003,8 +997,26 @@ void RND_Renderer::ImGuiOverlay::DrawHUDLayerAsBackground(VkCommandBuffer cb, Vk
     frame.hudWithoutAlphaFramebuffer->vkCopyFromImage(cb, srcImage);
 }
 
-void RND_Renderer::ImGuiOverlay::DrawAndCopyToImage(VkCommandBuffer cb, VkImage destImage, long frameIdx) {
+void RND_Renderer::ImGuiOverlay::DrawAndCopyToImage(VkCommandBuffer cb, VkImage destImage, long frameIdx, bool isDesktopView) {
     ImGui::Render();
+
+    ImDrawData* draw_data = ImGui::GetDrawData();
+    if (draw_data != nullptr && isDesktopView) {
+        ImDrawList* backgroundDrawList = ImGui::GetBackgroundDrawList();
+        ImVec2 framebufferRes = ImVec2((float)m_outputRes.width, (float)m_outputRes.height);
+        ImVec4 framebufferUiRegion = CalculateCenteredAspectRegion(framebufferRes);
+        ImVec2 drawScale = ImVec2(framebufferUiRegion.z / framebufferRes.x, framebufferUiRegion.w / framebufferRes.y);
+        ImVec2 drawOffset = ImVec2(framebufferUiRegion.x / draw_data->FramebufferScale.x, framebufferUiRegion.y / draw_data->FramebufferScale.y);
+
+        for (int listIdx = 0; listIdx < draw_data->CmdListsCount; ++listIdx) {
+            ImDrawList* drawList = draw_data->CmdLists[listIdx];
+            if (drawList == backgroundDrawList) {
+                continue;
+            }
+
+            TransformDrawList(drawList, drawScale, drawOffset);
+        }
+    }
 
     auto* dispatch = VRManager::instance().VK->GetDeviceDispatch();
     auto* renderer = VRManager::instance().XR->GetRenderer();
@@ -1034,7 +1046,9 @@ void RND_Renderer::ImGuiOverlay::DrawAndCopyToImage(VkCommandBuffer cb, VkImage 
     };
     dispatch->CmdBeginRenderPass(cb, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cb);
+    if (draw_data != nullptr) {
+        ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
+    }
 
     dispatch->CmdEndRenderPass(cb);
 

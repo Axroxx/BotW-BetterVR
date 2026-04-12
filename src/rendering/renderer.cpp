@@ -494,7 +494,9 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
         layerPose.orientation = { 0.0f, 0.0f, 0.0f, 1.0f };
     }
 
-    const float aspectRatio = (float)this->m_textures[frameIdx]->d3d12GetTexture()->GetDesc().Width / (float)this->m_textures[frameIdx]->d3d12GetTexture()->GetDesc().Height;
+    //const float aspectRatio = (float)this->m_textures[frameIdx]->d3d12GetTexture()->GetDesc().Width / (float)this->m_textures[frameIdx]->d3d12GetTexture()->GetDesc().Height;
+    const float aspectRatio = 16.0f / 9.0f;
+
 
     const float width = aspectRatio > 1.0f ? aspectRatio : 1.0f;
     const float height = aspectRatio <= 1.0f ? 1.0f / aspectRatio : 1.0f;

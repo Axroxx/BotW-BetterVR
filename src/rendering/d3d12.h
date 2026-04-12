@@ -1,6 +1,7 @@
 #pragma once
 
 #include "openxr.h"
+#include "texture.h"
 
 class RND_Renderer;
 

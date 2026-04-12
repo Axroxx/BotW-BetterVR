@@ -111,13 +111,17 @@ public:
         }
     }
 
-    void AddSliderToGUI(bool* changed, int min = (int)this->min, int max = (int)this->max, std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+    void AddSliderToGUI(bool* changed, int min, int max, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
         int value = int(T(*this));
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::SliderInt(idStr.c_str(), &value, min, max, format(value).c_str())) {
             *this = T(value);
             *changed = true;
         }
+    }
+
+    void AddSliderToGUI(bool* changed, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
+        AddSliderToGUI(changed, int(this->min), int(this->max), std::move(format));
     }
 
     void AddSetToGUI(bool* changed, const char* label, T value) {
@@ -136,12 +140,16 @@ public:
         }
     }
 
-    void AddToGUI(bool* changed, float windowWidth, int min = int(this->min), int max = int(this->max), std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+    void AddToGUI(bool* changed, float windowWidth, int min, int max, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
         ImGui::PushItemWidth(windowWidth * 0.35f);
         AddSliderToGUI(changed, min, max, format);
         ImGui::PopItemWidth();
         ImGui::SameLine();
         AddResetToGUI(changed);
+    }
+
+    void AddToGUI(bool* changed, float windowWidth, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
+        AddToGUI(changed, windowWidth, int(this->min), int(this->max), std::move(format));
     }
 };
 
@@ -196,13 +204,17 @@ public:
         }
     }
 
-    void AddSliderToGUI(bool* changed, int min = int(this->min), int max = int(this->max), std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+    void AddSliderToGUI(bool* changed, int min, int max, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
         int value = int(T(*this));
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::SliderInt(idStr.c_str(), &value, min, max, format(value).c_str())) {
             *this = T(value);
             *changed = true;
         }
+    }
+
+    void AddSliderToGUI(bool* changed, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
+        AddSliderToGUI(changed, int(this->min), int(this->max), std::move(format));
     }
 
     void AddSetToGUI(bool* changed, const char* label, T value) {
@@ -221,12 +233,16 @@ public:
         }
     }
 
-    void AddToGUI(bool* changed, float windowWidth, int min = int(this->min), int max = int(this->max), std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+    void AddToGUI(bool* changed, float windowWidth, int min, int max, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
         ImGui::PushItemWidth(windowWidth * 0.35f);
         AddSliderToGUI(changed, min, max, format);
         ImGui::PopItemWidth();
         ImGui::SameLine();
         AddResetToGUI(changed);
+    }
+
+    void AddToGUI(bool* changed, float windowWidth, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
+        AddToGUI(changed, windowWidth, int(this->min), int(this->max), std::move(format));
     }
 };
 
@@ -288,7 +304,7 @@ public:
         }
     }
 
-    void AddSliderToGUI(bool* changed, float min, float max, std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+    void AddSliderToGUI(bool* changed, float min, float max, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
         float value = float(T(*this));
         std::string idStr = std::format("##{}", this->name);
         if (ImGui::SliderFloat(idStr.c_str(), &value, min, max, format(value).c_str())) {
@@ -313,7 +329,7 @@ public:
         }
     }
 
-    void AddToGUI(bool* changed, float windowWidth, float min, float max, std::function<std::string(float)> format = [&](float value) { return std::format("%.2f", value); }) {
+    void AddToGUI(bool* changed, float windowWidth, float min, float max, std::function<std::string(float)> format = [](float value) { return std::format("%.2f", value); }) {
         ImGui::PushItemWidth(windowWidth * 0.35f);
         AddSliderToGUI(changed, min, max, format);
         ImGui::PopItemWidth();
@@ -704,7 +720,6 @@ struct ModSettings {
     BoolSetting uiFollowsGaze = BoolSetting("UiFollowsGaze", true);
     FloatSetting<float> hudDistance = FloatSetting<float>("HudDistance", 1.85f, 0.5f, 2.5f);
     FloatSetting<float> hudSize = FloatSetting<float>("HudSize", 0.85f, 0.4f, 1.75f);
-    BoolSetting cropFlatTo16x9 = BoolSetting("CropFlatTo16x9", true);
 
     // advanced settings
     BoolSetting enableDebugOverlay = BoolSetting("EnableDebugOverlay", false);
@@ -732,7 +747,6 @@ struct ModSettings {
             &uiFollowsGaze,
             &hudDistance,
             &hudSize,
-            &cropFlatTo16x9,
             &enableDebugOverlay,
             &buggyAngularVelocity,
             &performanceOverlay,
@@ -767,7 +781,6 @@ struct ModSettings {
         return cutsceneCameraMode;
     }
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
-    bool ShouldFlatPreviewBeCroppedTo16x9() const { return cropFlatTo16x9 == 1; }
 
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
@@ -784,7 +797,6 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Left Handed: {}\n", IsLeftHanded() ? "Yes" : "No");
         std::format_to(std::back_inserter(buffer), " - GUI Follow Setting: {}\n", DoesUIFollowGaze() ? "Follow Looking Direction" : "Fixed");
         std::format_to(std::back_inserter(buffer), " - Player Height: {} meters\n", GetPlayerHeightOffset());
-        std::format_to(std::back_inserter(buffer), " - Crop Flat to 16:9: {}\n", ShouldFlatPreviewBeCroppedTo16x9() ? "Yes" : "No");
         std::format_to(std::back_inserter(buffer), " - Debug Overlay: {}\n", ShowDebugOverlay() ? "Enabled" : "Disabled");
         std::format_to(std::back_inserter(buffer), " - Boot Directly Into BotW: {}\n", ShouldBootDirectlyIntoGame() ? "Enabled" : "Disabled");
         if (!bootDirectlyTitleId.Get().empty()) {
