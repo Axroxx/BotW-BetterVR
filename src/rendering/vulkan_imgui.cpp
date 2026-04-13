@@ -6,6 +6,7 @@
 #include "vulkan.h"
 #include "utils/mod_settings.h"
 
+#undef __cpuid
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
