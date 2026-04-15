@@ -188,16 +188,18 @@ public:
         void DrawAndCopyToImage(VkCommandBuffer cb, VkImage destImage, long frameIdx, bool isDesktopView);
         void DrawHelpMenu();
         void ProcessInputs(OpenXR::InputState& inputs, const VPADStatus& vpadStatus);
-        int GetHelpImagePagesCount() const { return m_helpImagePages.size(); };
+        int GetHelpImagePagesCount() const { return m_helpImages.size(); };
 
     private:
         VkDescriptorPool m_descriptorPool;
         VkRenderPass m_renderPass;
         struct HelpImage {
+            const char* m_title = nullptr;
             VulkanTexture* m_image;
             VkDescriptorSet m_imageDS = VK_NULL_HANDLE;
         };
-        std::vector<std::vector<HelpImage>> m_helpImagePages;
+        std::vector<HelpImage> m_helpImages;
+        uint32_t m_currentHelpImage = 0;
 
         VkSampler m_sampler = VK_NULL_HANDLE;
         VkExtent2D m_outputRes = {};

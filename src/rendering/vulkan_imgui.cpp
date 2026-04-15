@@ -209,13 +209,14 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     }
 
     // create VulkanTexture
-    auto createHelpImage = [&](stbi_uc const* imageData, int imageSize) {
+    auto createHelpImage = [&](const char* title, stbi_uc const* imageData, int imageSize) {
         // load png image using stb_image
         int width, height, channels;
         unsigned char* img = stbi_load_from_memory(imageData, imageSize, &width, &height, &channels, STBI_rgb_alpha);
 
         // create VulkanTexture from image data
         HelpImage image;
+        image.m_title = title;
         image.m_image = new VulkanTexture{ (uint32_t)width, (uint32_t)height, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT };
         image.m_image->vkTransitionLayout(cb, VK_IMAGE_LAYOUT_GENERAL);
         image.m_image->vkUpload(cb, img, width * height * 4);
@@ -227,12 +228,10 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
         return image;
     };
 
-    std::vector<HelpImage> page1;
-    page1.emplace_back(createHelpImage((stbi_uc const*)controls, sizeof(controls)));
-    page1.push_back(createHelpImage((stbi_uc const*)equip, sizeof(equip)));
-    page1.push_back(createHelpImage((stbi_uc const*)swing, sizeof(swing)));
-    page1.push_back(createHelpImage((stbi_uc const*)whistle_and_magnesis, sizeof(whistle_and_magnesis)));
-    m_helpImagePages.push_back(page1);
+    m_helpImages.emplace_back(createHelpImage("Buttons & Inputs", (stbi_uc const*)controls, sizeof(controls)));
+    m_helpImages.push_back(createHelpImage("Equipment", (stbi_uc const*)equip, sizeof(equip)));
+    m_helpImages.push_back(createHelpImage("Swinging", (stbi_uc const*)swing, sizeof(swing)));
+    m_helpImages.push_back(createHelpImage("Whistle & Magnesis", (stbi_uc const*)whistle_and_magnesis, sizeof(whistle_and_magnesis)));
 
     VulkanUtils::DebugPipelineBarrier(cb);
 
@@ -261,11 +260,9 @@ RND_Renderer::ImGuiOverlay::~ImGuiOverlay() {
             frame.imguiFramebuffer.reset();
     }
 
-    for (auto& imagePage : m_helpImagePages) {
-        for (auto& helpImage : imagePage) {
-            ImGui_ImplVulkan_RemoveTexture(helpImage.m_imageDS);
-            delete helpImage.m_image;
-        }
+    for (auto& helpImage : m_helpImages) {
+        ImGui_ImplVulkan_RemoveTexture(helpImage.m_imageDS);
+        delete helpImage.m_image;
     }
 
     if (m_sampler != VK_NULL_HANDLE)
@@ -865,23 +862,69 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                 }
 
                 if (DrawStyledTab(ICON_KI_INFO_CIRCLE " Help & Controller Guide", 1)) {
-                    ImGui::PushItemWidth(windowWidth.x * 0.5f);
+                    if (!m_helpImages.empty()) {
+                        auto moveHelpImage = [&](int direction) {
+                            const int helpImageCount = (int)m_helpImages.size();
+                            m_currentHelpImage = (uint32_t)((m_currentHelpImage + helpImageCount + direction) % helpImageCount);
+                        };
 
-                    for (const auto& imagePage : m_helpImagePages) {
-                        for (const auto& image : imagePage) {
-                            ImGui::PushID(&image);
-                            float availWidth = ImGui::GetContentRegionAvail().x;
-                            float imageHeight = (availWidth) * ((float)image.m_image->GetHeight() / (float)image.m_image->GetWidth());
-                            ImVec2 imageSize = ImVec2(availWidth, imageHeight);
-                            ImVec2 p = ImGui::GetCursorPos();
-                            ImGui::Selectable("##imgButton", false, 0, imageSize);
-                            ImGui::SetCursorPos(p);
-                            ImGui::Image((ImTextureID)image.m_imageDS, imageSize);
-                            ImGui::PopID();
+                        const bool hasMultipleHelpImages = m_helpImages.size() > 1;
+                        m_currentHelpImage = std::min<uint32_t>(m_currentHelpImage, (uint32_t)m_helpImages.size() - 1);
+                        const auto& image = m_helpImages[m_currentHelpImage];
+
+                        std::string slideText = std::format("{} ({}/{})", image.m_title, m_currentHelpImage + 1, m_helpImages.size());
+                        float availableWidth = ImGui::GetContentRegionAvail().x;
+                        float sideWidth = availableWidth * 0.4f;
+                        float centerWidth = availableWidth * 0.2f;
+                        float rowStartX = ImGui::GetCursorPosX();
+                        float buttonWidth = ImGui::CalcTextSize(ICON_KI_ARROW_RIGHT).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+                        float leftButtonX = rowStartX + std::max((sideWidth - buttonWidth) * 0.5f, 0.0f);
+                        float textWidth = ImGui::CalcTextSize(slideText.c_str()).x;
+                        float textX = rowStartX + sideWidth + std::max((centerWidth - textWidth) * 0.5f, 0.0f);
+                        float rightButtonX = rowStartX + sideWidth + centerWidth + std::max((sideWidth - buttonWidth) * 0.5f, 0.0f);
+
+                        ImGui::SetCursorPosX(leftButtonX);
+                        if (!hasMultipleHelpImages)
+                            ImGui::BeginDisabled();
+                        if (ImGui::Button(ICON_KI_ARROW_LEFT "##PrevHelpImage")) {
+                            moveHelpImage(-1);
                         }
+                        if (!hasMultipleHelpImages)
+                            ImGui::EndDisabled();
+
+                        ImGui::SameLine(textX);
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextUnformatted(slideText.c_str());
+
+                        ImGui::SameLine(rightButtonX);
+                        if (!hasMultipleHelpImages)
+                            ImGui::BeginDisabled();
+                        if (ImGui::Button(ICON_KI_ARROW_RIGHT "##NextHelpImage")) {
+                            moveHelpImage(1);
+                        }
+                        if (!hasMultipleHelpImages)
+                            ImGui::EndDisabled();
+
+                        ImGui::Separator();
+
+                        if (ImGui::BeginChild("HelpImageCarousel", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground)) {
+                            ImVec2 availableSize = ImGui::GetContentRegionAvail();
+                            float widthScale = availableSize.x / (float)image.m_image->GetWidth();
+                            float heightScale = availableSize.y / (float)image.m_image->GetHeight();
+                            float imageScale = std::min(std::min(widthScale, heightScale), 1.0f);
+                            ImVec2 imageSize = ImVec2((float)image.m_image->GetWidth() * imageScale, (float)image.m_image->GetHeight() * imageScale);
+
+                            ImVec2 cursorPos = ImGui::GetCursorPos();
+                            if (availableSize.x > imageSize.x)
+                                cursorPos.x += (availableSize.x - imageSize.x) * 0.5f;
+                            if (availableSize.y > imageSize.y)
+                                cursorPos.y += (availableSize.y - imageSize.y) * 0.5f;
+                            ImGui::SetCursorPos(cursorPos);
+                            ImGui::Image((ImTextureID)image.m_imageDS, imageSize);
+                        }
+                        ImGui::EndChild();
                     }
 
-                    ImGui::PopItemWidth();
                     ImGui::EndTabItem();
                 }
 
@@ -1026,10 +1069,8 @@ void RND_Renderer::ImGuiOverlay::DrawAndCopyToImage(VkCommandBuffer cb, VkImage 
     frame.imguiFramebuffer->vkClear(cb, { 0.0f, 0.0f, 0.0f, 0.0f });
 
     // try to delete the staging buffer of the controller scheme textures if possible
-    for (auto imagePage : m_helpImagePages) {
-        for (auto& helpImage : imagePage) {
-            helpImage.m_image->vkTryToFinishAnyUploads(cb);
-        }
+    for (auto& helpImage : m_helpImages) {
+        helpImage.m_image->vkTryToFinishAnyUploads(cb);
     }
 
     // draw imgui to framebuffer
