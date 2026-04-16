@@ -61,6 +61,50 @@ struct WeaponProfile {
     static WeaponProfile ForSensitivity(SwingSensitivity sensitivity);
 };
 
+struct WeaponDebugSnapshot {
+    WeaponType weaponType = LargeSword;
+    AttackType lockedAttackType = AttackType::None;
+    XrTime sampleTime = 0;
+    bool attackActive = false;
+    bool hitboxEnabled = false;
+    float swingPower = 0.0f;
+    float badSampleAccumTime = 0.0f;
+    float maxBadDuration = 0.0f;
+    float calibratedArmLength = 0.0f;
+
+    float forwardStabSpeed = 0.0f;
+    float stabSpeedThreshold = 0.0f;
+    float forwardStabAcceleration = 0.0f;
+    float stabAccThreshold = 0.0f;
+    float stabDirectionAbsZ = 0.0f;
+    float stabLinearSteadinessThreshold = 0.0f;
+    float stabAngularXY = 0.0f;
+    float stabAngularSteadinessThreshold = 0.0f;
+    float goodStabAccumTime = 0.0f;
+    float minGoodStabDuration = 0.0f;
+
+    float slashAngularSpeed = 0.0f;
+    float slashSpeedThreshold = 0.0f;
+    float slashAngularAcceleration = 0.0f;
+    float slashAccThreshold = 0.0f;
+    float slashVelocityThreshold = 0.0f;
+    float slashAngularDrift = 0.0f;
+    float slashAccDriftThreshold = 0.0f;
+    float goodSwingAccumTime = 0.0f;
+    float minGoodSwingDuration = 0.0f;
+
+    bool stabSpeedOk = false;
+    bool stabAccelOk = false;
+    bool stabDirectionOk = false;
+    bool stabAngularOk = false;
+    bool stabDurationOk = false;
+    bool slashSpeedOk = false;
+    bool slashAccelOk = false;
+    bool slashVelocityOk = false;
+    bool slashDriftOk = false;
+    bool slashDurationOk = false;
+};
+
 // Returns a coherent set of profile values for the given sensitivity preset.
 inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity) {
     WeaponProfile p = {};
@@ -136,6 +180,9 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
 
 class WeaponMotionAnalyser {
 public:
+    static constexpr int MAX_SAMPLES = 90;
+    static constexpr float HAND_VELOCITY_LENGTH_THRESHOLD = 2.0f;
+
     WeaponMotionAnalyser() = default;
 
     void Update(const XrSpaceLocation& handLocation, const XrSpaceVelocity& handVelocity, const glm::fmat4& headsetMtx, XrTime inputTime);
@@ -156,10 +203,9 @@ public:
 
     void ApplyProfile(SwingSensitivity sensitivity);
 
-    void DrawDebugOverlay() const;
-
-    static constexpr int MAX_SAMPLES = 90;
-    static constexpr float HAND_VELOCITY_LENGTH_THRESHOLD = 2.0f;
+    WeaponDebugSnapshot GetDebugSnapshot() const;
+    const std::array<MotionSample, MAX_SAMPLES>& GetSamples() const { return m_samples; }
+    uint32_t GetLastSampleIndex() const { return m_lastSampleIdx; }
 
 private:
     // ---- Signal processing ----
@@ -546,83 +592,51 @@ inline void WeaponMotionAnalyser::ResetIfWeaponTypeChanged(WeaponType weaponType
     }
 }
 
-inline void WeaponMotionAnalyser::DrawDebugOverlay() const {
-    ImGui::TextColored(ImVec4(1, 1, 0, 1), "Weapon Motion Debugger");
-    ImGui::Text("Weapon Type: %d", static_cast<int>(m_weaponType));
-    ImGui::Text("Sample %d / %d", m_lastSampleIdx, MAX_SAMPLES);
-    ImGui::Text("Attack: %s  Active: %s  Bad: %.3fs  Power: %.2f",
-        m_lockedAttackType == AttackType::Slash ? "Slash" :
-        m_lockedAttackType == AttackType::Stab ? "Stab" : "None",
-        m_attackActive ? "Yes" : "No",
-        m_badSampleAccumTime,
-        m_swingPower);
-    ImGui::Text("Arm calibration: %.3f m", m_calibratedArmLength);
+inline WeaponDebugSnapshot WeaponMotionAnalyser::GetDebugSnapshot() const {
+    WeaponDebugSnapshot snapshot = {};
+    snapshot.weaponType = m_weaponType;
+    snapshot.lockedAttackType = m_lockedAttackType;
+    snapshot.sampleTime = m_samples[m_lastSampleIdx].time;
+    snapshot.attackActive = m_attackActive;
+    snapshot.hitboxEnabled = m_isHitboxEnabled;
+    snapshot.swingPower = m_swingPower;
+    snapshot.badSampleAccumTime = m_badSampleAccumTime;
+    snapshot.maxBadDuration = m_profile.maxBadDuration;
+    snapshot.calibratedArmLength = m_calibratedArmLength;
 
-    const auto oldestIdx = [this](uint32_t j) { return (m_lastSampleIdx + j) % MAX_SAMPLES; };
+    snapshot.forwardStabSpeed = -m_localLinVel.z;
+    snapshot.stabSpeedThreshold = m_profile.stabSpeedThreshold;
+    snapshot.forwardStabAcceleration = -m_smoothedLinAccel.z;
+    snapshot.stabAccThreshold = m_profile.stabAccThreshold;
+    snapshot.stabAngularXY = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
+    snapshot.stabAngularSteadinessThreshold = m_profile.stabAngularSteadinessThreshold;
+    snapshot.goodStabAccumTime = m_goodStabAccumTime;
+    snapshot.minGoodStabDuration = m_profile.minGoodStabDuration;
 
-    // Angular velocity plot
-    {
-        std::array<float, MAX_SAMPLES> t{}, avX{}, avY{}, avZ{}, maskSlash{}, maskStab{};
-        for (uint32_t j = 0; j < MAX_SAMPLES; ++j) {
-            const auto& s = m_samples[oldestIdx(j)];
-            t[j] = static_cast<float>(j);
-            avX[j] = s.localAngularVelocity.x;
-            avY[j] = s.localAngularVelocity.y;
-            avZ[j] = s.localAngularVelocity.z;
-            maskSlash[j] = (s.attackType == AttackType::Slash) ? 100.0f : -100.0f;
-            maskStab[j] = (s.attackType == AttackType::Stab) ? 100.0f : -100.0f;
-        }
-
-        if (ImPlot::BeginPlot("Weapon Steadiness", {0, 300}, ImPlotFlags_NoTitle)) {
-            ImPlot::SetupAxes("Sample", "Angular Velocity", ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock);
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, MAX_SAMPLES - 1, ImPlotCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, -15, 15, ImPlotCond_Always);
-
-            ImPlot::SetNextLineStyle(ImVec4(0, 1, 0, 0.3f), 3);
-            ImPlot::PlotShaded("Slash", t.data(), maskSlash.data(), MAX_SAMPLES, -100.0f);
-            ImPlot::SetNextLineStyle(ImVec4(1, 0.5f, 0, 0.3f), 3);
-            ImPlot::PlotShaded("Stab", t.data(), maskStab.data(), MAX_SAMPLES, -100.0f);
-
-            ImPlot::SetNextLineStyle(ImVec4(0, 1, 0.5f, 0.5f), 2);
-            ImPlot::PlotLine("X", t.data(), avX.data(), MAX_SAMPLES);
-            ImPlot::PlotLine("Y", t.data(), avY.data(), MAX_SAMPLES);
-            ImPlot::PlotLine("Z", t.data(), avZ.data(), MAX_SAMPLES);
-            ImPlot::EndPlot();
-        }
-        ImGui::SameLine();
+    if (glm::length2(m_localLinVel) >= 1e-8f) {
+        snapshot.stabDirectionAbsZ = std::abs(glm::normalize(m_localLinVel).z);
     }
+    snapshot.stabLinearSteadinessThreshold = m_profile.stabLinearSteadinessThreshold;
 
-    // Linear velocity plot
-    {
-        std::array<float, MAX_SAMPLES> t{}, lvX{}, lvY{}, lvZ{}, accZ{}, maskSlash{}, maskStab{};
-        for (uint32_t j = 0; j < MAX_SAMPLES; ++j) {
-            const auto& s = m_samples[oldestIdx(j)];
-            t[j] = static_cast<float>(j);
-            lvX[j] = s.localLinearVelocity.x;
-            lvY[j] = s.localLinearVelocity.y;
-            lvZ[j] = s.localLinearVelocity.z;
-            accZ[j] = s.smoothedLinearAcceleration.z;
-            maskSlash[j] = (s.attackType == AttackType::Slash) ? 100.0f : -100.0f;
-            maskStab[j] = (s.attackType == AttackType::Stab) ? 100.0f : -100.0f;
-        }
+    snapshot.slashAngularSpeed = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
+    snapshot.slashSpeedThreshold = m_profile.slashSpeedThreshold;
+    snapshot.slashAngularAcceleration = m_smoothedFlatAngAcc;
+    snapshot.slashAccThreshold = m_profile.slashAccThreshold;
+    snapshot.slashVelocityThreshold = m_profile.slashVelocityThreshold;
+    snapshot.slashAngularDrift = m_smoothedAngDrift;
+    snapshot.slashAccDriftThreshold = m_profile.slashAccDriftThreshold;
+    snapshot.goodSwingAccumTime = m_goodSwingAccumTime;
+    snapshot.minGoodSwingDuration = m_profile.minGoodSwingDuration;
 
-        if (ImPlot::BeginPlot("Controller Linear Velocity", {0, 300}, ImPlotFlags_NoTitle)) {
-            ImPlot::SetupAxes("Sample", "Linear Velocity", ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock);
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, MAX_SAMPLES - 1, ImPlotCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, -6, 6, ImPlotCond_Always);
-
-            ImPlot::SetNextLineStyle(ImVec4(0, 1, 0, 0.01f), 3);
-            ImPlot::PlotShaded("Slash", t.data(), maskSlash.data(), MAX_SAMPLES, -100.0f);
-            ImPlot::SetNextLineStyle(ImVec4(1, 0.5f, 0, 0.01f), 3);
-            ImPlot::PlotShaded("Stab", t.data(), maskStab.data(), MAX_SAMPLES, -100.0f);
-
-            ImPlot::SetNextLineStyle(ImVec4(0, 1, 0.5f, 0.5f), 2);
-            ImPlot::PlotLine("X", t.data(), lvX.data(), MAX_SAMPLES);
-            ImPlot::PlotLine("Y", t.data(), lvY.data(), MAX_SAMPLES);
-            ImPlot::PlotLine("Z", t.data(), lvZ.data(), MAX_SAMPLES);
-            ImPlot::PlotLine("Acc Z (smoothed)", t.data(), accZ.data(), MAX_SAMPLES);
-            ImPlot::EndPlot();
-        }
-        ImGui::SameLine();
-    }
+    snapshot.stabSpeedOk = snapshot.forwardStabSpeed >= snapshot.stabSpeedThreshold;
+    snapshot.stabAccelOk = snapshot.forwardStabAcceleration >= snapshot.stabAccThreshold;
+    snapshot.stabDirectionOk = snapshot.stabDirectionAbsZ >= snapshot.stabLinearSteadinessThreshold;
+    snapshot.stabAngularOk = snapshot.stabAngularXY <= snapshot.stabAngularSteadinessThreshold;
+    snapshot.stabDurationOk = snapshot.goodStabAccumTime >= snapshot.minGoodStabDuration;
+    snapshot.slashSpeedOk = snapshot.slashAngularSpeed >= snapshot.slashSpeedThreshold;
+    snapshot.slashAccelOk = snapshot.slashAngularAcceleration >= snapshot.slashAccThreshold;
+    snapshot.slashVelocityOk = snapshot.slashAngularSpeed >= snapshot.slashVelocityThreshold;
+    snapshot.slashDriftOk = snapshot.slashAngularDrift <= snapshot.slashAccDriftThreshold;
+    snapshot.slashDurationOk = snapshot.goodSwingAccumTime >= snapshot.minGoodSwingDuration;
+    return snapshot;
 }

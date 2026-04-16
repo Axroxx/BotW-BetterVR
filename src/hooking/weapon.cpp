@@ -460,15 +460,3 @@ void CemuHooks::hook_ModifyHandModelAccessSearch(PPCInterpreter_t* hCPU) {
 #endif
 }
 
-void CemuHooks::DrawDebugOverlays() {
-    if (ImGui::Begin("Weapon Motion Debugger")) {
-        for (auto it = m_motionAnalyzers.rbegin(); it != m_motionAnalyzers.rend(); ++it) {
-            ImGui::PushID(&(*it));
-            ImGui::BeginGroup();
-            it->DrawDebugOverlay();
-            ImGui::EndGroup();
-            ImGui::PopID();
-        }
-    }
-    ImGui::End();
-}

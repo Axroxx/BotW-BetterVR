@@ -1,5 +1,6 @@
 #include "hooking/cemu_hooks.h"
 #include "hooking/entity_debugger.h"
+#include "hooking/imgui_menus.h"
 #include "instance.h"
 #include "utils/vulkan_utils.h"
 #include "utils/debug_draw.h"
@@ -342,7 +343,7 @@ void RND_Renderer::ImGuiOverlay::Update() {
     // keep a shared 16:9 canvas with a 1080p minimum menu size
     float uiScaleFactor = std::max(physicalUiRegion.w / 1080.0f, 1.0f);
 
-    uiScaleFactor *= 2.0f;
+    uiScaleFactor *= 1.75f;
 
     ImVec2 logicalRes = ImVec2(framebufferUiRegion.z / uiScaleFactor, framebufferUiRegion.w / uiScaleFactor);
 
@@ -420,6 +421,8 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
     else {
         renderHUDBackground(VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx), false);
     }
+
+    ImGuiMenus::DrawWeaponSensitivityOverlays();
 
     if (GetSettings().ShowDebugOverlay()) {
         VRManager::instance().Hooks->m_entityDebugger->DrawEntityInspector();
@@ -822,6 +825,18 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
                             ImGui::Text("Custom Stab Sensitivity");
                             ImGui::PopStyleColor();
+
+                            DrawSettingRow("Debug Overlay Windows", [&]() {
+                                bool showLeftOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide::LEFT);
+                                if (ImGui::Checkbox("Left Hand", &showLeftOverlay)) {
+                                    ImGuiMenus::SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide::LEFT, showLeftOverlay);
+                                }
+                                ImGui::SameLine();
+                                bool showRightOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide::RIGHT);
+                                if (ImGui::Checkbox("Right Hand", &showRightOverlay)) {
+                                    ImGuiMenus::SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide::RIGHT, showRightOverlay);
+                                }
+                            });
 
                             DrawSettingRow("Stab Speed Threshold", [&]() {
                                 settings.customStabSpeedThreshold.AddToGUI(&changed, windowWidth.x, 0.01f, 0.50f, [](float) { return "%.2f m/s"; });
