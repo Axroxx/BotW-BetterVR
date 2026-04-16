@@ -401,19 +401,17 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
         bool shouldRenderHUDWithAlpha = shouldRender3DBackground && !CemuHooks::UseBlackBarsDuringEvents();
 
         if (shouldRender3DBackground) {
-            ImVec2 croppedUv0 = ImVec2(0.0f, 0.0f);
-            ImVec2 croppedUv1 = ImVec2(1.0f, 1.0f);
+            // draw 3d first so the hud can blend on top of it
+            backgroundDrawList->AddImage((ImTextureID)frame.mainFramebufferDS, ImVec2(0, 0), windowSize, ImVec2(0, 0), ImVec2(1, 1));
+
+            // clip world-space debug draw to the cropped 3d view
             ImVec2 displaySize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y / 2 / frame.mainFramebufferAspectRatio);
             ImVec2 displayOffset = ImVec2(ImGui::GetIO().DisplaySize.x / 2 - (displaySize.x / 2), ImGui::GetIO().DisplaySize.y / 2 - (displaySize.y / 2));
             ImVec2 textureSize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
 
-            croppedUv0 = ImVec2(displayOffset.x / textureSize.x, displayOffset.y / textureSize.y);
-            croppedUv1 = ImVec2((displayOffset.x + displaySize.x) / textureSize.x, (displayOffset.y + displaySize.y) / textureSize.y);
+            ImVec2 croppedUv0 = ImVec2(displayOffset.x / textureSize.x, displayOffset.y / textureSize.y);
+            ImVec2 croppedUv1 = ImVec2((displayOffset.x + displaySize.x) / textureSize.x, (displayOffset.y + displaySize.y) / textureSize.y);
 
-            // draw 3d first so the hud can blend on top of it
-            backgroundDrawList->AddImage((ImTextureID)frame.mainFramebufferDS, ImVec2(0, 0), windowSize, croppedUv0, croppedUv1);
-
-            // clip world-space debug draw to the cropped 3d view
             DebugDraw::instance().Render(glm::vec2(0.0f, 0.0f), glm::vec2(windowSize.x, windowSize.y), glm::vec2(croppedUv0.x, croppedUv0.y), glm::vec2(croppedUv1.x, croppedUv1.y));
         }
 
