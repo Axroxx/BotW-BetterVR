@@ -753,6 +753,7 @@ struct ModSettings {
     FloatSetting<float> customGoodSampleGracePeriod = FloatSetting<float>("CustomGoodSampleGracePeriod", 40.0f, 10.0f, 200.0f);
     FloatSetting<float> customSmoothingTimeConstant = FloatSetting<float>("CustomSmoothingTimeConstant", 0.020f, 0.005f, 0.100f);
     FloatSetting<float> customAngularDriftMinVelocity = FloatSetting<float>("CustomAngularDriftMinVelocity", 0.5f, 0.1f, 3.0f);
+    FloatSetting<float> customDamageOutputScale = FloatSetting<float>("CustomDamageOutputScale", 1.0f, 0.10f, 2.00f);
 
     auto GetOptions() {
         return std::to_array<ModSettingBase*>({ 
@@ -794,7 +795,8 @@ struct ModSettings {
             &customMaxBadDuration,
             &customGoodSampleGracePeriod,
             &customSmoothingTimeConstant,
-            &customAngularDriftMinVelocity
+            &customAngularDriftMinVelocity,
+            &customDamageOutputScale
         });
     }
 
@@ -815,6 +817,7 @@ struct ModSettings {
         customGoodSampleGracePeriod.Reset();
         customSmoothingTimeConstant.Reset();
         customAngularDriftMinVelocity.Reset();
+        customDamageOutputScale.Reset();
     }
 
     CameraMode GetCameraMode() const { return cameraMode; }
@@ -848,6 +851,12 @@ struct ModSettings {
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
+    float GetWeaponDamageOutputScale() const {
+        if (GetSwingSensitivity() != SwingSensitivity::SWING_CUSTOM) {
+            return 1.0f;
+        }
+        return customDamageOutputScale;
+    }
 
     // By default BotW's camera uses 0.1f for near plane and 25000.0f for far plane, except maybe some indoor areas? But for simplicity, we'll use the default values everywhere.
     float GetZNear() const { return 0.1f; }

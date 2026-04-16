@@ -18,6 +18,14 @@ std::array s_cameraPositions = {
     glm::fvec3(0.0f)
 };
 
+static float ComputeAttackDamageMultiplier(float swingPower) {
+    const float normalizedPower = glm::clamp((swingPower - 0.15f) / 0.85f, 0.0f, 1.0f);
+    const float rampedPower = normalizedPower * normalizedPower * (3.0f - 2.0f * normalizedPower);
+
+    // Keep incidental motion weak, then ramp into full damage once the swing is committed.
+    return 0.20f + 1.15f * rampedPower;
+}
+
 static bool isDroppable(std::string actorName) {
     static const std::string_view nonDroppableItems[] = {
         "AncientArrow",
@@ -364,9 +372,9 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
         weapon.setupAttackSensor.isContactLayerInitialized = 0;
         weapon.setupAttackSensor.shieldBreakPower = 2; // damageType 2 required for chopping trees
 
-        // Scale damage based on swing power (0.5x - 1.5x base weapon damage)
+        // Weak motions stay light; proper swings ramp up closer to full damage.
         const float power = m_motionAnalyzers[heldIndex].GetSwingPower();
-        weapon.setupAttackSensor.multiplier = 0.5f + power;
+        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale();
 
         writeMemory(weaponPtr, &weapon);
     }

@@ -12,6 +12,7 @@ namespace {
         uint32_t weaponPtr = 0;
         std::string actorName;
         float baseDamage = 0.0f;
+        float damageScale = 1.0f;
         float multiplier = 1.0f;
         float estimatedDamage = 0.0f;
         uint32_t setupDamage = 0;
@@ -133,6 +134,8 @@ namespace {
             state.baseDamage = float(state.damageMgrDamage);
         }
 
+        state.damageScale = GetSettings().GetWeaponDamageOutputScale();
+
         state.estimatedDamage = state.baseDamage * state.multiplier;
         return state;
     }
@@ -231,8 +234,9 @@ namespace {
             ToString(snapshot.lockedAttackType),
             snapshot.attackActive ? "Yes" : "No",
             snapshot.hitboxEnabled ? "Yes" : "No");
-        ImGui::Text("Current damage: %.1f | Multiplier: %.2f | Estimated output: %.1f",
+        ImGui::Text("Current damage: %.1f | Damage scale: %.2fx | Multiplier: %.2f | Estimated output: %.1f",
             liveState.baseDamage,
+            liveState.damageScale,
             liveState.multiplier,
             liveState.estimatedDamage);
         ImGui::Text("Bad samples: %.3f / %.3f s | Swing power: %.2f | Arm calibration: %.3f m",

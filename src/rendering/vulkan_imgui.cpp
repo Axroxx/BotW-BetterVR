@@ -898,6 +898,9 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                             DrawSettingRow("Drift Min Velocity", [&]() {
                                 settings.customAngularDriftMinVelocity.AddToGUI(&changed, windowWidth.x, 0.1f, 3.0f, [](float) { return "%.1f rad/s"; });
                             });
+                            DrawSettingRow("Damage Output Scale", [&]() {
+                                settings.customDamageOutputScale.AddToGUI(&changed, windowWidth.x, 0.10f, 2.00f, [](float) { return "%.2fx"; });
+                            });
                             DrawSettingRow("", [&]() {
                                 if (ImGui::Button("Reset Custom Weapon Sensitivity")) {
                                     settings.ResetCustomWeaponSensitivity();
