@@ -548,9 +548,9 @@ enum class PerformanceOverlayMode : int32_t {
 };
 
 enum class SwingSensitivity : int32_t {
-    SWING_RELAXED = 0,
+    SWING_EASY = 0,
     SWING_NORMAL = 1,
-    SWING_STRICT = 2,
+    SWING_CUSTOM = 2,
 };
 
 struct ModSettings {
@@ -680,12 +680,12 @@ struct ModSettings {
 
     static const char* toString(SwingSensitivity sensitivity) {
         switch (sensitivity) {
-            case SwingSensitivity::SWING_RELAXED:
-                return "SWING_RELAXED";
+            case SwingSensitivity::SWING_EASY:
+                return "SWING_EASY";
             case SwingSensitivity::SWING_NORMAL:
                 return "SWING_NORMAL";
-            case SwingSensitivity::SWING_STRICT:
-                return "STRICT";
+            case SwingSensitivity::SWING_CUSTOM:
+                return "SWING_CUSTOM";
             default:
                 return "";
         }
@@ -693,12 +693,12 @@ struct ModSettings {
 
     static const char* toDisplayString(SwingSensitivity sensitivity) {
         switch (sensitivity) {
-            case SwingSensitivity::SWING_RELAXED:
-                return "Relaxed (Easier Swings)";
+            case SwingSensitivity::SWING_EASY:
+                return "Easy";
             case SwingSensitivity::SWING_NORMAL:
                 return "Normal";
-            case SwingSensitivity::SWING_STRICT:
-                return "Strict (Fewer False Positives)";
+            case SwingSensitivity::SWING_CUSTOM:
+                return "Custom";
             default:
                 return "";
         }
@@ -723,6 +723,9 @@ struct ModSettings {
 
     // advanced settings
     BoolSetting enableDebugOverlay = BoolSetting("EnableDebugOverlay", false);
+#ifdef _DEBUG
+    BoolSetting hideSettingsMenuInVRHeadset = BoolSetting("HideSettingsMenuInVRHeadset", false);
+#endif
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
@@ -733,7 +736,23 @@ struct ModSettings {
     // Input settings
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
     FloatSetting<float> stickDeadzone = FloatSetting<float>("StickDeadzone", kDefaultStickDeadzone, 0.0f, 1.0f);
-    EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_RELAXED, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_STRICT });
+    EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_EASY, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_CUSTOM });
+    FloatSetting<float> customStabSpeedThreshold = FloatSetting<float>("CustomStabSpeedThreshold", 0.05f, 0.01f, 0.50f);
+    FloatSetting<float> customStabAccThreshold = FloatSetting<float>("CustomStabAccThreshold", 7.0f, 1.0f, 15.0f);
+    FloatSetting<float> customStabSteadinessCone = FloatSetting<float>("CustomStabSteadinessCone", 30.0f, 15.0f, 85.0f);
+    FloatSetting<float> customStabAngularSteadiness = FloatSetting<float>("CustomStabAngularSteadiness", 4.5f, 1.0f, 15.0f);
+    FloatSetting<float> customStabTravelDistance = FloatSetting<float>("CustomStabTravelDistance", 0.20f, 0.05f, 0.50f);
+    FloatSetting<float> customMinGoodStabDuration = FloatSetting<float>("CustomMinGoodStabDuration", 0.040f, 0.005f, 0.100f);
+    FloatSetting<float> customSlashSpeedThreshold = FloatSetting<float>("CustomSlashSpeedThreshold", 1.5f, 0.1f, 5.0f);
+    FloatSetting<float> customSlashAccThreshold = FloatSetting<float>("CustomSlashAccThreshold", 20.0f, 3.0f, 40.0f);
+    FloatSetting<float> customSlashVelocityThreshold = FloatSetting<float>("CustomSlashVelocityThreshold", 7.0f, 1.0f, 15.0f);
+    FloatSetting<float> customSlashAccDriftThreshold = FloatSetting<float>("CustomSlashAccDriftThreshold", 10.0f, 2.0f, 30.0f);
+    FloatSetting<float> customSlashTravelAngle = FloatSetting<float>("CustomSlashTravelAngle", 36.0f, 10.0f, 90.0f);
+    FloatSetting<float> customMinGoodSwingDuration = FloatSetting<float>("CustomMinGoodSwingDuration", 0.040f, 0.005f, 0.100f);
+    FloatSetting<float> customMaxBadDuration = FloatSetting<float>("CustomMaxBadDuration", 0.022f, 0.005f, 0.100f);
+    FloatSetting<float> customGoodSampleGracePeriod = FloatSetting<float>("CustomGoodSampleGracePeriod", 40.0f, 10.0f, 200.0f);
+    FloatSetting<float> customSmoothingTimeConstant = FloatSetting<float>("CustomSmoothingTimeConstant", 0.020f, 0.005f, 0.100f);
+    FloatSetting<float> customAngularDriftMinVelocity = FloatSetting<float>("CustomAngularDriftMinVelocity", 0.5f, 0.1f, 3.0f);
 
     auto GetOptions() {
         return std::to_array<ModSettingBase*>({ 
@@ -748,6 +767,9 @@ struct ModSettings {
             &hudDistance,
             &hudSize,
             &enableDebugOverlay,
+#ifdef _DEBUG
+            &hideSettingsMenuInVRHeadset,
+#endif
             &buggyAngularVelocity,
             &performanceOverlay,
             &performanceOverlayFrequency,
@@ -756,8 +778,43 @@ struct ModSettings {
             &bootDirectlyTitleId,
             &axisThreshold,
             &stickDeadzone,
-            &swingSensitivity
+            &swingSensitivity,
+            &customStabSpeedThreshold,
+            &customStabAccThreshold,
+            &customStabSteadinessCone,
+            &customStabAngularSteadiness,
+            &customStabTravelDistance,
+            &customMinGoodStabDuration,
+            &customSlashSpeedThreshold,
+            &customSlashAccThreshold,
+            &customSlashVelocityThreshold,
+            &customSlashAccDriftThreshold,
+            &customSlashTravelAngle,
+            &customMinGoodSwingDuration,
+            &customMaxBadDuration,
+            &customGoodSampleGracePeriod,
+            &customSmoothingTimeConstant,
+            &customAngularDriftMinVelocity
         });
+    }
+
+    void ResetCustomWeaponSensitivity() {
+        customStabSpeedThreshold.Reset();
+        customStabAccThreshold.Reset();
+        customStabSteadinessCone.Reset();
+        customStabAngularSteadiness.Reset();
+        customStabTravelDistance.Reset();
+        customMinGoodStabDuration.Reset();
+        customSlashSpeedThreshold.Reset();
+        customSlashAccThreshold.Reset();
+        customSlashVelocityThreshold.Reset();
+        customSlashAccDriftThreshold.Reset();
+        customSlashTravelAngle.Reset();
+        customMinGoodSwingDuration.Reset();
+        customMaxBadDuration.Reset();
+        customGoodSampleGracePeriod.Reset();
+        customSmoothingTimeConstant.Reset();
+        customAngularDriftMinVelocity.Reset();
     }
 
     CameraMode GetCameraMode() const { return cameraMode; }
@@ -783,6 +840,11 @@ struct ModSettings {
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
+#ifdef _DEBUG
+    bool HideSettingsMenuInVRHeadset() const { return hideSettingsMenuInVRHeadset; }
+#else
+    bool HideSettingsMenuInVRHeadset() const { return false; }
+#endif
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
@@ -808,7 +870,7 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Performance Overlay Frequency: {} Hz\n", uint32_t(performanceOverlayFrequency));
         std::format_to(std::back_inserter(buffer), " - Stick Direction Threshold: {}\n", float(axisThreshold));
         std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
-        std::format_to(std::back_inserter(buffer), " - Swing Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
+        std::format_to(std::back_inserter(buffer), " - Weapon Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
         return buffer;
     }
 };

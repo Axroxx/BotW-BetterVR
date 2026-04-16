@@ -827,6 +827,8 @@ void processInputPrevention(OpenXR::GameState& gameState, std::chrono::steady_cl
 
 void processModMenuInput(std::atomic_bool& isMenuOpen, OpenXR::InputState& inputs, VPADStatus& vpadInputs, RND_Renderer::ImGuiOverlay* imguiOverlay, XrActionStateVector2f& leftStickSource, XrActionStateVector2f& rightStickSource)
 {
+    const bool shouldPassGamepadInputToGame = GetSettings().HideSettingsMenuInVRHeadset();
+
     if (inputs.shared.modMenuState.lastEvent == ButtonState::Event::LongPress && inputs.shared.modMenuState.longFired_actedUpon) {
         isMenuOpen = !isMenuOpen;
         inputs.shared.modMenuState.longFired_actedUpon = false;
@@ -836,7 +838,7 @@ void processModMenuInput(std::atomic_bool& isMenuOpen, OpenXR::InputState& input
     imguiOverlay->ProcessInputs(inputs, vpadInputs);
 
     // ignore stick input when the help menu is open
-    if (isMenuOpen || imguiOverlay->ShouldBlockGameInput()/*this is used for the entity inspector*/) {
+    if ((isMenuOpen && !shouldPassGamepadInputToGame) || imguiOverlay->ShouldBlockGameInput()/*this is used for the entity inspector*/) {
         vpadInputs = {};
         leftStickSource.currentState = { 0.0f, 0.0f };
         rightStickSource.currentState = { 0.0f, 0.0f };
@@ -998,6 +1000,7 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
 
     auto& isMenuOpen = VRManager::instance().XR->m_isMenuOpen;
     processModMenuInput(isMenuOpen, inputs, vpadStatus, imguiOverlay, leftStickSource, rightStickSource);
+    const bool shouldPassGamepadInputToGame = GetSettings().HideSettingsMenuInVRHeadset();
 
     // Calculate hand gestures
     HandGestureState leftGesture = {};
@@ -1007,7 +1010,7 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
     keepDpadMenuOpen(newXRBtnHold, gameState);
 
     // Process inputs
-    if (isMenuOpen) {
+    if (isMenuOpen && !shouldPassGamepadInputToGame) {
         // ignore inputs when the mod menu is open
     }
     else if (gameState.in_game) {

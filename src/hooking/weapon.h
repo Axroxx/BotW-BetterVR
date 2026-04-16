@@ -65,7 +65,7 @@ struct WeaponProfile {
 inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity) {
     WeaponProfile p = {};
 
-    // Shared defaults (Normal preset)
+    // Shared defaults (Easy preset)
     p.stabSpeedThreshold = 0.05f;
     p.stabAccThreshold = 5.0f;
     p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 4.5f); // ~40 deg cone
@@ -88,26 +88,11 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
     p.referenceArmLength = 0.55f;
 
     switch (sensitivity) {
-        case SwingSensitivity::SWING_RELAXED:
-            p.stabAccThreshold = 3.5f;
-            p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 3.5f); // wider cone
-            p.stabTravelDistance = 0.10f;
-            p.slashAccThreshold = 10.0f;
-            p.slashVelocityThreshold = 3.5f;
-            p.slashSpeedThreshold = 0.7f;
-            p.slashTravelAngle = glm::pi<float>() / 8.0f; // 22.5 deg
-            p.maxBadDuration = 0.045f;
-            p.goodSampleGracePeriod = XrTime(120e6); // 120 ms
-            p.minGoodSwingDuration = 0.015f;
-            p.minGoodStabDuration = 0.015f;
-            p.smoothingTimeConstant = 0.045f;
-            break;
-
-        case SwingSensitivity::SWING_NORMAL:
+        case SwingSensitivity::SWING_EASY:
             // Already set above
             break;
 
-        case SwingSensitivity::SWING_STRICT:
+        case SwingSensitivity::SWING_NORMAL:
             p.stabAccThreshold = 7.0f;
             p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 6.0f); // tighter cone
             p.stabTravelDistance = 0.20f;
@@ -121,6 +106,29 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             p.minGoodStabDuration = 0.040f;
             p.smoothingTimeConstant = 0.020f;
             break;
+
+        case SwingSensitivity::SWING_CUSTOM: {
+            const ModSettings& settings = GetSettings();
+            p.stabSpeedThreshold = settings.customStabSpeedThreshold;
+            p.stabAccThreshold = settings.customStabAccThreshold;
+            p.stabLinearSteadinessThreshold = glm::cos(glm::radians(float(settings.customStabSteadinessCone)));
+            p.stabAngularSteadinessThreshold = settings.customStabAngularSteadiness;
+            p.stabTravelDistance = settings.customStabTravelDistance;
+
+            p.slashSpeedThreshold = settings.customSlashSpeedThreshold;
+            p.slashAccThreshold = settings.customSlashAccThreshold;
+            p.slashVelocityThreshold = settings.customSlashVelocityThreshold;
+            p.slashAccDriftThreshold = settings.customSlashAccDriftThreshold;
+            p.slashTravelAngle = glm::radians(float(settings.customSlashTravelAngle));
+
+            p.maxBadDuration = settings.customMaxBadDuration;
+            p.goodSampleGracePeriod = XrTime(std::llround(double(settings.customGoodSampleGracePeriod) * 1e6));
+            p.minGoodSwingDuration = settings.customMinGoodSwingDuration;
+            p.minGoodStabDuration = settings.customMinGoodStabDuration;
+            p.smoothingTimeConstant = settings.customSmoothingTimeConstant;
+            p.angularDriftMinVelocity = settings.customAngularDriftMinVelocity;
+            break;
+        }
     }
 
     return p;

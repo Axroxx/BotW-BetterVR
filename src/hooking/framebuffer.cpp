@@ -233,7 +233,7 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                     if (imguiOverlay && !hudCopied) {
                         // render imgui, and then copy the framebuffer to the 2D layer
                         imguiOverlay->Update();
-                        imguiOverlay->Render(frameIdx, false);
+                        imguiOverlay->Render(frameIdx, false, false);
                         imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, false);
                         VulkanUtils::DebugPipelineBarrier(commandBuffer);
                     }
@@ -255,7 +255,7 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                 // render the imgui overlay on the right side
                 if (imguiOverlay) {
                     // render imgui, and then copy the framebuffer to the 2D layer
-                    imguiOverlay->Render(frameIdx, true);
+                    imguiOverlay->Render(frameIdx, true, true);
                     imguiOverlay->Update();
                     imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, true);
 
