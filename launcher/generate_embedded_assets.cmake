@@ -1,4 +1,4 @@
-if(NOT DEFINED OUTPUT_HEADER OR NOT DEFINED OUTPUT_SOURCE OR NOT DEFINED OUTPUT_RC OR NOT DEFINED INPUT_DLL OR NOT DEFINED INPUT_JSON OR NOT DEFINED GRAPHIC_PACK_DIR OR NOT DEFINED VERSION)
+if(NOT DEFINED OUTPUT_HEADER OR NOT DEFINED OUTPUT_SOURCE OR NOT DEFINED OUTPUT_RC OR NOT DEFINED INPUT_DLL OR NOT DEFINED INPUT_JSON OR NOT DEFINED GRAPHIC_PACK_DIR OR NOT DEFINED BOTW_GRAPHICS_DIR OR NOT DEFINED VERSION)
     message(FATAL_ERROR "Missing required generator arguments")
 endif()
 
@@ -14,7 +14,8 @@ set(header_contents [=[#pragma once
 namespace EmbeddedAssets {
     enum class AssetKind {
         Runtime,
-        GraphicPack
+        GraphicPack,
+        DownloadedGraphics
     };
 
     struct Asset {
@@ -60,6 +61,16 @@ foreach(graphic_pack_file IN LISTS graphic_pack_files)
     set(full_path "${GRAPHIC_PACK_DIR}/${graphic_pack_file}")
     if(NOT IS_DIRECTORY "${full_path}")
         append_asset("${full_path}" "BreathOfTheWild_BetterVR/${graphic_pack_file}" "GraphicPack")
+    endif()
+endforeach()
+
+file(GLOB_RECURSE botw_graphics_files RELATIVE "${BOTW_GRAPHICS_DIR}" "${BOTW_GRAPHICS_DIR}/*")
+list(SORT botw_graphics_files)
+
+foreach(botw_graphics_file IN LISTS botw_graphics_files)
+    set(full_path "${BOTW_GRAPHICS_DIR}/${botw_graphics_file}")
+    if(NOT IS_DIRECTORY "${full_path}")
+        append_asset("${full_path}" "BreathOfTheWild_Graphics/${botw_graphics_file}" "DownloadedGraphics")
     endif()
 endforeach()
 

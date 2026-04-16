@@ -10,8 +10,11 @@ set(BETTERVR_LAUNCHER_EMBED_HEADER "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_asse
 set(BETTERVR_LAUNCHER_EMBED_SOURCE "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_assets.cpp")
 set(BETTERVR_LAUNCHER_EMBED_RC "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_assets.rc")
 set(BETTERVR_LAUNCHER_EMBED_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/generate_embedded_assets.cmake")
+set(BETTERVR_GRAPHIC_PACK_DIR "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR")
+set(BETTERVR_BOTW_GRAPHICS_DIR "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_Graphics")
 
-file(GLOB_RECURSE GRAPHIC_PACK_FILES "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR/*")
+file(GLOB_RECURSE GRAPHIC_PACK_FILES "${BETTERVR_GRAPHIC_PACK_DIR}/*")
+file(GLOB_RECURSE BOTW_GRAPHICS_FILES "${BETTERVR_BOTW_GRAPHICS_DIR}/*")
 
 add_executable(BetterVR_Launcher ${BETTERVR_LAUNCHER_SOURCES})
 target_precompile_headers(BetterVR_Launcher PRIVATE ${CMAKE_SOURCE_DIR}/include/pch.h)
@@ -32,7 +35,8 @@ add_custom_command(
         -DOUTPUT_RC=${BETTERVR_LAUNCHER_EMBED_RC}
         -DINPUT_DLL=$<TARGET_FILE:BetterVR_Layer>
         -DINPUT_JSON=$<TARGET_FILE_DIR:BetterVR_Layer>/BetterVR_Layer.json
-        -DGRAPHIC_PACK_DIR=${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR
+        -DGRAPHIC_PACK_DIR=${BETTERVR_GRAPHIC_PACK_DIR}
+        -DBOTW_GRAPHICS_DIR=${BETTERVR_BOTW_GRAPHICS_DIR}
         -DVERSION=${PROJECT_VERSION}
         -P ${BETTERVR_LAUNCHER_EMBED_SCRIPT}
     DEPENDS
@@ -40,6 +44,7 @@ add_custom_command(
         ${CMAKE_SOURCE_DIR}/resources/BetterVR_Layer.json
         ${BETTERVR_LAUNCHER_EMBED_SCRIPT}
         ${GRAPHIC_PACK_FILES}
+        ${BOTW_GRAPHICS_FILES}
     VERBATIM
 )
 
