@@ -8,7 +8,7 @@ aspectRatio:
 
 ; Use 16:9 for the inventory preview in BetterVR mode, otherwise use the active graphics-pack aspect ratio.
 aspectRatio_Inventory:
-.float (($betterVRExposeVROptions != 0)*(16.0/9.0)) + (($betterVRExposeVROptions == 0)*($width/$height))
+.float (16.0/9.0)
 
 grassCulling: ; The grass is calculated in a weird way, but this fix seems to work. So for safety, only enable it for ultrawide resolutions.
 .float (($ultrawideHUDMode != 0)*(($gameWidth/$gameHeight) / ($width/$height))) + (($ultrawideHUDMode == 0)*1.0)

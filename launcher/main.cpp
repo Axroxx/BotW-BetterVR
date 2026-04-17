@@ -9,26 +9,37 @@ static constexpr wchar_t VulkanImplicitLayersRegistryPath[] = L"SOFTWARE\\Khrono
 static constexpr std::string_view BundledGraphicPackName = "BreathOfTheWild_BetterVR";
 static constexpr std::string_view BundledGraphicPackPrefix = "BreathOfTheWild_BetterVR/";
 static constexpr std::string_view BundledDownloadedGraphicsPrefix = "BreathOfTheWild_Graphics/";
+static constexpr std::wstring_view LegacyLaunchFiles[] = {
+    L"Launch_BetterVR.bat",
+    L"BetterVR LAUNCH CEMU IN VR.bat",
+    L"BetterVR LAUNCH CEMU IN VR - COMPATIBILITY MODE.bat",
+    L"BetterVR UNINSTALL.bat",
+    L"BetterVR_Layer.dll",
+    L"VkLayer_BetterVR_Hook.dll",
+    L"BetterVR.txt",
+};
 
 struct EmbeddedAssetView {
     const void* data = nullptr;
     size_t size = 0;
 };
 
-struct DeleteOnCloseFiles {
-    std::vector<HANDLE> handles;
+struct TemporaryDownloadedGraphicsFiles {
+    std::vector<fs::path> paths;
 
-    void CloseAll() {
-        for (HANDLE handle : handles) {
-            if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
-                CloseHandle(handle);
+    void DeleteAll() {
+        for (const fs::path& path : paths) {
+            std::error_code ec;
+            fs::remove(path, ec);
+            if (ec && ec.value() != ERROR_FILE_NOT_FOUND) {
+                LogLine("Failed to remove temporary downloaded graphics override file: " + Narrow(path) + " (" + ec.message() + ")");
             }
         }
-        handles.clear();
+        paths.clear();
     }
 
-    ~DeleteOnCloseFiles() {
-        CloseAll();
+    ~TemporaryDownloadedGraphicsFiles() {
+        DeleteAll();
     }
 };
 
@@ -410,6 +421,22 @@ static bool RemoveInstalledAssets(const LauncherPaths& paths) {
     return success;
 }
 
+static void CleanupLegacyLaunchFiles(const LauncherPaths& paths) {
+    for (std::wstring_view fileName : LegacyLaunchFiles) {
+        const fs::path filePath = paths.launcherDir / fs::path(fileName);
+        std::error_code ec;
+        const bool removed = fs::remove(filePath, ec);
+        if (ec) {
+            LogLine("Failed to remove legacy BetterVR launch file: " + Narrow(filePath) + " (" + ec.message() + ")");
+            continue;
+        }
+
+        if (removed) {
+            LogLine("Removed legacy BetterVR launch file: " + Narrow(filePath));
+        }
+    }
+}
+
 static bool ReplaceRuleValue(std::string& contents, const std::string& key, const std::string& value) {
     bool replacedAny = false;
     size_t searchPosition = 0;
@@ -448,43 +475,43 @@ static bool ReplaceRuleValue(std::string& contents, const std::string& key, cons
     return replacedAny;
 }
 
-static bool WriteDeleteOnCloseFile(const fs::path& path, const unsigned char* data, size_t size, DeleteOnCloseFiles& openFiles) {
-    if (!EnsureDirectory(path.parent_path(), "Failed to create downloaded graphics parent directory")) {
+static std::optional<fs::path> GetDownloadedGraphicsOutputPath(const LauncherPaths& paths, std::string_view assetRelativePath) {
+    if (!assetRelativePath.starts_with(BundledDownloadedGraphicsPrefix)) {
+        return std::nullopt;
+    }
+
+    assetRelativePath.remove_prefix(BundledDownloadedGraphicsPrefix.size());
+    return paths.downloadedGraphicsDir / fs::path(std::string(assetRelativePath));
+}
+
+static bool WriteTemporaryDownloadedGraphicsFile(const fs::path& path, const unsigned char* data, size_t size, TemporaryDownloadedGraphicsFiles& extractedFiles) {
+    if (!WriteBinaryFile(path, data, size)) {
         return false;
     }
 
-    HANDLE fileHandle = CreateFileW(
-        path.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_DELETE,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr
-    );
-    if (fileHandle == INVALID_HANDLE_VALUE) {
-        LogLine("Failed to create delete-on-close file: " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
-        return false;
-    }
+    extractedFiles.paths.push_back(path);
+    return true;
+}
 
-    if (size > 0) {
-        const DWORD sizeDword = static_cast<DWORD>(size);
-        DWORD bytesWritten = 0;
-        if (!WriteFile(fileHandle, data, sizeDword, &bytesWritten, nullptr) || bytesWritten != sizeDword) {
-            LogLine("Failed to write delete-on-close file: " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
-            CloseHandle(fileHandle);
-            return false;
+static void CleanupDownloadedGraphicsOverrideFiles(const LauncherPaths& paths) {
+    for (size_t index = 0; index < EmbeddedAssets::AssetCount; ++index) {
+        const EmbeddedAssets::Asset& asset = EmbeddedAssets::Assets[index];
+        if (asset.kind != EmbeddedAssets::AssetKind::DownloadedGraphics) {
+            continue;
+        }
+
+        const std::optional<fs::path> outputPath = GetDownloadedGraphicsOutputPath(paths, asset.relativePath);
+        if (!outputPath.has_value()) {
+            LogLine("Embedded asset had unexpected downloaded graphics path during cleanup: " + std::string(asset.relativePath));
+            continue;
+        }
+
+        std::error_code ec;
+        fs::remove(*outputPath, ec);
+        if (ec && ec.value() != ERROR_FILE_NOT_FOUND) {
+            LogLine("Failed to remove stale downloaded graphics override file: " + Narrow(*outputPath) + " (" + ec.message() + ")");
         }
     }
-
-    if (!FlushFileBuffers(fileHandle)) {
-        LogLine("Failed to flush delete-on-close file: " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
-        CloseHandle(fileHandle);
-        return false;
-    }
-
-    openFiles.handles.push_back(fileHandle);
-    return true;
 }
 
 static bool MoveDownloadedGraphicsIntoSubfolder(const LauncherPaths& paths) {
@@ -549,7 +576,7 @@ static bool MoveDownloadedGraphicsIntoSubfolder(const LauncherPaths& paths) {
     return true;
 }
 
-static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const OpenXRProbeResult& probeResult, DeleteOnCloseFiles& openFiles) {
+static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const OpenXRProbeResult& probeResult, TemporaryDownloadedGraphicsFiles& extractedFiles) {
     if (!fs::exists(paths.downloadedGraphicsDir) || !fs::is_directory(paths.downloadedGraphicsDir)) {
         const std::string message =
             "The BotW Community Graphic Packs are not installed yet.\n\n"
@@ -569,6 +596,8 @@ static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const 
         LogLine("Downloaded BOTW Graphics sentinel subfolder already exists: " + Narrow(paths.downloadedGraphicsSubfolder));
     }
 
+    CleanupDownloadedGraphicsOverrideFiles(paths);
+
     for (size_t index = 0; index < EmbeddedAssets::AssetCount; ++index) {
         const EmbeddedAssets::Asset& asset = EmbeddedAssets::Assets[index];
         if (asset.kind != EmbeddedAssets::AssetKind::DownloadedGraphics) {
@@ -577,19 +606,19 @@ static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const 
 
         const std::optional<EmbeddedAssetView> assetView = LoadEmbeddedAsset(asset);
         if (!assetView.has_value()) {
-            openFiles.CloseAll();
+            extractedFiles.DeleteAll();
+            return false;
+        }
+
+        const std::optional<fs::path> outputPath = GetDownloadedGraphicsOutputPath(paths, asset.relativePath);
+        if (!outputPath.has_value()) {
+            LogLine("Embedded asset had unexpected downloaded graphics path: " + std::string(asset.relativePath));
+            extractedFiles.DeleteAll();
             return false;
         }
 
         std::string_view relativePath = asset.relativePath;
-        if (!relativePath.starts_with(BundledDownloadedGraphicsPrefix)) {
-            LogLine("Embedded asset had unexpected downloaded graphics path: " + std::string(relativePath));
-            openFiles.CloseAll();
-            return false;
-        }
-
         relativePath.remove_prefix(BundledDownloadedGraphicsPrefix.size());
-        const fs::path outputPath = paths.downloadedGraphicsDir / fs::path(std::string(relativePath));
 
         if (relativePath == "rules.txt") {
             std::string contents(static_cast<const char*>(assetView->data), assetView->size);
@@ -603,17 +632,17 @@ static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const 
                 LogLine("Bundled BOTW Graphics rules did not contain BetterVR resolution variables");
             }
 
-            if (!WriteDeleteOnCloseFile(outputPath, reinterpret_cast<const unsigned char*>(contents.data()), contents.size(), openFiles)) {
-                openFiles.CloseAll();
+            if (!WriteTemporaryDownloadedGraphicsFile(*outputPath, reinterpret_cast<const unsigned char*>(contents.data()), contents.size(), extractedFiles)) {
+                extractedFiles.DeleteAll();
                 return false;
             }
         }
-        else if (!WriteDeleteOnCloseFile(outputPath, static_cast<const unsigned char*>(assetView->data), assetView->size, openFiles)) {
-            openFiles.CloseAll();
+        else if (!WriteTemporaryDownloadedGraphicsFile(*outputPath, static_cast<const unsigned char*>(assetView->data), assetView->size, extractedFiles)) {
+            extractedFiles.DeleteAll();
             return false;
         }
 
-        LogLine("Installed temporary downloaded graphics override file: " + Narrow(outputPath));
+        LogLine("Installed temporary downloaded graphics override file: " + Narrow(*outputPath));
     }
 
     return true;
@@ -850,7 +879,9 @@ int wmain(int argc, wchar_t** argv) {
     try {
         const LauncherPaths paths = DetectPaths();
         InitLog(paths);
-        DeleteOnCloseFiles downloadedGraphicsOverrideFiles;
+        TemporaryDownloadedGraphicsFiles downloadedGraphicsOverrideFiles;
+        CleanupLegacyLaunchFiles(paths);
+        CleanupDownloadedGraphicsOverrideFiles(paths);
 
         bool uninstallRequested = false;
         bool keepInstalled = false;
@@ -870,6 +901,8 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         if (uninstallRequested) {
+            CleanupLegacyLaunchFiles(paths);
+            CleanupDownloadedGraphicsOverrideFiles(paths);
             if (!RemoveInstalledAssets(paths)) {
                 ShowErrorMessage("BetterVR uninstall did not complete cleanly. Check BetterVR_log.txt for details.");
                 return 1;
@@ -911,7 +944,7 @@ int wmain(int argc, wchar_t** argv) {
         const int exitCode = LaunchCemuAndWait(paths, forwardedArgs);
 
         EmbedCemuLog(paths);
-        downloadedGraphicsOverrideFiles.CloseAll();
+        downloadedGraphicsOverrideFiles.DeleteAll();
 
         if (!keepInstalled) {
             LogLine("Cleaning up installed assets after Cemu exit...");
