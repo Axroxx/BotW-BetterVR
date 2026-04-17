@@ -1,15 +1,35 @@
 #include "pch.h"
 
+#include <ktmw32.h>
+
 #include "embedded_assets.h"
 #include "launcher_common.h"
 
 static constexpr wchar_t VulkanImplicitLayersRegistryPath[] = L"SOFTWARE\\Khronos\\Vulkan\\ImplicitLayers";
 static constexpr std::string_view BundledGraphicPackName = "BreathOfTheWild_BetterVR";
 static constexpr std::string_view BundledGraphicPackPrefix = "BreathOfTheWild_BetterVR/";
+static constexpr std::string_view BundledDownloadedGraphicsPrefix = "BreathOfTheWild_Graphics/";
 
 struct EmbeddedAssetView {
     const void* data = nullptr;
     size_t size = 0;
+};
+
+struct DeleteOnCloseFiles {
+    std::vector<HANDLE> handles;
+
+    void CloseAll() {
+        for (HANDLE handle : handles) {
+            if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
+                CloseHandle(handle);
+            }
+        }
+        handles.clear();
+    }
+
+    ~DeleteOnCloseFiles() {
+        CloseAll();
+    }
 };
 
 static std::optional<EmbeddedAssetView> LoadEmbeddedAsset(const EmbeddedAssets::Asset& asset) {
@@ -428,191 +448,175 @@ static bool ReplaceRuleValue(std::string& contents, const std::string& key, cons
     return replacedAny;
 }
 
-static uint64_t ComputeRuleFileHash(std::string_view contents) {
-    uint64_t hash = 14695981039346656037ull;
-    for (unsigned char character : contents) {
-        hash ^= character;
-        hash *= 1099511628211ull;
-    }
-    return hash;
-}
-
-static std::optional<std::string> ReadTextFile(const fs::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input.is_open()) {
-        return std::nullopt;
-    }
-
-    return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-}
-
-static void DeleteGraphicsRulesPatchState(const LauncherPaths& paths) {
-    std::error_code ec;
-    fs::remove(paths.graphicsRulesPatchState, ec);
-    if (ec) {
-        LogLine("Failed to remove graphics rules patch state: " + ec.message());
-    }
-}
-
-static void DeleteGraphicsRulesBackupFiles(const LauncherPaths& paths) {
-    std::error_code ec;
-    fs::remove(paths.backupGraphicsRules, ec);
-    if (ec) {
-        LogLine("Failed to remove BOTW Graphics rules backup: " + ec.message());
-    }
-
-    DeleteGraphicsRulesPatchState(paths);
-}
-
-static bool WriteGraphicsRulesPatchState(const LauncherPaths& paths, uint64_t patchedHash) {
-    std::ofstream output(paths.graphicsRulesPatchState, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        LogLine("Failed to open graphics rules patch state file");
+static bool WriteDeleteOnCloseFile(const fs::path& path, const unsigned char* data, size_t size, DeleteOnCloseFiles& openFiles) {
+    if (!EnsureDirectory(path.parent_path(), "Failed to create downloaded graphics parent directory")) {
         return false;
     }
 
-    const std::string value = std::to_string(patchedHash);
-    output.write(value.data(), static_cast<std::streamsize>(value.size()));
-    if (!output.good()) {
-        LogLine("Failed to write graphics rules patch state file");
+    HANDLE fileHandle = CreateFileW(
+        path.c_str(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+        nullptr
+    );
+    if (fileHandle == INVALID_HANDLE_VALUE) {
+        LogLine("Failed to create delete-on-close file: " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
         return false;
     }
 
+    if (size > 0) {
+        const DWORD sizeDword = static_cast<DWORD>(size);
+        DWORD bytesWritten = 0;
+        if (!WriteFile(fileHandle, data, sizeDword, &bytesWritten, nullptr) || bytesWritten != sizeDword) {
+            LogLine("Failed to write delete-on-close file: " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
+            CloseHandle(fileHandle);
+            return false;
+        }
+    }
+
+    if (!FlushFileBuffers(fileHandle)) {
+        LogLine("Failed to flush delete-on-close file: " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
+        CloseHandle(fileHandle);
+        return false;
+    }
+
+    openFiles.handles.push_back(fileHandle);
     return true;
 }
 
-static void PatchGraphicsRules(const LauncherPaths& paths, const OpenXRProbeResult& probeResult) {
-    if (!fs::exists(paths.downloadedGraphicsRules)) {
-        LogLine("Downloaded BOTW Graphics rules were not found: " + Narrow(paths.downloadedGraphicsRules));
-        return;
+static bool MoveDownloadedGraphicsIntoSubfolder(const LauncherPaths& paths) {
+    wchar_t transactionDescription[] = L"BetterVR Graphics move";
+    HANDLE transactionHandle = CreateTransaction(nullptr, nullptr, 0, 0, 0, 0, transactionDescription);
+    if (transactionHandle == INVALID_HANDLE_VALUE) {
+        LogLine("Failed to create graphics transaction (error " + std::to_string(GetLastError()) + ")");
+        return false;
     }
 
-    const std::optional<std::string> originalContents = ReadTextFile(paths.downloadedGraphicsRules);
-    if (!originalContents.has_value()) {
-        LogLine("Failed to open downloaded BOTW Graphics rules");
-        return;
-    }
-
-    std::string contents = *originalContents;
-
-    bool coreVarsFound = false;
-    if (probeResult.leftWidth != 0 && probeResult.leftHeight != 0) {
-        coreVarsFound |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeWidth", std::to_string(probeResult.leftWidth));
-        coreVarsFound |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeHeight", std::to_string(probeResult.leftHeight));
-    }
-    coreVarsFound |= ReplaceRuleValue(contents, "$betterVRExposeVROptions:int", "1");
-
-    if (!coreVarsFound) {
-        LogLine("No BetterVR-managed BOTW Graphics variables were found");
-        MessageBoxA(
-            nullptr,
-            "Your BotW Graphics graphic pack doesn't have BetterVR support yet.\n\n"
-            "Please update your graphic packs in Cemu:\n"
-            "Options > Download community graphic packs\n\n"
-            "VR will still work, but the resolution may not be optimized for your headset.",
-            "BetterVR Launcher",
-            MB_OK | MB_ICONWARNING
-        );
-        return;
-    }
-
-    std::error_code backupEc;
-    bool backupExists = fs::exists(paths.backupGraphicsRules, backupEc);
-    bool stateExists = fs::exists(paths.graphicsRulesPatchState, backupEc);
-    bool needsFreshBackup = !backupExists || !stateExists;
-    if (!needsFreshBackup && stateExists) {
-        const std::optional<std::string> expectedHashText = ReadTextFile(paths.graphicsRulesPatchState);
-        if (!expectedHashText.has_value()) {
-            needsFreshBackup = true;
+    auto rollbackAndClose = [&]() {
+        if (!RollbackTransaction(transactionHandle)) {
+            LogLine("Failed to roll back graphics transaction (error " + std::to_string(GetLastError()) + ")");
         }
-        else if (*expectedHashText != std::to_string(ComputeRuleFileHash(*originalContents))) {
-            LogLine("Discarding stale BOTW Graphics rules backup because the source file changed since the previous patch session");
-            needsFreshBackup = true;
+        CloseHandle(transactionHandle);
+    };
+
+    if (!CreateDirectoryTransactedW(nullptr, paths.downloadedGraphicsSubfolder.c_str(), nullptr, transactionHandle)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS) {
+            LogLine("Failed to create graphics subfolder in transaction: " + Narrow(paths.downloadedGraphicsSubfolder) + " (error " + std::to_string(error) + ")");
+            rollbackAndClose();
+            return false;
         }
     }
-
-    if (needsFreshBackup) {
-        DeleteGraphicsRulesBackupFiles(paths);
-        fs::copy_file(paths.downloadedGraphicsRules, paths.backupGraphicsRules, backupEc);
-        if (backupEc) {
-            LogLine("Failed to back up BOTW Graphics rules: " + backupEc.message());
-        }
-        else {
-            LogLine("Backed up BOTW Graphics rules to: " + Narrow(paths.backupGraphicsRules));
-        }
-    }
-    else {
-        LogLine("Backup already exists (previous session may not have cleaned up): " + Narrow(paths.backupGraphicsRules));
-    }
-
-    const fs::path tempPath = paths.downloadedGraphicsRules.wstring() + L".bettervr.tmp";
-    std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        LogLine("Failed to open temporary BOTW Graphics rules file");
-        return;
-    }
-
-    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-    output.close();
 
     std::error_code ec;
-    fs::rename(tempPath, paths.downloadedGraphicsRules, ec);
+    fs::directory_iterator iterator(paths.downloadedGraphicsDir, ec);
     if (ec) {
-        fs::remove(paths.downloadedGraphicsRules, ec);
-        ec.clear();
-        fs::rename(tempPath, paths.downloadedGraphicsRules, ec);
+        LogLine("Failed to enumerate downloaded graphics directory: " + ec.message());
+        rollbackAndClose();
+        return false;
     }
 
-    if (ec) {
-        LogLine("Failed to replace BOTW Graphics rules: " + ec.message());
-        return;
+    for (const fs::directory_entry& entry : iterator) {
+        if (ec) {
+            LogLine("Failed to enumerate downloaded graphics directory: " + ec.message());
+            rollbackAndClose();
+            return false;
+        }
+
+        if (entry.path().filename() == paths.downloadedGraphicsSubfolder.filename()) {
+            continue;
+        }
+
+        const fs::path destinationPath = paths.downloadedGraphicsSubfolder / entry.path().filename();
+        if (!MoveFileTransactedW(entry.path().c_str(), destinationPath.c_str(), nullptr, nullptr, MOVEFILE_WRITE_THROUGH, transactionHandle)) {
+            LogLine("Failed to move graphics entry into sentinel subfolder: " + Narrow(entry.path()) + " (error " + std::to_string(GetLastError()) + ")");
+            rollbackAndClose();
+            return false;
+        }
     }
 
-    if (!WriteGraphicsRulesPatchState(paths, ComputeRuleFileHash(contents))) {
-        LogLine("Continuing without graphics rules restore tracking; the original rules will not be restored automatically");
-        DeleteGraphicsRulesBackupFiles(paths);
-        return;
+    if (!CommitTransaction(transactionHandle)) {
+        LogLine("Failed to commit graphics transaction (error " + std::to_string(GetLastError()) + ")");
+        rollbackAndClose();
+        return false;
     }
 
-    LogLine("Patched BOTW Graphics rules: " + Narrow(paths.downloadedGraphicsRules));
+    CloseHandle(transactionHandle);
+    LogLine("Moved downloaded BOTW Graphics files into: " + Narrow(paths.downloadedGraphicsSubfolder));
+    return true;
 }
 
-static void RestoreGraphicsRules(const LauncherPaths& paths) {
-    std::error_code ec;
-    if (!fs::exists(paths.backupGraphicsRules, ec)) {
-        DeleteGraphicsRulesPatchState(paths);
-        return;
+static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const OpenXRProbeResult& probeResult, DeleteOnCloseFiles& openFiles) {
+    if (!fs::exists(paths.downloadedGraphicsDir) || !fs::is_directory(paths.downloadedGraphicsDir)) {
+        const std::string message =
+            "The BotW Community Graphic Packs are not installed yet.\n\n"
+            "Please download the Community Graphic Packs by following the setup guide, or in Cemu go to:\n"
+            "Options > Graphic Packs > Download Community Graphic Packs";
+        LogLine("Downloaded BOTW Graphics directory was not found: " + Narrow(paths.downloadedGraphicsDir));
+        MessageBoxA(nullptr, message.c_str(), "BetterVR Launcher", MB_OK | MB_ICONWARNING);
+        return true;
     }
 
-    const std::optional<std::string> expectedHashText = ReadTextFile(paths.graphicsRulesPatchState);
-    if (!expectedHashText.has_value()) {
-        LogLine("Skipping BOTW Graphics rules restore because the patch state file is missing");
-        DeleteGraphicsRulesBackupFiles(paths);
-        return;
-    }
-
-    const std::optional<std::string> currentContents = ReadTextFile(paths.downloadedGraphicsRules);
-    if (!currentContents.has_value()) {
-        LogLine("Skipping BOTW Graphics rules restore because the current rules file could not be read");
-        DeleteGraphicsRulesBackupFiles(paths);
-        return;
-    }
-
-    if (*expectedHashText != std::to_string(ComputeRuleFileHash(*currentContents))) {
-        LogLine("Skipping BOTW Graphics rules restore because the file changed after BetterVR patched it");
-        DeleteGraphicsRulesBackupFiles(paths);
-        return;
-    }
-
-    fs::copy_file(paths.backupGraphicsRules, paths.downloadedGraphicsRules, fs::copy_options::overwrite_existing, ec);
-    if (ec) {
-        LogLine("Failed to restore BOTW Graphics rules from backup: " + ec.message());
+    if (!fs::exists(paths.downloadedGraphicsSubfolder)) {
+        if (!MoveDownloadedGraphicsIntoSubfolder(paths)) {
+            return false;
+        }
     }
     else {
-        LogLine("Restored BOTW Graphics rules from backup");
+        LogLine("Downloaded BOTW Graphics sentinel subfolder already exists: " + Narrow(paths.downloadedGraphicsSubfolder));
     }
 
-    DeleteGraphicsRulesBackupFiles(paths);
+    for (size_t index = 0; index < EmbeddedAssets::AssetCount; ++index) {
+        const EmbeddedAssets::Asset& asset = EmbeddedAssets::Assets[index];
+        if (asset.kind != EmbeddedAssets::AssetKind::DownloadedGraphics) {
+            continue;
+        }
+
+        const std::optional<EmbeddedAssetView> assetView = LoadEmbeddedAsset(asset);
+        if (!assetView.has_value()) {
+            openFiles.CloseAll();
+            return false;
+        }
+
+        std::string_view relativePath = asset.relativePath;
+        if (!relativePath.starts_with(BundledDownloadedGraphicsPrefix)) {
+            LogLine("Embedded asset had unexpected downloaded graphics path: " + std::string(relativePath));
+            openFiles.CloseAll();
+            return false;
+        }
+
+        relativePath.remove_prefix(BundledDownloadedGraphicsPrefix.size());
+        const fs::path outputPath = paths.downloadedGraphicsDir / fs::path(std::string(relativePath));
+
+        if (relativePath == "rules.txt") {
+            std::string contents(static_cast<const char*>(assetView->data), assetView->size);
+            bool replacedAny = false;
+            if (probeResult.leftWidth != 0 && probeResult.leftHeight != 0) {
+                replacedAny |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeWidth", std::to_string(probeResult.leftWidth));
+                replacedAny |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeHeight", std::to_string(probeResult.leftHeight));
+            }
+
+            if (!replacedAny) {
+                LogLine("Bundled BOTW Graphics rules did not contain BetterVR resolution variables");
+            }
+
+            if (!WriteDeleteOnCloseFile(outputPath, reinterpret_cast<const unsigned char*>(contents.data()), contents.size(), openFiles)) {
+                openFiles.CloseAll();
+                return false;
+            }
+        }
+        else if (!WriteDeleteOnCloseFile(outputPath, static_cast<const unsigned char*>(assetView->data), assetView->size, openFiles)) {
+            openFiles.CloseAll();
+            return false;
+        }
+
+        LogLine("Installed temporary downloaded graphics override file: " + Narrow(outputPath));
+    }
+
+    return true;
 }
 
 static std::string Trim(std::string value) {
@@ -846,6 +850,7 @@ int wmain(int argc, wchar_t** argv) {
     try {
         const LauncherPaths paths = DetectPaths();
         InitLog(paths);
+        DeleteOnCloseFiles downloadedGraphicsOverrideFiles;
 
         bool uninstallRequested = false;
         bool keepInstalled = false;
@@ -865,7 +870,6 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         if (uninstallRequested) {
-            RestoreGraphicsRules(paths);
             if (!RemoveInstalledAssets(paths)) {
                 ShowErrorMessage("BetterVR uninstall did not complete cleanly. Check BetterVR_log.txt for details.");
                 return 1;
@@ -897,13 +901,17 @@ int wmain(int argc, wchar_t** argv) {
             return 1;
         }
 
-        PatchGraphicsRules(paths, probeResult);
+        if (!InstallDownloadedGraphicsOverride(paths, probeResult, downloadedGraphicsOverrideFiles)) {
+            ShowErrorMessage("BetterVR could not install its temporary BotW Graphics override. Check BetterVR_log.txt for details.");
+            return 1;
+        }
+
         LogVulkanDetails();
 
         const int exitCode = LaunchCemuAndWait(paths, forwardedArgs);
 
         EmbedCemuLog(paths);
-        RestoreGraphicsRules(paths);
+        downloadedGraphicsOverrideFiles.CloseAll();
 
         if (!keepInstalled) {
             LogLine("Cleaning up installed assets after Cemu exit...");

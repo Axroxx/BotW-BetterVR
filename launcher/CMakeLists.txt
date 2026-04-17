@@ -23,7 +23,7 @@ target_include_directories(BetterVR_Launcher BEFORE PRIVATE ${CMAKE_SOURCE_DIR}/
 target_include_directories(BetterVR_Launcher AFTER PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(BetterVR_Launcher AFTER PRIVATE ${CMAKE_SOURCE_DIR}/dependencies)
 target_include_directories(BetterVR_Launcher SYSTEM PRIVATE ${VULKAN_HEADERS_INCLUDE_DIRS})
-target_link_libraries(BetterVR_Launcher PRIVATE OpenXR::headers OpenXR::openxr_loader)
+target_link_libraries(BetterVR_Launcher PRIVATE OpenXR::headers OpenXR::openxr_loader ktmw32)
 target_compile_definitions(BetterVR_Launcher PRIVATE BETTERVR_LAUNCHER_VERSION="${PROJECT_VERSION}")
 target_link_options(BetterVR_Launcher PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:wmainCRTStartup)
 

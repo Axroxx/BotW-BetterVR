@@ -28,9 +28,9 @@ struct LauncherPaths {
     fs::path settingsIni;
     fs::path targetBase;
     fs::path targetPack;
+    fs::path downloadedGraphicsDir;
     fs::path downloadedGraphicsRules;
-    fs::path backupGraphicsRules;
-    fs::path graphicsRulesPatchState;
+    fs::path downloadedGraphicsSubfolder;
     fs::path launcherLog;
     fs::path updateIgnoreFile;
     fs::path runtimeLayerDll;
@@ -162,9 +162,9 @@ inline LauncherPaths DetectPaths() {
     }
 
     paths.targetPack = paths.targetBase / fs::path("BreathOfTheWild_BetterVR");
-    paths.downloadedGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt";
-    paths.backupGraphicsRules = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt.bettervr.backup";
-    paths.graphicsRulesPatchState = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics" / "rules.txt.bettervr.state";
+    paths.downloadedGraphicsDir = paths.targetBase / "downloadedGraphicPacks" / "BreathOfTheWild" / "Graphics";
+    paths.downloadedGraphicsRules = paths.downloadedGraphicsDir / "rules.txt";
+    paths.downloadedGraphicsSubfolder = paths.downloadedGraphicsDir / "NotUsedIfBetterVRPlacesRulesTxtNextToThis";
     paths.runtimeLayerDll = paths.targetPack / "BetterVR_Layer.dll";
     paths.runtimeLayerJson = paths.targetPack / "BetterVR_Layer.json";
     return paths;
