@@ -30,53 +30,38 @@ $shadowFarEnd = 1.0
 # Should be set to 1 or 2 (changes verbosity of loggin) when trying to log the layout of panes while they're getting loaded for debugging purposes
 $enableUltrawideDebugLogging:int = 0
 
-# BetterVR specific options
-$betterVRRecommendedEyeWidth = 1440
-$betterVRRecommendedEyeHeight = 1584
-
-
 # VR Resolution Multiplier (BetterVR)
 
 [Preset]
 name = 0.5x (Only For 8K VR headsets)
 category = VR Resolution Multiplier
-$betterVRRecommendedEyeWidth = 1440
-$betterVRRecommendedEyeHeight = 1584
-$width = $betterVRRecommendedEyeWidth * 0.5
-$height = $betterVRRecommendedEyeHeight * 0.5
+$width = __BETTERVR_05_WIDTH__
+$height = __BETTERVR_05_HEIGHT__
 
 [Preset]
 name = 1x (Native Headset Resolution, Default)
 category = VR Resolution Multiplier
 default = 1
-$betterVRRecommendedEyeWidth = 1440
-$betterVRRecommendedEyeHeight = 1584
-$width = $betterVRRecommendedEyeWidth
-$height = $betterVRRecommendedEyeHeight
+$width = __BETTERVR_10_WIDTH__
+$height = __BETTERVR_10_HEIGHT__
 
 [Preset]
 name = 2x (Good For Anti-Aliasing, Recommended)
 category = VR Resolution Multiplier
-$betterVRRecommendedEyeWidth = 1440
-$betterVRRecommendedEyeHeight = 1584
-$width = $betterVRRecommendedEyeWidth * 2
-$height = $betterVRRecommendedEyeHeight * 2
+$width = __BETTERVR_20_WIDTH__
+$height = __BETTERVR_20_HEIGHT__
 
 [Preset]
 name = 3x (Best Anti-Aliasing, Requires A Good GPU)
 category = VR Resolution Multiplier
-$betterVRRecommendedEyeWidth = 1440
-$betterVRRecommendedEyeHeight = 1584
-$width = $betterVRRecommendedEyeWidth * 3
-$height = $betterVRRecommendedEyeHeight * 3
+$width = __BETTERVR_30_WIDTH__
+$height = __BETTERVR_30_HEIGHT__
 
 [Preset]
 name = 4x (Likely Costs Performance)
 category = VR Resolution Multiplier
-$betterVRRecommendedEyeWidth = 1440
-$betterVRRecommendedEyeHeight = 1584
-$width = $betterVRRecommendedEyeWidth * 4
-$height = $betterVRRecommendedEyeHeight * 4
+$width = __BETTERVR_40_WIDTH__
+$height = __BETTERVR_40_HEIGHT__
 
 # Anti-Aliasing
 

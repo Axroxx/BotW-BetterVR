@@ -1,5 +1,7 @@
 #include "pch.h"
 
+#include <array>
+#include <cmath>
 #include <ktmw32.h>
 
 #include "embedded_assets.h"
@@ -9,6 +11,9 @@ static constexpr wchar_t VulkanImplicitLayersRegistryPath[] = L"SOFTWARE\\Khrono
 static constexpr std::string_view BundledGraphicPackName = "BreathOfTheWild_BetterVR";
 static constexpr std::string_view BundledGraphicPackPrefix = "BreathOfTheWild_BetterVR/";
 static constexpr std::string_view BundledDownloadedGraphicsPrefix = "BreathOfTheWild_Graphics/";
+static constexpr uint32_t BetterVRResolutionSearchAlignment = 8;
+static constexpr uint32_t BetterVRResolutionSearchRadius = 32;
+static constexpr double BetterVRPreferredMatchDistance = 32.0;
 static constexpr std::wstring_view LegacyLaunchFiles[] = {
     L"Launch_BetterVR.bat",
     L"BetterVR LAUNCH CEMU IN VR.bat",
@@ -23,6 +28,28 @@ struct EmbeddedAssetView {
     const void* data = nullptr;
     size_t size = 0;
 };
+
+struct BetterVRTextureRedefineRule {
+    uint32_t width;
+    uint32_t height;
+    double weight;
+    double heightBias;
+};
+
+static constexpr std::array<BetterVRTextureRedefineRule, 12> BetterVRTextureRedefineRules = {{
+    { 640, 368, 8.0, 0.49 },
+    { 640, 360, 8.0, 0.0 },
+    { 384, 192, 7.0, 0.0 },
+    { 320, 192, 7.0, 0.0 },
+    { 320, 180, 7.0, 0.0 },
+    { 192, 96, 6.0, 0.0 },
+    { 160, 96, 6.0, 0.0 },
+    { 160, 90, 6.0, 0.0 },
+    { 128, 48, 5.0, 0.0 },
+    { 96, 48, 5.0, 0.0 },
+    { 80, 45, 4.0, 0.0 },
+    { 64, 64, 4.0, 0.0 },
+}};
 
 struct TemporaryDownloadedGraphicsFiles {
     std::vector<fs::path> paths;
@@ -437,42 +464,78 @@ static void CleanupLegacyLaunchFiles(const LauncherPaths& paths) {
     }
 }
 
-static bool ReplaceRuleValue(std::string& contents, const std::string& key, const std::string& value) {
+static bool ReplaceTextToken(std::string& contents, std::string_view token, const std::string& value) {
     bool replacedAny = false;
     size_t searchPosition = 0;
-
-    while (searchPosition < contents.size()) {
-        const size_t lineStart = searchPosition;
-        size_t lineEnd = contents.find_first_of("\r\n", lineStart);
-        if (lineEnd == std::string::npos) {
-            lineEnd = contents.size();
-        }
-
-        const std::string_view line(contents.data() + lineStart, lineEnd - lineStart);
-        const size_t keyStart = line.find_first_not_of(" \t");
-        if (keyStart != std::string_view::npos && line.compare(keyStart, key.size(), key) == 0) {
-            const size_t separatorStart = line.find_first_not_of(" \t", keyStart + key.size());
-            if (separatorStart != std::string_view::npos && line[separatorStart] == '=') {
-                const std::string replacement = std::string(line.substr(0, keyStart)) + key + " = " + value;
-                contents.replace(lineStart, lineEnd - lineStart, replacement);
-                lineEnd = lineStart + replacement.size();
-                replacedAny = true;
-            }
-        }
-
-        if (lineEnd == contents.size()) {
-            break;
-        }
-
-        if (contents[lineEnd] == '\r' && lineEnd + 1 < contents.size() && contents[lineEnd + 1] == '\n') {
-            searchPosition = lineEnd + 2;
-        }
-        else {
-            searchPosition = lineEnd + 1;
-        }
+    while ((searchPosition = contents.find(token, searchPosition)) != std::string::npos) {
+        contents.replace(searchPosition, token.size(), value);
+        searchPosition += value.size();
+        replacedAny = true;
     }
 
     return replacedAny;
+}
+
+static double GetDistanceToNearestInteger(double value) {
+    return std::abs(value - std::round(value));
+}
+
+static double GetTextureRedefinePenalty(uint32_t width, uint32_t height) {
+    double penalty = 0.0;
+    for (const BetterVRTextureRedefineRule& rule : BetterVRTextureRedefineRules) {
+        const double overwriteWidth = (double(width) / 1280.0) * rule.width;
+        const double overwriteHeight = ((double(height) / 720.0) * rule.height) + rule.heightBias;
+        penalty += (GetDistanceToNearestInteger(overwriteWidth) + GetDistanceToNearestInteger(overwriteHeight)) * rule.weight;
+    }
+
+    return penalty;
+}
+
+static uint32_t AlignDown(uint32_t value, uint32_t alignment) {
+    return value - (value % alignment);
+}
+
+static std::pair<uint32_t, uint32_t> GetNearestRulesCompatibleEyeResolution(double width, double height) {
+    if (width <= 0.0 || height <= 0.0) {
+        return { 0, 0 };
+    }
+
+    struct ResolutionCandidate {
+        uint32_t width;
+        uint32_t height;
+        double distance;
+        double penalty;
+    };
+
+    const auto evaluateCandidate = [width, height](uint32_t candidateWidth, uint32_t candidateHeight) {
+        const double distance = std::hypot(double(candidateWidth) - width, double(candidateHeight) - height);
+        return ResolutionCandidate{ candidateWidth, candidateHeight, distance, GetTextureRedefinePenalty(candidateWidth, candidateHeight) };
+    };
+
+    const uint32_t targetWidth = std::max(1u, static_cast<uint32_t>(std::llround(width)));
+    const uint32_t targetHeight = std::max(1u, static_cast<uint32_t>(std::llround(height)));
+    const ResolutionCandidate targetCandidate = evaluateCandidate(targetWidth, targetHeight);
+    ResolutionCandidate bestNearbyMatch = targetCandidate;
+
+    const uint32_t searchStartWidth = std::max(BetterVRResolutionSearchAlignment, AlignDown(targetWidth > BetterVRResolutionSearchRadius ? targetWidth - BetterVRResolutionSearchRadius : BetterVRResolutionSearchAlignment, BetterVRResolutionSearchAlignment));
+    const uint32_t searchStartHeight = std::max(BetterVRResolutionSearchAlignment, AlignDown(targetHeight > BetterVRResolutionSearchRadius ? targetHeight - BetterVRResolutionSearchRadius : BetterVRResolutionSearchAlignment, BetterVRResolutionSearchAlignment));
+    const uint32_t searchEndWidth = targetWidth + BetterVRResolutionSearchRadius;
+    const uint32_t searchEndHeight = targetHeight + BetterVRResolutionSearchRadius;
+
+    for (uint32_t candidateWidth = searchStartWidth; candidateWidth <= searchEndWidth; candidateWidth += BetterVRResolutionSearchAlignment) {
+        for (uint32_t candidateHeight = searchStartHeight; candidateHeight <= searchEndHeight; candidateHeight += BetterVRResolutionSearchAlignment) {
+            const ResolutionCandidate candidate = evaluateCandidate(candidateWidth, candidateHeight);
+            if (candidate.distance <= BetterVRPreferredMatchDistance && (candidate.penalty < bestNearbyMatch.penalty || (candidate.penalty == bestNearbyMatch.penalty && candidate.distance < bestNearbyMatch.distance))) {
+                bestNearbyMatch = candidate;
+            }
+        }
+    }
+
+    if (bestNearbyMatch.penalty < targetCandidate.penalty) {
+        return { bestNearbyMatch.width, bestNearbyMatch.height };
+    }
+
+    return { targetCandidate.width, targetCandidate.height };
 }
 
 static std::optional<fs::path> GetDownloadedGraphicsOutputPath(const LauncherPaths& paths, std::string_view assetRelativePath) {
@@ -624,12 +687,31 @@ static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const 
             std::string contents(static_cast<const char*>(assetView->data), assetView->size);
             bool replacedAny = false;
             if (probeResult.leftWidth != 0 && probeResult.leftHeight != 0) {
-                replacedAny |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeWidth", std::to_string(probeResult.leftWidth));
-                replacedAny |= ReplaceRuleValue(contents, "$betterVRRecommendedEyeHeight", std::to_string(probeResult.leftHeight));
+                struct BetterVRPresetPlaceholder {
+                    const char* widthToken;
+                    const char* heightToken;
+                    double multiplier;
+                    const char* label;
+                };
+
+                static constexpr BetterVRPresetPlaceholder PresetPlaceholders[] = {
+                    { "__BETTERVR_05_WIDTH__", "__BETTERVR_05_HEIGHT__", 0.5, "0.5x" },
+                    { "__BETTERVR_10_WIDTH__", "__BETTERVR_10_HEIGHT__", 1.0, "1x" },
+                    { "__BETTERVR_20_WIDTH__", "__BETTERVR_20_HEIGHT__", 2.0, "2x" },
+                    { "__BETTERVR_30_WIDTH__", "__BETTERVR_30_HEIGHT__", 3.0, "3x" },
+                    { "__BETTERVR_40_WIDTH__", "__BETTERVR_40_HEIGHT__", 4.0, "4x" },
+                };
+
+                for (const BetterVRPresetPlaceholder& preset : PresetPlaceholders) {
+                    const std::pair<uint32_t, uint32_t> adjustedResolution = GetNearestRulesCompatibleEyeResolution(double(probeResult.leftWidth) * preset.multiplier, double(probeResult.leftHeight) * preset.multiplier);
+                    LogLine("Adjusted BetterVR " + std::string(preset.label) + " resolution: " + std::to_string(adjustedResolution.first) + "x" + std::to_string(adjustedResolution.second));
+                    replacedAny |= ReplaceTextToken(contents, preset.widthToken, std::to_string(adjustedResolution.first));
+                    replacedAny |= ReplaceTextToken(contents, preset.heightToken, std::to_string(adjustedResolution.second));
+                }
             }
 
             if (!replacedAny) {
-                LogLine("Bundled BOTW Graphics rules did not contain BetterVR resolution variables");
+                LogLine("Bundled BOTW Graphics rules did not contain BetterVR preset resolution placeholders");
             }
 
             if (!WriteTemporaryDownloadedGraphicsFile(*outputPath, reinterpret_cast<const unsigned char*>(contents.data()), contents.size(), extractedFiles)) {
