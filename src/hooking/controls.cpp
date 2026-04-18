@@ -69,7 +69,10 @@ HandGestureState calculateHandGesture(
     constexpr float SHOULDER_RADIUS = 0.35f;
     constexpr float MOUTH_RADIUS = 0.2f;
     constexpr float WAIST_OFFSET_Y = 0.45f;
-    constexpr float SHIELD_GUARD_OFFSET_Y = 0.60f;
+    constexpr float MIN_SHIELD_GUARD_OFFSET_Y = 0.40f;
+    constexpr float MAX_SHIELD_GUARD_OFFSET_Y = 0.60f;
+    constexpr float SHIELD_GUARD_REFERENCE_HEIGHT_MIN = 1.60f;
+    constexpr float SHIELD_GUARD_REFERENCE_HEIGHT_MAX = 2.00f;
     
     // Calculate directional vectors
     glm::vec3 headsetForward = -glm::normalize(glm::vec3(headsetMatrix[2]));
@@ -113,7 +116,9 @@ HandGestureState calculateHandGesture(
     gesture.isCloseToWaist = (handPos.y < waistPos.y);
 
     // Check hand height for shield (rough estimate)
-    glm::fvec3 chestPos = headsetPos - glm::fvec3(0.0f, SHIELD_GUARD_OFFSET_Y, 0.0f);
+    float shieldGuardHeightT = (headsetPos.y - SHIELD_GUARD_REFERENCE_HEIGHT_MIN) / (SHIELD_GUARD_REFERENCE_HEIGHT_MAX - SHIELD_GUARD_REFERENCE_HEIGHT_MIN);
+    float shieldGuardOffsetY = std::lerp(MIN_SHIELD_GUARD_OFFSET_Y, MAX_SHIELD_GUARD_OFFSET_Y, glm::clamp(shieldGuardHeightT, 0.0f, 1.0f));
+    glm::fvec3 chestPos = headsetPos - glm::fvec3(0.0f, shieldGuardOffsetY, 0.0f);
     gesture.isNearChestHeight = (handPos.y > chestPos.y);
 
     // Check distance from stored position
