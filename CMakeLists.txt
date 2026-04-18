@@ -2,7 +2,7 @@ set(VCPKG_TARGET_TRIPLET "x64-windows-static")
 set(VCPKG_HOST_TRIPLET "x64-windows-static")
 
 cmake_minimum_required(VERSION 3.27.0)
-project(BetterVR_Layer VERSION 0.9.14 LANGUAGES CXX)
+project(BetterVR_Layer VERSION 0.9.15 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
