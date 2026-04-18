@@ -56,7 +56,12 @@ std::optional<CemuHooks::HybridEventSettings> CemuHooks::GetFirstPersonSettingsF
         //}
     }
 
-    return s_currentEventSettings;
+    HybridEventSettings settings = s_currentEventSettings;
+    if (GetSettings().AlwaysPreventFirstPersonCutsceneCameraMovement()) {
+        settings.ignoreCameraRotation = true;
+    }
+
+    return settings;
 }
 
 bool CemuHooks::IsFirstPerson() {

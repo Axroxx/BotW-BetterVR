@@ -884,6 +884,10 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                             settings.enableDebugOverlay.AddToGUI(&changed);
                         });
 
+                        DrawSettingRow("No Camera Movement in First-Person Cutscenes", [&]() {
+                            settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(&changed);
+                        });
+
                         if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
                             DrawSettingRow("Angular Velocity Fixer", [&]() {
                                 settings.buggyAngularVelocity.AddComboToGUI(&changed, ModSettings::toDisplayString);

@@ -723,6 +723,7 @@ struct ModSettings {
 
     // advanced settings
     BoolSetting enableDebugOverlay = BoolSetting("EnableDebugOverlay", false);
+    BoolSetting alwaysPreventFirstPersonCutsceneCameraMovement = BoolSetting("AlwaysPreventFirstPersonCutsceneCameraMovement", false);
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
@@ -765,6 +766,7 @@ struct ModSettings {
             &hudDistance,
             &hudSize,
             &enableDebugOverlay,
+            &alwaysPreventFirstPersonCutsceneCameraMovement,
             &buggyAngularVelocity,
             &performanceOverlay,
             &performanceOverlayFrequency,
@@ -837,6 +839,7 @@ struct ModSettings {
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
+    bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
