@@ -85,10 +85,10 @@ data_TableOfCutsceneEventsSettings:
 .string "Demo021_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Arriving in sky demo
 .string "Demo022_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Demonstration at Teva with Do | skydiving at the divine beast
 .string "Demo023_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Assassin changing Demo
-.string "Demo024_0,FP_ON,PAN_ON,HND_OFF,CTRL_OFF" ; name: Door opening demo
+.string "Demo024_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Door opening demo
 .string "Demo024_1,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Door opening demo (Do not stop chemicals)
 .string "Demo024_2,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Door opening demo (do not stop actors and chemicals)
-.string "Demo025_0,FP_ON,PAN_ON,HND_OFF,CTRL_OFF" ; name: General scene start demo
+.string "Demo025_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: General scene start demo
 .string "Demo025_1,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: E3 only scene exit demo
 .string "Demo025_2,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; name: Title Scene Start Demo
 .string "Demo026_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Combat shrine: enemy appearing demo
@@ -833,7 +833,7 @@ data_TableOfCutsceneEventsSettings:
 .string "Npc_Zora002,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora003,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora004,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
-.string "Npc_Zora005,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
+.string "Npc_Zora005,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
 .string "Npc_Zora006,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora007,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora008,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
@@ -856,7 +856,7 @@ data_TableOfCutsceneEventsSettings:
 .string "Npc_Zora034,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora035,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora036,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
-.string "Npc_Zora037,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
+.string "Npc_Zora037,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_Zora126,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
 .string "Npc_ZoraB001,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_ZoraGoron_001,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
@@ -875,8 +875,8 @@ data_TableOfCutsceneEventsSettings:
 .string "Obj_DiaryTamul_A_05,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Obj_Diary_touzoku_01,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Obj_Diary_touzoku_02,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
-.string "Obj_DRStone_A_01,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
-.string "OldKorok_Help,FP_ON,PAN_ON,HND_OFF,CTRL_ON"
+.string "Obj_DRStone_A_01,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; sheikah slate require
+.string "OldKorok_Help,FP_ON,PAN_OFF,HND_OFF,CTRL_ON"
 .string "OneHundred,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "OperationGuide,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "PictureMemory,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
@@ -901,7 +901,7 @@ data_TableOfCutsceneEventsSettings:
 .string "SDemo_B-6,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
 .string "SDemo_B-7,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "SDemo_D-6,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; Zelda telling Link to follow the marker on his map to the first, buried, tower.
-.string "SDemo_F-2,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
+.string "SDemo_F-2,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "SearchStone,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
 .string "SecretofObject,FP_ON,PAN_ON,HND_OFF,CTRL_OFF" ; shrine quest
 .string "SeekerEye,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"

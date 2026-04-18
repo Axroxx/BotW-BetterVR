@@ -44,13 +44,13 @@ addi r1, r1, 0x10
 mtlr r0
 blr
 
-; patch CameraEventAnim
+; patch CameraEventAnim (going down the elevator after loading into the shrine, shrine of resurrection wake up, etc.)
 0x02BA3214 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventMovePos
+; patch CameraEventMovePos (teleport for example)
 0x02BB9D30 = bla hook_calcCameraDuringEvent_trampoline
 ; patch CameraEventMovePos (specifically CameraEventMovePos::m_42)
 ; 0x02BB7034 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventMove
+; patch CameraEventMove (enter shrine elevator from overworld)
 0x02BB1F68 = bla hook_calcCameraDuringEvent_trampoline
 ; patch CameraEventGameOver
 0x02BAA378 = bla hook_calcCameraDuringEvent_trampoline
@@ -62,8 +62,12 @@ blr
 0x02BC7014 = bla hook_calcCameraDuringEvent_trampoline
 ; patch CameraEventTurn
 0x02BCD3F4 = bla hook_calcCameraDuringEvent_trampoline
-; patch CameraEventPolarCoordPlayerRel
+; patch CameraEventPolarCoordPlayerRel (shrine with test of strength whenever the boss comes up from the ground)
 0x02BC1A28 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventTalkManualCtrl/CameraEventTalkManualCtrlRet (repro by talking to koroks)
+0x02BCB414 = bla hook_calcCameraDuringEvent_trampoline
+; patch CameraEventIdling (seems to cause jumps, seen after cliff scene @ shrine of resurrection)
+0x02BAABC0 = bla hook_calcCameraDuringEvent_trampoline
 
 
 ; --------------------------------------------------------------------------------------
