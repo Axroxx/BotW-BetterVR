@@ -636,7 +636,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     }
 
     ImVec2 fullWindowWidth = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-    ImVec2 windowWidth = fullWindowWidth;
+    ImVec2 windowWidth = fullWindowWidth * ImVec2(0.75f, 1.0f);
 
     auto DrawSettingRow = [&](const char* label, auto drawWidget) {
         ImGui::AlignTextToFramePadding();
