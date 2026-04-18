@@ -694,7 +694,7 @@ struct ModSettings {
     static const char* toDisplayString(SwingSensitivity sensitivity) {
         switch (sensitivity) {
             case SwingSensitivity::SWING_EASY:
-                return "Easy";
+                return "Relaxed";
             case SwingSensitivity::SWING_NORMAL:
                 return "Normal";
             case SwingSensitivity::SWING_CUSTOM:
@@ -723,9 +723,6 @@ struct ModSettings {
 
     // advanced settings
     BoolSetting enableDebugOverlay = BoolSetting("EnableDebugOverlay", false);
-#ifdef _DEBUG
-    BoolSetting hideSettingsMenuInVRHeadset = BoolSetting("HideSettingsMenuInVRHeadset", false);
-#endif
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
@@ -768,9 +765,6 @@ struct ModSettings {
             &hudDistance,
             &hudSize,
             &enableDebugOverlay,
-#ifdef _DEBUG
-            &hideSettingsMenuInVRHeadset,
-#endif
             &buggyAngularVelocity,
             &performanceOverlay,
             &performanceOverlayFrequency,
@@ -843,11 +837,6 @@ struct ModSettings {
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
-#ifdef _DEBUG
-    bool HideSettingsMenuInVRHeadset() const { return hideSettingsMenuInVRHeadset; }
-#else
-    bool HideSettingsMenuInVRHeadset() const { return false; }
-#endif
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }

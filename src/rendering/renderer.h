@@ -186,7 +186,7 @@ public:
         static void DrawHUDLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, long frameIdx);
         void Render(long frameIdx, bool renderBackground, bool isDesktopView);
         void DrawAndCopyToImage(VkCommandBuffer cb, VkImage destImage, long frameIdx, bool isDesktopView);
-        void DrawHelpMenu(bool isDesktopView);
+        void DrawHelpMenu();
         void ProcessInputs(OpenXR::InputState& inputs, const VPADStatus& vpadStatus);
         int GetHelpImagePagesCount() const { return m_helpImages.size(); };
 

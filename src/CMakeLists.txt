@@ -18,6 +18,7 @@ target_sources(BetterVR_Layer PUBLIC
     ${CMAKE_SOURCE_DIR}/src/shader.h
     ${CMAKE_SOURCE_DIR}/src/utils/d3d12_utils.h
     ${CMAKE_SOURCE_DIR}/src/utils/vulkan_utils.h
+    ${CMAKE_SOURCE_DIR}/src/utils/game_utils.h
     ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/logger.h
     ${CMAKE_SOURCE_DIR}/src/utils/mod_settings.h
@@ -29,6 +30,7 @@ target_sources(BetterVR_Layer PUBLIC
     ${CMAKE_SOURCE_DIR}/src/hooking/layer.h
     ${CMAKE_SOURCE_DIR}/src/hooking/cemu_hooks.h
     ${CMAKE_SOURCE_DIR}/src/hooking/camera.cpp
+    ${CMAKE_SOURCE_DIR}/src/hooking/game_state.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/settings.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/weapon.h
     ${CMAKE_SOURCE_DIR}/src/hooking/weapon.cpp

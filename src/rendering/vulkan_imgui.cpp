@@ -343,7 +343,7 @@ void RND_Renderer::ImGuiOverlay::Update() {
     // keep a shared 16:9 canvas with a 1080p minimum menu size
     float uiScaleFactor = std::max(physicalUiRegion.w / 1080.0f, 1.0f);
 
-    uiScaleFactor *= 1.75f;
+    uiScaleFactor *= 2.0f;
 
     ImVec2 logicalRes = ImVec2(framebufferUiRegion.z / uiScaleFactor, framebufferUiRegion.w / uiScaleFactor);
 
@@ -433,16 +433,18 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
         EntityDebugger::DrawFPSOverlay(renderer);
     }
 
-    DrawHelpMenu(isDesktopView);
+    DrawHelpMenu();
 }
 
-constexpr uint8_t TOTAL_TABS = 4;
+constexpr uint8_t SETTINGS_TAB = 0;
+constexpr uint8_t HELP_TAB = 1;
+constexpr uint8_t FPS_OVERLAY_TAB = 2;
+constexpr uint8_t CREDITS_TAB = 3;
+constexpr uint8_t CUSTOM_ATTACK_SENSITIVITY_TAB = 4;
 void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const VPADStatus& vpadStatus) {
     auto& isMenuOpen = VRManager::instance().XR->m_isMenuOpen;
     if (!isMenuOpen)
         return;
-
-    const bool allowGamepadMenuInput = !GetSettings().HideSettingsMenuInVRHeadset();
 
     auto& io = ImGui::GetIO();
     bool inGame = inputs.shared.in_game;
@@ -468,7 +470,7 @@ void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const
         pageRight = inputs.inMenu.rightTrigger.currentState && inputs.inMenu.rightTrigger.changedSinceLastSync;
     }
 
-    uint32_t hold = allowGamepadMenuInput ? vpadStatus.hold.getLE() : 0;
+    uint32_t hold = vpadStatus.hold.getLE();
     backDown |= (hold & VPAD_BUTTON_B) != 0;
     confirmDown |= (hold & VPAD_BUTTON_A) != 0;
 
@@ -535,15 +537,21 @@ void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const
     bool l1 = applyInput(ImGuiKey_GamepadL1, pageLeft || ((hold & VPAD_BUTTON_L) != 0), VERTICAL_REFIRE_DELAY, 6);
     bool r1 = applyInput(ImGuiKey_GamepadR1, pageRight || ((hold & VPAD_BUTTON_R) != 0), VERTICAL_REFIRE_DELAY, 7);
 
+    const bool hasCustomAttackSensitivityTab = GetSettings().GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
+    const uint8_t totalTabs = hasCustomAttackSensitivityTab ? CUSTOM_ATTACK_SENSITIVITY_TAB + 1 : CREDITS_TAB + 1;
+    auto& currTab = VRManager::instance().XR->m_currMenuTab;
+    if (!hasCustomAttackSensitivityTab && currTab == CUSTOM_ATTACK_SENSITIVITY_TAB) {
+        currTab = SETTINGS_TAB;
+    }
+
     VRManager::instance().XR->m_forceTabChange = false;
     if (l1 || r1) {
-        auto& currTab = VRManager::instance().XR->m_currMenuTab;
         uint8_t prevTab = currTab;
         if (l1) {
-            currTab = (currTab - 1 + TOTAL_TABS) % TOTAL_TABS;
+            currTab = (currTab - 1 + totalTabs) % totalTabs;
         }
         if (r1) {
-            currTab = (currTab + 1) % TOTAL_TABS;
+            currTab = (currTab + 1) % totalTabs;
         }
 
         if (prevTab != currTab) {
@@ -576,10 +584,9 @@ void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const
     }
 }
 
-void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
+void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     auto& isMenuOpen = VRManager::instance().XR->m_isMenuOpen;
     auto& settings = GetSettings();
-    const bool shouldFadeSettingsWindow = !isDesktopView && settings.HideSettingsMenuInVRHeadset();
 
     float alphaForNotify = settings.tutorialPromptShown ? 0.9f : 0.98f;
     float timeLimit = settings.tutorialPromptShown ? 14.0f : 60.0f;
@@ -645,8 +652,14 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
         ImGui::PopItemWidth();
     };
 
+    const bool hasCustomAttackSensitivityTab = settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
+    auto& selectedTab = VRManager::instance().XR->m_currMenuTab;
+    if (!hasCustomAttackSensitivityTab && selectedTab == CUSTOM_ATTACK_SENSITIVITY_TAB) {
+        selectedTab = SETTINGS_TAB;
+        VRManager::instance().XR->m_forceTabChange = true;
+    }
+
     bool setTab = VRManager::instance().XR->m_forceTabChange;
-    uint8_t selectedTab = VRManager::instance().XR->m_currMenuTab;
 
     auto DrawStyledTab = [&](const char* label, uint32_t tabIdx, ImGuiTabItemFlags extraFlags = ImGuiTabItemFlags_None) {
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().FramePadding + ImVec2(0, 2.0f));
@@ -708,8 +721,8 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
 
     ImGui::SetNextWindowPos(fullWindowWidth * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(windowWidth, ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(shouldFadeSettingsWindow ? 0.0000001f : 1.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, shouldFadeSettingsWindow ? 0.0000001f : 1.0f);
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
     if (ImGui::Begin("BetterVR Settings & Help##Settings", &shouldStayOpen, ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
@@ -724,7 +737,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().FramePadding + ImVec2(0, 2.0f));
             if (ImGui::BeginTabBar("HelpMenuTabs")) {
                 ImGui::PopStyleVar();
-                if (DrawStyledTab(ICON_KI_COG "Settings", 0)) {
+                if (DrawStyledTab(ICON_KI_COG "Settings", SETTINGS_TAB)) {
                     ImGui::Separator();
                     DrawSettingRow("Boot Directly Into BotW", [&]() {
                         settings.bootDirectlyIntoGame.AddToGUI(&changed);
@@ -816,94 +829,21 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                             settings.axisThreshold.AddToGUI(&changed, windowWidth.x, 0.1f, 0.9f);
                         });
 
-                        DrawSettingRow("Swing Sensitivity", [&]() {
-                            settings.swingSensitivity.AddRadioToGUI(&changed, ModSettings::toDisplayString);
-                        });
-
                         if (settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM) {
-                            ImGui::Spacing();
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-                            ImGui::Text("Custom Stab Sensitivity");
-                            ImGui::PopStyleColor();
-
-                            DrawSettingRow("Debug Overlay Windows", [&]() {
-                                bool showLeftOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide::LEFT);
-                                if (ImGui::Checkbox("Left Hand", &showLeftOverlay)) {
-                                    ImGuiMenus::SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide::LEFT, showLeftOverlay);
+                            DrawSettingRow("Attack Sensitivity", [&]() {
+                                ImGui::TextUnformatted("Configured in the Custom Attack Sensitivity tab");
+                            });
+                        }
+                        else {
+                            DrawSettingRow("Attack Sensitivity", [&]() {
+                                int sensitivity = settings.GetSwingSensitivity() == SwingSensitivity::SWING_EASY ? 0 : 1;
+                                if (ImGui::RadioButton("Relaxed##SwingSensitivity", &sensitivity, 0)) {
+                                    settings.swingSensitivity = SwingSensitivity::SWING_EASY;
+                                    changed = true;
                                 }
                                 ImGui::SameLine();
-                                bool showRightOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide::RIGHT);
-                                if (ImGui::Checkbox("Right Hand", &showRightOverlay)) {
-                                    ImGuiMenus::SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide::RIGHT, showRightOverlay);
-                                }
-                            });
-
-                            DrawSettingRow("Stab Speed Threshold", [&]() {
-                                settings.customStabSpeedThreshold.AddToGUI(&changed, windowWidth.x, 0.01f, 0.50f, [](float) { return "%.2f m/s"; });
-                            });
-                            DrawSettingRow("Stab Accel Threshold", [&]() {
-                                settings.customStabAccThreshold.AddToGUI(&changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f m/s^2"; });
-                            });
-                            DrawSettingRow("Stab Aim Cone", [&]() {
-                                settings.customStabSteadinessCone.AddToGUI(&changed, windowWidth.x, 15.0f, 85.0f, [](float) { return "%.0f deg"; });
-                            });
-                            DrawSettingRow("Stab Twist Limit", [&]() {
-                                settings.customStabAngularSteadiness.AddToGUI(&changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
-                            });
-                            DrawSettingRow("Stab Travel Distance", [&]() {
-                                settings.customStabTravelDistance.AddToGUI(&changed, windowWidth.x, 0.05f, 0.50f, [](float) { return "%.2f m"; });
-                            });
-                            DrawSettingRow("Stab Lock Time", [&]() {
-                                settings.customMinGoodStabDuration.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
-                            });
-
-                            ImGui::Spacing();
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-                            ImGui::Text("Custom Swing Sensitivity");
-                            ImGui::PopStyleColor();
-
-                            DrawSettingRow("Swing Speed Threshold", [&]() {
-                                settings.customSlashSpeedThreshold.AddToGUI(&changed, windowWidth.x, 0.1f, 5.0f, [](float) { return "%.1f rad/s"; });
-                            });
-                            DrawSettingRow("Swing Accel Threshold", [&]() {
-                                settings.customSlashAccThreshold.AddToGUI(&changed, windowWidth.x, 3.0f, 40.0f, [](float) { return "%.1f rad/s^2"; });
-                            });
-                            DrawSettingRow("Swing Velocity Threshold", [&]() {
-                                settings.customSlashVelocityThreshold.AddToGUI(&changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
-                            });
-                            DrawSettingRow("Swing Drift Limit", [&]() {
-                                settings.customSlashAccDriftThreshold.AddToGUI(&changed, windowWidth.x, 2.0f, 30.0f, [](float) { return "%.1f rad/s^2"; });
-                            });
-                            DrawSettingRow("Swing Travel Angle", [&]() {
-                                settings.customSlashTravelAngle.AddToGUI(&changed, windowWidth.x, 10.0f, 90.0f, [](float) { return "%.0f deg"; });
-                            });
-                            DrawSettingRow("Swing Lock Time", [&]() {
-                                settings.customMinGoodSwingDuration.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
-                            });
-
-                            ImGui::Spacing();
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-                            ImGui::Text("Shared Tuning");
-                            ImGui::PopStyleColor();
-
-                            DrawSettingRow("Bad Sample Timeout", [&]() {
-                                settings.customMaxBadDuration.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
-                            });
-                            DrawSettingRow("Grace Period", [&]() {
-                                settings.customGoodSampleGracePeriod.AddToGUI(&changed, windowWidth.x, 10.0f, 200.0f, [](float) { return "%.0f ms"; });
-                            });
-                            DrawSettingRow("Input Smoothing", [&]() {
-                                settings.customSmoothingTimeConstant.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
-                            });
-                            DrawSettingRow("Drift Min Velocity", [&]() {
-                                settings.customAngularDriftMinVelocity.AddToGUI(&changed, windowWidth.x, 0.1f, 3.0f, [](float) { return "%.1f rad/s"; });
-                            });
-                            DrawSettingRow("Damage Output Scale", [&]() {
-                                settings.customDamageOutputScale.AddToGUI(&changed, windowWidth.x, 0.10f, 2.00f, [](float) { return "%.2fx"; });
-                            });
-                            DrawSettingRow("", [&]() {
-                                if (ImGui::Button("Reset Custom Weapon Sensitivity")) {
-                                    settings.ResetCustomWeaponSensitivity();
+                                if (ImGui::RadioButton("Normal##SwingSensitivity", &sensitivity, 1)) {
+                                    settings.swingSensitivity = SwingSensitivity::SWING_NORMAL;
                                     changed = true;
                                 }
                             });
@@ -928,15 +868,21 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                     }
 
                     if (ImGui::CollapsingHeader("Advanced Settings")) {
+                        DrawSettingRow("Use Custom Attack Sensitivity", [&]() {
+                            bool useCustomAttackSensitivity = settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
+                            if (ImGui::Checkbox("##UseCustomAttackSensitivity", &useCustomAttackSensitivity)) {
+                                settings.swingSensitivity = useCustomAttackSensitivity ? SwingSensitivity::SWING_CUSTOM : SwingSensitivity::SWING_NORMAL;
+                                if (!useCustomAttackSensitivity && VRManager::instance().XR->m_currMenuTab == CUSTOM_ATTACK_SENSITIVITY_TAB) {
+                                    VRManager::instance().XR->m_currMenuTab = SETTINGS_TAB;
+                                    VRManager::instance().XR->m_forceTabChange = true;
+                                }
+                                changed = true;
+                            }
+                        });
+
                         DrawSettingRow("Show Debugging Overlays (for developers)", [&]() {
                             settings.enableDebugOverlay.AddToGUI(&changed);
                         });
-
-#ifdef _DEBUG
-                        DrawSettingRow("Hide Settings Menu In VR Headset (for developers)", [&]() {
-                            settings.hideSettingsMenuInVRHeadset.AddToGUI(&changed);
-                        });
-#endif
 
                         if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
                             DrawSettingRow("Angular Velocity Fixer", [&]() {
@@ -962,7 +908,99 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                     ImGui::EndTabItem();
                 }
 
-                if (DrawStyledTab(ICON_KI_INFO_CIRCLE " Help & Controller Guide", 1)) {
+                if (hasCustomAttackSensitivityTab && DrawStyledTab("Custom Attack Sensitivity", CUSTOM_ATTACK_SENSITIVITY_TAB)) {
+                    ImGui::Separator();
+
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+                    ImGui::Text("Custom Stab Sensitivity");
+                    ImGui::PopStyleColor();
+
+                    DrawSettingRow("Debug Overlay Windows", [&]() {
+                        bool showLeftOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide::LEFT);
+                        if (ImGui::Checkbox("Left Hand", &showLeftOverlay)) {
+                            ImGuiMenus::SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide::LEFT, showLeftOverlay);
+                        }
+                        ImGui::SameLine();
+                        bool showRightOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide::RIGHT);
+                        if (ImGui::Checkbox("Right Hand", &showRightOverlay)) {
+                            ImGuiMenus::SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide::RIGHT, showRightOverlay);
+                        }
+                    });
+
+                    DrawSettingRow("Stab Speed Threshold", [&]() {
+                        settings.customStabSpeedThreshold.AddToGUI(&changed, windowWidth.x, 0.01f, 0.50f, [](float) { return "%.2f m/s"; });
+                    });
+                    DrawSettingRow("Stab Accel Threshold", [&]() {
+                        settings.customStabAccThreshold.AddToGUI(&changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f m/s^2"; });
+                    });
+                    DrawSettingRow("Stab Aim Cone", [&]() {
+                        settings.customStabSteadinessCone.AddToGUI(&changed, windowWidth.x, 15.0f, 85.0f, [](float) { return "%.0f deg"; });
+                    });
+                    DrawSettingRow("Stab Twist Limit", [&]() {
+                        settings.customStabAngularSteadiness.AddToGUI(&changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
+                    });
+                    DrawSettingRow("Stab Travel Distance", [&]() {
+                        settings.customStabTravelDistance.AddToGUI(&changed, windowWidth.x, 0.05f, 0.50f, [](float) { return "%.2f m"; });
+                    });
+                    DrawSettingRow("Stab Lock Time", [&]() {
+                        settings.customMinGoodStabDuration.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+                    });
+
+                    ImGui::Spacing();
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+                    ImGui::Text("Custom Swing Sensitivity");
+                    ImGui::PopStyleColor();
+
+                    DrawSettingRow("Swing Speed Threshold", [&]() {
+                        settings.customSlashSpeedThreshold.AddToGUI(&changed, windowWidth.x, 0.1f, 5.0f, [](float) { return "%.1f rad/s"; });
+                    });
+                    DrawSettingRow("Swing Accel Threshold", [&]() {
+                        settings.customSlashAccThreshold.AddToGUI(&changed, windowWidth.x, 3.0f, 40.0f, [](float) { return "%.1f rad/s^2"; });
+                    });
+                    DrawSettingRow("Swing Velocity Threshold", [&]() {
+                        settings.customSlashVelocityThreshold.AddToGUI(&changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
+                    });
+                    DrawSettingRow("Swing Drift Limit", [&]() {
+                        settings.customSlashAccDriftThreshold.AddToGUI(&changed, windowWidth.x, 2.0f, 30.0f, [](float) { return "%.1f rad/s^2"; });
+                    });
+                    DrawSettingRow("Swing Travel Angle", [&]() {
+                        settings.customSlashTravelAngle.AddToGUI(&changed, windowWidth.x, 10.0f, 90.0f, [](float) { return "%.0f deg"; });
+                    });
+                    DrawSettingRow("Swing Lock Time", [&]() {
+                        settings.customMinGoodSwingDuration.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+                    });
+
+                    ImGui::Spacing();
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+                    ImGui::Text("Shared Tuning");
+                    ImGui::PopStyleColor();
+
+                    DrawSettingRow("Bad Sample Timeout", [&]() {
+                        settings.customMaxBadDuration.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+                    });
+                    DrawSettingRow("Grace Period", [&]() {
+                        settings.customGoodSampleGracePeriod.AddToGUI(&changed, windowWidth.x, 10.0f, 200.0f, [](float) { return "%.0f ms"; });
+                    });
+                    DrawSettingRow("Input Smoothing", [&]() {
+                        settings.customSmoothingTimeConstant.AddToGUI(&changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+                    });
+                    DrawSettingRow("Drift Min Velocity", [&]() {
+                        settings.customAngularDriftMinVelocity.AddToGUI(&changed, windowWidth.x, 0.1f, 3.0f, [](float) { return "%.1f rad/s"; });
+                    });
+                    DrawSettingRow("Damage Output Scale", [&]() {
+                        settings.customDamageOutputScale.AddToGUI(&changed, windowWidth.x, 0.10f, 2.00f, [](float) { return "%.2fx"; });
+                    });
+                    DrawSettingRow("", [&]() {
+                        if (ImGui::Button("Reset Custom Weapon Sensitivity")) {
+                            settings.ResetCustomWeaponSensitivity();
+                            changed = true;
+                        }
+                    });
+
+                    ImGui::EndTabItem();
+                }
+
+                if (DrawStyledTab(ICON_KI_INFO_CIRCLE " Help & Controller Guide", HELP_TAB)) {
                     if (!m_helpImages.empty()) {
                         auto moveHelpImage = [&](int direction) {
                             const int helpImageCount = (int)m_helpImages.size();
@@ -1029,7 +1067,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                     ImGui::EndTabItem();
                 }
 
-                if (DrawStyledTab(ICON_KI_PODIUM " FPS Overlay", 2)) {
+                if (DrawStyledTab(ICON_KI_PODIUM " FPS Overlay", FPS_OVERLAY_TAB)) {
                     ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
                     auto& settings = GetSettings();
@@ -1064,7 +1102,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu(bool isDesktopView) {
                     ImGui::EndTabItem();
                 }
 
-                if (DrawStyledTab(ICON_KI_HEART " Credits", 3)) {
+                if (DrawStyledTab(ICON_KI_HEART " Credits", CREDITS_TAB)) {
                     ImGui::SeparatorText("Project Links");
                     ImGui::TextLinkOpenURL(ICON_KI_GITHUB " https://github.com/Crementif/BotW-BetterVR");
                     ImGui::Text("");

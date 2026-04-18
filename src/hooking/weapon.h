@@ -109,10 +109,10 @@ struct WeaponDebugSnapshot {
 inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity) {
     WeaponProfile p = {};
 
-    // Shared defaults (Easy preset)
+    // Shared defaults (Relaxed preset)
     p.stabSpeedThreshold = 0.05f;
     p.stabAccThreshold = 5.0f;
-    p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 4.5f); // ~40 deg cone
+    p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 3.0f); // ~60 deg cone to avoid over-penalizing wrist angle
     p.stabAngularSteadinessThreshold = 4.5f;
     p.stabTravelDistance = 0.15f;
 
@@ -137,9 +137,9 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             break;
 
         case SwingSensitivity::SWING_NORMAL:
-            p.stabAccThreshold = 7.0f;
-            p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 6.0f); // tighter cone
-            p.stabTravelDistance = 0.20f;
+            p.stabAccThreshold = 6.0f;
+            p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 4.0f); // ~45 deg cone, still stricter than relaxed
+            p.stabTravelDistance = 0.17f;
             p.slashAccThreshold = 20.0f;
             p.slashVelocityThreshold = 7.0f;
             p.slashSpeedThreshold = 1.5f;
@@ -147,7 +147,7 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             p.maxBadDuration = 0.022f;
             p.goodSampleGracePeriod = XrTime(40e6); // 40 ms
             p.minGoodSwingDuration = 0.040f;
-            p.minGoodStabDuration = 0.040f;
+            p.minGoodStabDuration = 0.030f;
             p.smoothingTimeConstant = 0.020f;
             break;
 
@@ -481,16 +481,29 @@ inline void WeaponMotionAnalyser::updateSwingPower() {
             currentVelocity = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
             referenceVelocity = REFERENCE_SLASH_VELOCITY;
             break;
-        case AttackType::Stab:
+        case AttackType::Stab: {
             currentVelocity = std::abs(m_localLinVel.z);
             referenceVelocity = REFERENCE_STAB_VELOCITY;
+            m_peakAttackVelocity = std::max(m_peakAttackVelocity, currentVelocity);
+
+            float straightness = 0.0f;
+            if (glm::length2(m_localLinVel) >= 1e-8f) {
+                straightness = std::abs(glm::normalize(m_localLinVel).z);
+            }
+
+            const float normalizedStraightness = glm::clamp((straightness - m_profile.stabLinearSteadinessThreshold) / (1.0f - m_profile.stabLinearSteadinessThreshold), 0.0f, 1.0f);
+            const float straightnessFactor = std::lerp(0.70f, 1.0f, normalizedStraightness);
+            m_swingPower = std::clamp(m_peakAttackVelocity / referenceVelocity, 0.0f, 1.0f) * straightnessFactor;
             break;
+        }
         default:
             break;
     }
 
-    m_peakAttackVelocity = std::max(m_peakAttackVelocity, currentVelocity);
-    m_swingPower = std::clamp(m_peakAttackVelocity / referenceVelocity, 0.0f, 1.0f);
+    if (m_lockedAttackType != AttackType::Stab) {
+        m_peakAttackVelocity = std::max(m_peakAttackVelocity, currentVelocity);
+        m_swingPower = std::clamp(m_peakAttackVelocity / referenceVelocity, 0.0f, 1.0f);
+    }
 }
 
 inline void WeaponMotionAnalyser::Update(

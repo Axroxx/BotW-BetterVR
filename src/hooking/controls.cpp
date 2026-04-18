@@ -2,7 +2,6 @@
 #include "../instance.h"
 #include "openxr_motion_bridge.h"
 
-
 void spreadWeaponDetectionOverFrames(OpenXR::GameState& gameState) {
     // Spread the weapon detection from link's attachement bones over several frames.
     // Each bone isn't necessarily checked each frames which can give wrong results sometimes
@@ -66,11 +65,21 @@ HandGestureState calculateHandGesture(
     const glm::fvec3& storedHandPos
 ) {
     HandGestureState gesture = {};
+
+    constexpr float SHOULDER_RADIUS = 0.35f;
+    constexpr float MOUTH_RADIUS = 0.2f;
+    constexpr float WAIST_OFFSET_Y = 0.45f;
+    constexpr float SHIELD_GUARD_OFFSET_Y = 0.60f;
     
     // Calculate directional vectors
-    glm::fvec3 headsetForward = -glm::normalize(glm::fvec3(headsetMatrix[2]));
+    glm::vec3 headsetForward = -glm::normalize(glm::vec3(headsetMatrix[2]));
     headsetForward.y = 0.0f;
-    headsetForward = glm::normalize(headsetForward);
+    if (glm::length2(headsetForward) < 0.0001f) {
+        headsetForward = glm::vec3(0.0f, 0.0f, -1.0f);
+    }
+    else {
+        headsetForward = glm::normalize(headsetForward);
+    }
     
     glm::fvec3 headsetRight = glm::normalize(glm::fvec3(headsetMatrix[0]));
     glm::fvec3 headToHand = handPos - headsetPos;
@@ -92,21 +101,19 @@ HandGestureState calculateHandGesture(
     gesture.isOnLeftSide = (rightDot < 0.0f);
     
     // Check distance from head (for shoulder slots)
-    constexpr float SHOULDER_RADIUS = 0.35f;
     constexpr float SHOULDER_RADIUS_SQ = SHOULDER_RADIUS * SHOULDER_RADIUS;
     gesture.isCloseToHead = (glm::length2(headToHand) < SHOULDER_RADIUS_SQ);
 
     // Check distance from head (for mouth slot)
-    constexpr float MOUTH_RADIUS = 0.2f;
     constexpr float MOUTH_RADIUS_SQ = MOUTH_RADIUS * MOUTH_RADIUS;
     gesture.isCloseToMouth = (glm::length2(headToHand) < MOUTH_RADIUS_SQ);
     
     // Check distance from waist (rough estimate)
-    glm::fvec3 waistPos = headsetPos - glm::fvec3(0.0f, 0.45f, 0.0f);
+    glm::fvec3 waistPos = headsetPos - glm::fvec3(0.0f, WAIST_OFFSET_Y, 0.0f);
     gesture.isCloseToWaist = (handPos.y < waistPos.y);
 
     // Check hand height for shield (rough estimate)
-    glm::fvec3 chestPos = headsetPos - glm::fvec3(0.0f, 0.3f, 0.0f);
+    glm::fvec3 chestPos = headsetPos - glm::fvec3(0.0f, SHIELD_GUARD_OFFSET_Y, 0.0f);
     gesture.isNearChestHeight = (handPos.y > chestPos.y);
 
     // Check distance from stored position
@@ -827,8 +834,6 @@ void processInputPrevention(OpenXR::GameState& gameState, std::chrono::steady_cl
 
 void processModMenuInput(std::atomic_bool& isMenuOpen, OpenXR::InputState& inputs, VPADStatus& vpadInputs, RND_Renderer::ImGuiOverlay* imguiOverlay, XrActionStateVector2f& leftStickSource, XrActionStateVector2f& rightStickSource)
 {
-    const bool shouldPassGamepadInputToGame = GetSettings().HideSettingsMenuInVRHeadset();
-
     if (inputs.shared.modMenuState.lastEvent == ButtonState::Event::LongPress && inputs.shared.modMenuState.longFired_actedUpon) {
         isMenuOpen = !isMenuOpen;
         inputs.shared.modMenuState.longFired_actedUpon = false;
@@ -838,7 +843,7 @@ void processModMenuInput(std::atomic_bool& isMenuOpen, OpenXR::InputState& input
     imguiOverlay->ProcessInputs(inputs, vpadInputs);
 
     // ignore stick input when the help menu is open
-    if ((isMenuOpen && !shouldPassGamepadInputToGame) || imguiOverlay->ShouldBlockGameInput()/*this is used for the entity inspector*/) {
+    if (isMenuOpen || imguiOverlay->ShouldBlockGameInput()/*this is used for the entity inspector*/) {
         vpadInputs = {};
         leftStickSource.currentState = { 0.0f, 0.0f };
         rightStickSource.currentState = { 0.0f, 0.0f };
@@ -1000,8 +1005,6 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
 
     auto& isMenuOpen = VRManager::instance().XR->m_isMenuOpen;
     processModMenuInput(isMenuOpen, inputs, vpadStatus, imguiOverlay, leftStickSource, rightStickSource);
-    const bool shouldPassGamepadInputToGame = GetSettings().HideSettingsMenuInVRHeadset();
-
     // Calculate hand gestures
     HandGestureState leftGesture = {};
     HandGestureState rightGesture = {};
@@ -1010,7 +1013,7 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
     keepDpadMenuOpen(newXRBtnHold, gameState);
 
     // Process inputs
-    if (isMenuOpen && !shouldPassGamepadInputToGame) {
+    if (isMenuOpen) {
         // ignore inputs when the mod menu is open
     }
     else if (gameState.in_game) {

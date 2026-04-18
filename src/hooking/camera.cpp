@@ -2,6 +2,7 @@
 #include "instance.h"
 #include "rendering/openxr.h"
 #include "utils/debug_draw.h"
+#include "utils/game_utils.h"
 
 bool CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures() {
     return IsScreenOpen(ScreenId::PauseMenuInfo_00) || VRManager::instance().XR->GetRenderer()->IsGameCapturing3DFrameBuffer();
@@ -83,10 +84,6 @@ bool s_isCrouching = false;
 bool s_wasCrouching = false;
 float actualCrouchOffset = 0.0f;
 std::chrono::steady_clock::time_point crouch_state_change_time;
-
-uint32_t s_isLadderClimbing = 0;
-uint32_t s_isRiding = 0;
-uint32_t s_isRidingSandSeal = 0;
 
 void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
@@ -789,143 +786,6 @@ void CemuHooks::hook_CalculateModelOpacity(PPCInterpreter_t* hCPU) {
     }
 }
 
-std::string CemuHooks::s_currentEvent = {};
-CemuHooks::HybridEventSettings CemuHooks::s_currentEventSettings = {};
-std::unordered_map<std::string, CemuHooks::HybridEventSettings> CemuHooks::s_eventSettings = {};
-
-constexpr CemuHooks::HybridEventSettings defaultFirstPersonSettings = {
-    .firstPerson = true,
-    .disablePlayerDrivenLinkHands = false,
-    .ignoreCameraRotation = true
-};
-
-void CemuHooks::initCutsceneDefaultSettings(uint32_t ppc_TableOfCutsceneEventsSettingsOffset) {
-    if (!s_eventSettings.empty()) {
-        return;
-    }
-
-    char* currPtr = reinterpret_cast<char*>(s_memoryBaseAddress + ppc_TableOfCutsceneEventsSettingsOffset);
-    while (true) {
-        const std::string line(currPtr);
-        if (line.empty()) {
-            break;
-        }
-        size_t commaPos = line.find(',');
-        if (commaPos != std::string::npos) {
-            HybridEventSettings entry = {};
-            std::string settingsStr = line.substr(commaPos + 1);
-            std::string eventName = line.substr(0, commaPos);
-            size_t pos = 0;
-            while ((pos = settingsStr.find(',')) != std::string::npos) {
-                std::string setting = settingsStr.substr(0, pos);
-                if (setting == "FP_ON") entry.firstPerson = true;
-                else if (setting == "FP_OFF")
-                    entry.firstPerson = false;
-                else if (setting == "HND_ON")
-                    entry.disablePlayerDrivenLinkHands = false;
-                else if (setting == "HND_OFF")
-                    entry.disablePlayerDrivenLinkHands = true;
-                else if (setting == "PAN_ON")
-                    entry.ignoreCameraRotation = false;
-                else if (setting == "PAN_OFF")
-                    entry.ignoreCameraRotation = true;
-                else if (setting == "CTRL_ON")
-                    entry.demoEnableCameraInput = false;
-                else if (setting == "CTRL_OFF")
-                    entry.demoEnableCameraInput = true;
-                else {
-                    Log::print<WARNING>("Unknown cutscene default setting: {}", setting);
-                }
-                settingsStr.erase(0, pos + 1);
-            }
-            // last setting
-            std::string setting = settingsStr;
-            if (setting == "FP_ON") entry.firstPerson = true;
-            else if (setting == "FP_OFF")
-                entry.firstPerson = false;
-            else if (setting == "HND_ON")
-                entry.disablePlayerDrivenLinkHands = false;
-            else if (setting == "HND_OFF")
-                entry.disablePlayerDrivenLinkHands = true;
-            else if (setting == "PAN_ON")
-                entry.ignoreCameraRotation = false;
-            else if (setting == "PAN_OFF")
-                entry.ignoreCameraRotation = true;
-            else if (setting == "CTRL_ON")
-                entry.demoEnableCameraInput = false;
-            else if (setting == "CTRL_OFF")
-                entry.demoEnableCameraInput = true;
-            else {
-                Log::print<WARNING>("Unknown cutscene default setting: {}", setting);
-            }
-            s_eventSettings.insert_or_assign(eventName, entry);
-        }
-        currPtr += line.length() + 1;
-    }
-
-    Log::print<VERBOSE>("Initialized cutscene default settings for {} events.", s_eventSettings.size());
-}
-
-
-uint32_t CemuHooks::s_playerAddress = 0;
-
-// todo: Fix sped-up cutscenes. You can go in-game into a save file that didn't have DLC yet, and it'll give you a sped up Demo200_0.
-void CemuHooks::hook_GetEventName(PPCInterpreter_t* hCPU) {
-    hCPU->instructionPointer = hCPU->sprNew.LR;
-
-    uint32_t isEventActive = hCPU->gpr[3];
-    uint32_t eventNamePtr = hCPU->gpr[4];
-    uint32_t entryPointNamePtr = hCPU->gpr[5];
-
-    if (isEventActive) {
-        std::string eventName = std::string((char*)s_memoryBaseAddress + eventNamePtr);
-        std::string entryPointName = std::string((char*)s_memoryBaseAddress + entryPointNamePtr);
-
-        if (s_currentEvent == eventName) {
-            return;
-        }
-        Log::print<INFO>("Event '{}' is now active (using entry point '{}').", eventName, entryPointName);
-        s_currentEvent = eventName;
-
-        auto it = s_eventSettings.find(eventName);
-        if (it != s_eventSettings.end()) {
-            HybridEventSettings settings = it->second;
-            Log::print<INFO>(" - First Person: {}", settings.firstPerson ? "ON" : "OFF");
-            Log::print<INFO>(" - Ignore Camera Rotation: {}", settings.ignoreCameraRotation ? "ON" : "OFF");
-            Log::print<INFO>(" - Disable Player-Driven Link Hands: {}", settings.disablePlayerDrivenLinkHands ? "ON" : "OFF");
-            s_currentEventSettings = settings;
-        }
-        else {
-            Log::print<INFO>(" - No specific settings found for this event, using defaults.");
-            s_currentEventSettings = defaultFirstPersonSettings;
-        }
-
-        // In cutscene's there's somethings a mention of Demo_EnableCameraInput/Demo_EnableCameraControlByUser/Demo_DisableCameraInput
-        // These don't actually seem to be hooked up so won't do anything in real-time, but they do flag a cutscene as having camera control disabled for the player.
-        // This can be read using the settings.demoEnableCameraInput in the HybridEventSettings struct.
-    }
-    else if (!s_currentEvent.empty()) {
-        Log::print<INFO>("Event '{}' has now ended", s_currentEvent);
-        s_currentEvent = "";
-    }
-}
-
-void CemuHooks::hook_ShouldSkipEventCamera(PPCInterpreter_t* hCPU) {
-    hCPU->instructionPointer = hCPU->sprNew.LR;
-
-    if (IsFirstPerson()) {
-        // disable camera rotation for first-person events, according to the event settings
-        if (auto eventSettings = GetFirstPersonSettingsForActiveEvent()) {
-            if (eventSettings->ignoreCameraRotation) {
-                hCPU->gpr[3] = 1;
-                return;
-            }
-        }
-    }
-
-    // return 0 to just follow regular camera rotation
-    hCPU->gpr[3] = 0;
-}
 
 struct CameraParamValueOffset {
     std::string name;
@@ -937,7 +797,6 @@ struct CameraParamValueOffset {
 // key = vtable address, value = list of parameter names and their offsets inside the camera object
 std::mutex storedCameraParametersLock;
 std::unordered_map<uint32_t, std::vector<CameraParamValueOffset>> storedCameraParameters;
-
 
 void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
@@ -975,10 +834,18 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
         }
     }
 
-    constexpr uint32_t kCameraChaseVtbl = 0x101B34F4;
     constexpr uint32_t kCameraTailVtbl = 0x101BC278;
-    constexpr uint32_t kCameraAiming2Vtbl = 0X101B2EB4;
     constexpr uint32_t kCameraMagneCatchVtbl = 0x101BAB4C;
+
+    static uint32_t s_lastLoggedCameraVtbl = 0;
+    if (currentCameraVtbl != s_lastLoggedCameraVtbl) {
+        Log::print<INFO>("Camera mode changed (vtbl={:#X}, camera={:#X})", currentCameraVtbl, currCameraInstance);
+#ifdef _DEBUG
+        std::string actionName = GameUtils::GetActionName(currCameraInstance);
+        Log::print<INFO>(" - Action name: {}", actionName.empty() ? "Unknown" : actionName);
+#endif
+        s_lastLoggedCameraVtbl = currentCameraVtbl;
+    }
 
     //hCPU->gpr[3] = cameraChaseInstance;
 
@@ -996,7 +863,7 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
         }
     }
 
-    //Log::print<INFO>("Camera mode: {:#X}, tail mode: {:#X}, vtbl: {:#X}", currentCameraMode, cameraTailMode, currentCameraVtbl);
+    //Log::print<INFO>("Camera mode: {:#X}, tail mode: {:#X}, vtbl: {:#X}", currCameraInstance, cameraChaseInstance, currentCameraVtbl);
 }
 
 constexpr uint32_t orig_GetStaticParam_float_funcAddr = 0x030E9BE0;
@@ -1051,32 +918,6 @@ void CemuHooks::hook_FixLadder(PPCInterpreter_t* hCPU) {
     }
 }
 
-void CemuHooks::hook_PlayerIsRiding(PPCInterpreter_t* hCPU) {
-    hCPU->instructionPointer = hCPU->sprNew.LR;
-
-    bool isRiding = hCPU->gpr[3] == 1;
-    if (isRiding && IsFirstPerson()) {
-        s_isRiding = 2;
-    }
-}
-
-void CemuHooks::hook_PlayerIsRidingSandSeal(PPCInterpreter_t* hCPU) {
-    hCPU->instructionPointer = hCPU->sprNew.LR;
-
-    bool isRiding = hCPU->gpr[3] == 1;
-    if (isRiding && IsFirstPerson()) {
-        s_isRidingSandSeal = 2;
-    }
-}
-
-void CemuHooks::hook_PlayerLadderFix(PPCInterpreter_t* hCPU) {
-    hCPU->gpr[0] = hCPU->sprNew.LR;
-    hCPU->instructionPointer = 0x02D07CEC;
-
-    if (IsFirstPerson()) {
-        s_isLadderClimbing = 2;
-    }
-}
 
 void CemuHooks::hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;

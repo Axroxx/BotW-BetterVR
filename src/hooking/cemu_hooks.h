@@ -128,88 +128,12 @@ public:
     static std::unordered_map<std::string, HybridEventSettings> s_eventSettings;
     static void initCutsceneDefaultSettings(uint32_t ppc_TableOfCutsceneEventsSettingsOffset);
 
-    static bool HasActiveCutscene() {
-        return !s_currentEvent.empty();
-    }
-
-    static EventMode GetEventModeWithOverride() {
-        if (!HasActiveCutscene()) {
-            return EventMode::NO_EVENT;
-        }
-
-        EventMode mode = GetSettings().GetCutsceneCameraMode();
-        // todo: check if user has overriden the cutscene mode during active cutscenes
-
-        // if the camera is controllable, treat it as no event
-        // todo: Apparently this is a bad way to check it.
-        if (IsInGame()) {
-            //Log::print<VERBOSE>("Camera is controllable during cutscene '{}' due to frames since last camera update being {}. Treating as no event.", s_currentEvent, GetFramesSinceLastCameraUpdate());
-            //return EventMode::NO_EVENT;
-        }
-        return mode;
-    }
-
-    static std::optional<HybridEventSettings> GetFirstPersonSettingsForActiveEvent() {
-        auto mode = GetEventModeWithOverride();
-
-        if (mode == EventMode::NO_EVENT) {
-            return std::nullopt;
-        }
-        if (mode == EventMode::ALWAYS_THIRD_PERSON) {
-            return std::nullopt;
-        }
-        // resolve settings if in hybrid mode
-        if (mode == EventMode::FOLLOW_DEFAULT_EVENT_SETTINGS) {
-            //if (!s_currentEventSettings.firstPerson) {
-            //    return std::nullopt;
-            //}
-        }
-
-        return s_currentEventSettings;
-    }
-
-    static bool IsFirstPerson() {
-        if (HasActiveCutscene()) {
-            // always third-person
-            if (GetSettings().GetCutsceneCameraMode() == EventMode::ALWAYS_THIRD_PERSON) {
-                return false;
-            }
-
-            // check settings
-            if (auto settings = GetFirstPersonSettingsForActiveEvent(); settings.has_value()) {
-                // there's an active event
-
-                auto mode = GetEventModeWithOverride();
-                if (mode == EventMode::FOLLOW_DEFAULT_EVENT_SETTINGS && !settings->firstPerson) {
-                    return false;
-                }
-
-                // cutscene with first-person settings
-                return true;
-            }
-        }
-        else {
-            // no event. Check if gameplay is in first-person mode
-            if (GetSettings().GetCameraMode() == CameraMode::FIRST_PERSON) {
-                return true;
-            }
-            return false;
-        }
-
-        return false;
-    }
-
-    static bool IsThirdPerson() {
-        return !IsFirstPerson();
-    }
-
-    static bool UseBlackBarsDuringEvents() {
-        if (!HasActiveCutscene() || IsFirstPerson()) {
-            return false;
-        }
-
-        return GetSettings().UseBlackBarsForCutscenes();
-    }
+    static bool HasActiveCutscene();
+    static EventMode GetEventModeWithOverride();
+    static std::optional<HybridEventSettings> GetFirstPersonSettingsForActiveEvent();
+    static bool IsFirstPerson();
+    static bool IsThirdPerson();
+    static bool UseBlackBarsDuringEvents();
     static bool IsScreenOpen(ScreenId screen);
     static bool IsScreenVisible(ScreenId screen);
     static bool IsAnyFadeScreenVisible();
@@ -232,6 +156,9 @@ private:
     gameMeta_getTitleIdPtr_t gameMeta_getTitleId;
 
     static std::atomic_uint32_t s_framesSinceLastCameraUpdate;
+    static uint32_t s_isLadderClimbing;
+    static uint32_t s_isRiding;
+    static uint32_t s_isRidingSandSeal;
 
     static void InitWindowHandles();
 

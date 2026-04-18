@@ -126,12 +126,12 @@ namespace {
             state.damageMgrDamage = damageMgr.damage.getLE();
         }
 
-        state.baseDamage = float(state.finalizedDamage);
+        state.baseDamage = (float)state.finalizedDamage;
         if (state.baseDamage <= 0.0f) {
-            state.baseDamage = float(state.setupDamage);
+            state.baseDamage = (float)state.setupDamage;
         }
         if (state.baseDamage <= 0.0f) {
-            state.baseDamage = float(state.damageMgrDamage);
+            state.baseDamage = (float)state.damageMgrDamage;
         }
 
         state.damageScale = GetSettings().GetWeaponDamageOutputScale();
@@ -164,7 +164,7 @@ namespace {
         const float liveDamage = liveState.estimatedDamage;
 
         if (isActive && tracker.wasActive && snapshot.sampleTime > tracker.previousSampleTime) {
-            const float dt = std::clamp(float(snapshot.sampleTime - tracker.previousSampleTime) / 1e9f, 0.0f, 0.25f);
+            const float dt = std::clamp((float)(snapshot.sampleTime - tracker.previousSampleTime) / 1e9f, 0.0f, 0.25f);
             tracker.currentDamageIntegral += liveDamage * dt;
             tracker.currentDuration += dt;
         }
@@ -227,7 +227,7 @@ namespace {
         const WeaponLiveDebugState liveState = ReadWeaponLiveDebugState(CemuHooks::m_heldWeapons[side]);
         UpdateAttackPeriodTracker(side, snapshot, liveState);
 
-        ImGui::PushID(int(side));
+        ImGui::PushID(static_cast<int>(side));
         DrawStatusText("Held weapon", liveState.hasWeapon ? liveState.actorName.c_str() : "None", liveState.hasWeapon ? kPassColor : kNeutralColor);
         ImGui::Text("Weapon type: %s | Attack: %s | Active: %s | Hitbox: %s",
             ToString(snapshot.weaponType),
@@ -282,7 +282,7 @@ namespace {
         const uint32_t lastSampleIdx = analyser.GetLastSampleIndex();
         const auto oldestIdx = [&](uint32_t j) { return (lastSampleIdx + j) % WeaponMotionAnalyser::MAX_SAMPLES; };
 
-        ImGui::PushID(int(side));
+        ImGui::PushID(static_cast<int>(side));
         ImGui::Text("%s", ToString(side));
         ImGui::Text("Weapon: %s | Sample %u / %d", ToString(snapshot.weaponType), lastSampleIdx, WeaponMotionAnalyser::MAX_SAMPLES);
         ImGui::Text("Attack: %s | Active: %s | Bad: %.3f s | Power: %.2f",
