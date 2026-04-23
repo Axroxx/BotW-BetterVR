@@ -12,6 +12,10 @@ ModSettings& GetSettings() {
     return g_settings;
 }
 
+void Settings_LogSavedSettings() {
+    Log::print<INFO>("VR Settings Saved:\n{}", GetSettings().ToString());
+}
+
 static void* Settings_ReadOpen(ImGuiContext*, ImGuiSettingsHandler*, const char* name) {
     if (strcmp(name, "Settings") != 0)
         return nullptr;
@@ -69,7 +73,6 @@ static void Settings_WriteAll(ImGuiContext* ctx, ImGuiSettingsHandler* handler, 
         buf->appendf("%s=%s\n", option->name, serialized.c_str());
     }
     buf->appendf("\n");
-    Log::print<INFO>("VR Settings Saved:\n{}", s.ToString());
 }
 
 static void Settings_ReadFinish(ImGuiContext* ctx, ImGuiSettingsHandler* handler) {

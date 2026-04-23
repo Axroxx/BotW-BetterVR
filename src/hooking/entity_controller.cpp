@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "cemu_hooks.h"
 
 bool shouldAdjustArrowTarget = false;

@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "instance.h"
 #include "cemu_hooks.h"
 #include "rendering/openxr.h"

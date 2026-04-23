@@ -884,7 +884,7 @@ void CemuHooks::hook_OverwriteCameraParam(PPCInterpreter_t* hCPU) {
 
         auto& paramList = storedCameraParameters[actionPtr];
         // store parameter offset if not already stored
-        auto it = std::find_if(paramList.begin(), paramList.end(), [&paramNameStr](const CameraParamValueOffset& entry) {
+        auto it = std::ranges::find_if(paramList, [&paramNameStr](const CameraParamValueOffset& entry) {
             return entry.name == paramNameStr;
         });
         if (it == paramList.end()) {

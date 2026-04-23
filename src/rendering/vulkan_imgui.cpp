@@ -622,9 +622,14 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     }
 
     static bool wasMenuPrevOpened = false;
+    static bool shouldLogSavedSettingsOnClose = false;
 
     if (!isMenuOpen && wasMenuPrevOpened) {
         wasMenuPrevOpened = false;
+        if (shouldLogSavedSettingsOnClose) {
+            Settings_LogSavedSettings();
+            shouldLogSavedSettingsOnClose = false;
+        }
     }
 
     if (!isMenuOpen)
@@ -633,6 +638,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     if (isMenuOpen && !wasMenuPrevOpened) {
         ImGui::SetNextWindowFocus();
         wasMenuPrevOpened = true;
+        shouldLogSavedSettingsOnClose = false;
     }
 
     ImVec2 fullWindowWidth = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
@@ -1144,6 +1150,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
             ImGui::EndChild();
 
             if (changed) {
+                shouldLogSavedSettingsOnClose = true;
                 ImGui::SaveIniSettingsToDisk("BetterVR_settings.ini");
             }
         }

@@ -878,3 +878,4 @@ struct ModSettings {
 
 extern ModSettings& GetSettings();
 extern void InitSettings();
+extern void Settings_LogSavedSettings();
