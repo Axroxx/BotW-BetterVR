@@ -871,7 +871,7 @@ static void LogVulkanDetails() {
 }
 
 static void EmbedCemuLog(const LauncherPaths& paths) {
-    const fs::path cemuLogPath = paths.cemuExe.parent_path() / "log.txt";
+    const fs::path& cemuLogPath = paths.cemuLog;
     std::ifstream cemuLog(cemuLogPath, std::ios::in);
     if (!cemuLog.is_open()) {
         LogLine("Cemu log.txt was not found at: " + Narrow(cemuLogPath));
