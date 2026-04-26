@@ -688,25 +688,31 @@ static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const 
             bool replacedAny = false;
             if (probeResult.leftWidth != 0 && probeResult.leftHeight != 0) {
                 struct BetterVRPresetPlaceholder {
+                    const char* nameToken;
                     const char* widthToken;
                     const char* heightToken;
                     double multiplier;
-                    const char* label;
+                    const char* multiplierLabel;
                 };
 
                 static constexpr BetterVRPresetPlaceholder PresetPlaceholders[] = {
-                    { "__BETTERVR_05_WIDTH__", "__BETTERVR_05_HEIGHT__", 0.5, "0.5x" },
-                    { "__BETTERVR_10_WIDTH__", "__BETTERVR_10_HEIGHT__", 1.0, "1x" },
-                    { "__BETTERVR_20_WIDTH__", "__BETTERVR_20_HEIGHT__", 2.0, "2x" },
-                    { "__BETTERVR_30_WIDTH__", "__BETTERVR_30_HEIGHT__", 3.0, "3x" },
-                    { "__BETTERVR_40_WIDTH__", "__BETTERVR_40_HEIGHT__", 4.0, "4x" },
+                    { "__BETTERVR_05_NAME__", "__BETTERVR_05_WIDTH__", "__BETTERVR_05_HEIGHT__", 0.5, "0.5x" },
+                    { "__BETTERVR_10_NAME__", "__BETTERVR_10_WIDTH__", "__BETTERVR_10_HEIGHT__", 1.0, "1x" },
+                    { "__BETTERVR_15_NAME__", "__BETTERVR_15_WIDTH__", "__BETTERVR_15_HEIGHT__", 1.5, "1.5x" },
+                    { "__BETTERVR_20_NAME__", "__BETTERVR_20_WIDTH__", "__BETTERVR_20_HEIGHT__", 2.0, "2x" },
+                    { "__BETTERVR_30_NAME__", "__BETTERVR_30_WIDTH__", "__BETTERVR_30_HEIGHT__", 3.0, "3x" },
+                    { "__BETTERVR_40_NAME__", "__BETTERVR_40_WIDTH__", "__BETTERVR_40_HEIGHT__", 4.0, "4x" },
                 };
 
                 for (const BetterVRPresetPlaceholder& preset : PresetPlaceholders) {
                     const std::pair<uint32_t, uint32_t> adjustedResolution = GetNearestRulesCompatibleEyeResolution(double(probeResult.leftWidth) * preset.multiplier, double(probeResult.leftHeight) * preset.multiplier);
-                    LogLine("Adjusted BetterVR " + std::string(preset.label) + " resolution: " + std::to_string(adjustedResolution.first) + "x" + std::to_string(adjustedResolution.second));
-                    replacedAny |= ReplaceTextToken(contents, preset.widthToken, std::to_string(adjustedResolution.first));
-                    replacedAny |= ReplaceTextToken(contents, preset.heightToken, std::to_string(adjustedResolution.second));
+                    const std::string adjustedWidth = std::to_string(adjustedResolution.first);
+                    const std::string adjustedHeight = std::to_string(adjustedResolution.second);
+                    const std::string resolutionLabel = adjustedWidth + "x" + adjustedHeight;
+                    LogLine("Adjusted BetterVR " + std::string(preset.multiplierLabel) + " resolution: " + resolutionLabel);
+                    replacedAny |= ReplaceTextToken(contents, preset.nameToken, resolutionLabel);
+                    replacedAny |= ReplaceTextToken(contents, preset.widthToken, adjustedWidth);
+                    replacedAny |= ReplaceTextToken(contents, preset.heightToken, adjustedHeight);
                 }
             }
 

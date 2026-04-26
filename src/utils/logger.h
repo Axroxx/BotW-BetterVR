@@ -174,6 +174,13 @@ struct std::formatter<BESeadLookAtCamera> : std::formatter<string> {
     }
 };
 
+template <>
+struct std::formatter<LookAtMatrix> : std::formatter<string> {
+    auto format(const LookAtMatrix& cam, std::format_context& ctx) const {
+        return std::format_to(ctx.out(), "pos = {}, target = {}, up = {}, unknown = {}, zNear = {}, zFar = {}", cam.pos, cam.target, cam.up, cam.unknown, cam.zNear.getLE(), cam.zFar.getLE());
+    }
+};
+
 
 template <>
 struct std::formatter<D3D_FEATURE_LEVEL> : std::formatter<string> {

@@ -33,32 +33,38 @@ $enableUltrawideDebugLogging:int = 0
 # VR Resolution Multiplier (BetterVR)
 
 [Preset]
-name = 0.5x (Only For 8K VR headsets)
+name = __BETTERVR_05_NAME__ (0.5x, Not Recommended Except For 8K VR headsets)
 category = VR Resolution Multiplier
 $width = __BETTERVR_05_WIDTH__
 $height = __BETTERVR_05_HEIGHT__
 
 [Preset]
-name = 1x (Native Headset Resolution, Default)
+name = __BETTERVR_10_NAME__ (1x, Native Headset Resolution, Default)
 category = VR Resolution Multiplier
 default = 1
 $width = __BETTERVR_10_WIDTH__
 $height = __BETTERVR_10_HEIGHT__
 
 [Preset]
-name = 2x (Good For Anti-Aliasing, Recommended)
+name = __BETTERVR_15_NAME__ (1.5x, Balanced Quality)
+category = VR Resolution Multiplier
+$width = __BETTERVR_15_WIDTH__
+$height = __BETTERVR_15_HEIGHT__
+
+[Preset]
+name = __BETTERVR_20_NAME__ (2x, Better Anti-Aliasing, Recommended)
 category = VR Resolution Multiplier
 $width = __BETTERVR_20_WIDTH__
 $height = __BETTERVR_20_HEIGHT__
 
 [Preset]
-name = 3x (Best Anti-Aliasing, Requires A Good GPU)
+name = __BETTERVR_30_NAME__ (3x, Best Anti-Aliasing, Requires A Good GPU)
 category = VR Resolution Multiplier
 $width = __BETTERVR_30_WIDTH__
 $height = __BETTERVR_30_HEIGHT__
 
 [Preset]
-name = 4x (Likely Costs Performance)
+name = __BETTERVR_40_NAME__ (4x, Likely Costs Performance)
 category = VR Resolution Multiplier
 $width = __BETTERVR_40_WIDTH__
 $height = __BETTERVR_40_HEIGHT__
