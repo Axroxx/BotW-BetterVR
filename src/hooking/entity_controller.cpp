@@ -53,7 +53,7 @@ void CemuHooks::hook_LoadDynamicVec3(PPCInterpreter_t* hCPU) {
 }
 
 void CemuHooks::hook_SetRigidBodyVelocity(PPCInterpreter_t* hCPU) {
-    hCPU->instructionPointer = 0x03489710;
+    hCPU->instructionPointer = hCPU->sprNew.LR;
     hCPU->gpr[0] = hCPU->sprNew.LR;
     uint32_t lr = hCPU->sprNew.LR;
 

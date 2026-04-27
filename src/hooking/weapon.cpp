@@ -454,10 +454,10 @@ void CemuHooks::hook_DropWeaponLogging(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_ModifyHandModelAccessSearch(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
+#ifdef _DEBUG
     if (hCPU->gpr[3] == 0) {
         return;
     }
-#ifdef _DEBUG
     // r3 holds the address of the string to search for
     const char* actorName = (const char*)(s_memoryBaseAddress + hCPU->gpr[3]);
 

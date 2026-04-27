@@ -88,7 +88,7 @@ std::chrono::steady_clock::time_point crouch_state_change_time;
 void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (CemuHooks::UseBlackBarsDuringEvents()) {
+    if (UseBlackBarsDuringEvents()) {
         return;
     }
 

@@ -57,6 +57,10 @@ append_asset("${INPUT_JSON}" "BetterVR_Layer.json" "Runtime")
 file(GLOB_RECURSE graphic_pack_files RELATIVE "${GRAPHIC_PACK_DIR}" "${GRAPHIC_PACK_DIR}/*")
 list(SORT graphic_pack_files)
 
+if(EXCLUDE_DEBUG_PATCHES)
+    list(FILTER graphic_pack_files EXCLUDE REGEX "(^|/)patch_debug_[^/]+\\.asm$")
+endif()
+
 foreach(graphic_pack_file IN LISTS graphic_pack_files)
     set(full_path "${GRAPHIC_PACK_DIR}/${graphic_pack_file}")
     if(NOT IS_DIRECTORY "${full_path}")
