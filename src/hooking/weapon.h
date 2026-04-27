@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../include/pch.h"
+#include "pch.h"
 
 #include "utils/mod_settings.h"
 
