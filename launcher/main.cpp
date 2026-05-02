@@ -14,6 +14,8 @@ static constexpr std::string_view BundledDownloadedGraphicsPrefix = "BreathOfThe
 static constexpr uint32_t BetterVRResolutionSearchAlignment = 8;
 static constexpr uint32_t BetterVRResolutionSearchRadius = 32;
 static constexpr double BetterVRPreferredMatchDistance = 32.0;
+static constexpr double BetterVRMinimumEyeWidth = 1280.0;
+static constexpr double BetterVRMinimumEyeHeight = 720.0;
 static constexpr std::wstring_view LegacyLaunchFiles[] = {
     L"Launch_BetterVR.bat",
     L"BetterVR LAUNCH CEMU IN VR.bat",
@@ -500,6 +502,10 @@ static std::pair<uint32_t, uint32_t> GetNearestRulesCompatibleEyeResolution(doub
         return { 0, 0 };
     }
 
+    const double minimumScale = std::max({ 1.0, BetterVRMinimumEyeWidth / width, BetterVRMinimumEyeHeight / height });
+    width *= minimumScale;
+    height *= minimumScale;
+
     struct ResolutionCandidate {
         uint32_t width;
         uint32_t height;
@@ -697,11 +703,14 @@ static bool InstallDownloadedGraphicsOverride(const LauncherPaths& paths, const 
 
                 static constexpr BetterVRPresetPlaceholder PresetPlaceholders[] = {
                     { "__BETTERVR_05_NAME__", "__BETTERVR_05_WIDTH__", "__BETTERVR_05_HEIGHT__", 0.5, "0.5x" },
+                    { "__BETTERVR_075_NAME__", "__BETTERVR_075_WIDTH__", "__BETTERVR_075_HEIGHT__", 0.75, "0.75x" },
                     { "__BETTERVR_10_NAME__", "__BETTERVR_10_WIDTH__", "__BETTERVR_10_HEIGHT__", 1.0, "1x" },
+                    { "__BETTERVR_125_NAME__", "__BETTERVR_125_WIDTH__", "__BETTERVR_125_HEIGHT__", 1.25, "1.25x" },
                     { "__BETTERVR_15_NAME__", "__BETTERVR_15_WIDTH__", "__BETTERVR_15_HEIGHT__", 1.5, "1.5x" },
+                    { "__BETTERVR_175_NAME__", "__BETTERVR_175_WIDTH__", "__BETTERVR_175_HEIGHT__", 1.75, "1.75x" },
                     { "__BETTERVR_20_NAME__", "__BETTERVR_20_WIDTH__", "__BETTERVR_20_HEIGHT__", 2.0, "2x" },
+                    { "__BETTERVR_225_NAME__", "__BETTERVR_225_WIDTH__", "__BETTERVR_225_HEIGHT__", 2.25, "2.25x" },
                     { "__BETTERVR_30_NAME__", "__BETTERVR_30_WIDTH__", "__BETTERVR_30_HEIGHT__", 3.0, "3x" },
-                    { "__BETTERVR_40_NAME__", "__BETTERVR_40_WIDTH__", "__BETTERVR_40_HEIGHT__", 4.0, "4x" },
                 };
 
                 for (const BetterVRPresetPlaceholder& preset : PresetPlaceholders) {
