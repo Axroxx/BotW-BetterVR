@@ -91,6 +91,51 @@ public:
         return getNameFromProgramTable(kAiProgramAIsOffset, entryIndex);
     }
 
+    static bool TryReadPlayerBase(PlayerBase& player) {
+        if (CemuHooks::s_playerAddress == 0)
+            return false;
+
+        CemuHooks::readMemory(CemuHooks::s_playerAddress, &player);
+        return true;
+    }
+
+
+    static uint32_t ResolveActorPhysicsController(const ActorWiiU& actor) {
+        uint32_t actorPhysics = actor.actorPhysicsPtr.getLE();
+        if (actorPhysics == 0)
+            return 0;
+
+        return CemuHooks::getMemory<BEType<uint32_t>>(actorPhysics + 0x50).getLE();
+    }
+
+    static bool TryGetPlayerCharacterController(uint32_t& controller) {
+        PlayerBase player;
+        return TryReadPlayerBase(player) && (controller = ResolveActorPhysicsController(player)) != 0;
+    }
+
+    static bool IsTrackedPlayerBody(uint32_t rigidBodyAddr) {
+        if (rigidBodyAddr == 0)
+            return false;
+
+        PlayerBase player;
+        if (!TryReadPlayerBase(player))
+            return false;
+
+        if (rigidBodyAddr == player.physicsTgtBodyPtr.getLE())
+            return true;
+
+        uint32_t mainBody = player.physicsMainBodyPtr.getLE();
+        uint32_t controller = ResolveActorPhysicsController(player);
+        if (controller != 0) {
+            uint32_t controllerBody = CemuHooks::getMemory<BEType<uint32_t>>(controller + 0x04).getLE();
+            if (controllerBody != 0) {
+                mainBody = controllerBody;
+            }
+        }
+
+        return rigidBodyAddr == mainBody;
+    }
+
 private:
     static std::string ReadLikelyActionName(uint32_t namePtr) {
         if (namePtr == 0) {

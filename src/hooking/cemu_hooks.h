@@ -83,9 +83,9 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_CreateNewScreen", &hook_CreateNewScreen);
         osLib_registerHLEFunction("coreinit", "hook_FixUIBlending", &hook_FixUIBlending);
         osLib_registerHLEFunction("coreinit", "hook_FixCameraSaveFilesAndInventory", &hook_FixCameraSaveFilesAndInventory);
-        osLib_registerHLEFunction("coreinit", "hook_VisualizeRayCastHits", &hook_VisualizeRayCastHits);
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicVec3", &hook_LoadDynamicVec3);
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicBool", &hook_LoadDynamicBool);
+        osLib_registerHLEFunction("coreinit", "hook_VisualizeRayCastHits", &hook_VisualizeRayCastHits);
     };
     ~CemuHooks() {
         FreeLibrary(m_cemuHandle);
