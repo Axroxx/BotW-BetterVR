@@ -105,6 +105,8 @@ void RND_Renderer::EndFrame() {
         // check whether there's a fade screen that we have to apply for the 3D layer
         SharedTexture* fadeTexture = m_layer2D ? m_layer2D->GetSharedTextures()[frameIdx].get() : nullptr;
         m_isFadeActive.store(CemuHooks::IsAnyFadeScreenVisible(), std::memory_order_relaxed);
+        SetCustomFadeColor(glm::fvec3(0.0f));
+        SetCustomFadeAmount(CemuHooks::GetRoomscaleFadeAmount());
 
         if (m_layer3D) {
             if (m_renderFrames[frameIdx].Is3DComplete()) {

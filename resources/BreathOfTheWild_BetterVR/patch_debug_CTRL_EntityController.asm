@@ -43,59 +43,42 @@ bctr
 ; IDA: 0x02D66B58 = mr r4, r29
 ;0x02D66B58 = bla import.coreinit.hook_TestPlayerSetMtxTeleport
 
-RoomscaleDelta = 0x20
-RoomscaleStep = 0x30
-RoomscaleCurrent = 0x40
-RoomscaleHit = 0x50
-RoomscaleLayerMask = 0x60
-RoomscaleSavedLR = 0x64
-RoomscaleQuery = 0x70
-
-const_roomscaleQuarter:
-.float 0.25
+RoomscaleScratch = 0x20
+RoomscaleCurrent = RoomscaleScratch + 0x00
+RoomscaleCastFrom = RoomscaleScratch + 0x0C
+RoomscaleCastDelta = RoomscaleScratch + 0x18
+RoomscaleHit = RoomscaleScratch + 0x24
+RoomscaleLayerMask = RoomscaleScratch + 0x30
+RoomscaleSavedLR = 0x58
+RoomscaleQuery = 0x60
 
 ApplyRoomscaleAfterPlayerVelocity:
-stwu r1, -0x120(r1)
+stwu r1, -0x110(r1)
 mflr r0
-stw r0, 0x124(r1)
+stw r0, 0x114(r1)
 stw r30, 0x14(r1)
 stw r31, 0x18(r1)
 
 mr r3, r31
-addi r4, r1, RoomscaleDelta
-bla import.coreinit.hook_GetRoomscaleDelta
+addi r4, r1, RoomscaleScratch
+bla import.coreinit.hook_BeginRoomscaleMovement
 lwz r31, 0x18(r1)
 
 cmpwi r3, 0
 beq ApplyRoomscaleAfterPlayerVelocity_Continue
 
-lis r12, const_roomscaleQuarter@ha
-lfs f0, const_roomscaleQuarter@l(r12)
-
-lfs f1, RoomscaleDelta + 0x0(r1)
-fmuls f1, f1, f0
-stfs f1, RoomscaleStep + 0x0(r1)
-
-lfs f1, RoomscaleDelta + 0x4(r1)
-fmuls f1, f1, f0
-stfs f1, RoomscaleStep + 0x4(r1)
-
-lfs f1, RoomscaleDelta + 0x8(r1)
-fmuls f1, f1, f0
-stfs f1, RoomscaleStep + 0x8(r1)
-
 mr r3, r31
 addi r4, r1, RoomscaleCurrent
 bl RigidBody_getPosition
 
-li r30, 4
-
 ApplyRoomscaleAfterPlayerVelocity_Loop:
-cmpwi r30, 0
+addi r3, r1, RoomscaleScratch
+bla import.coreinit.hook_PrepareRoomscaleRaycast
+lwz r31, 0x18(r1)
+cmpwi r3, 2
 beq ApplyRoomscaleAfterPlayerVelocity_Warp
-
-li r0, 15
-stw r0, RoomscaleLayerMask(r1)
+cmpwi r3, 1
+bne ApplyRoomscaleAfterPlayerVelocity_Continue
 
 addi r3, r1, RoomscaleQuery
 li r4, 0
@@ -107,54 +90,35 @@ addi r4, r31, 0x208
 bl RayCast_setLayers
 
 addi r3, r1, RoomscaleQuery
-addi r4, r1, RoomscaleCurrent
-addi r5, r1, RoomscaleStep
+addi r4, r1, RoomscaleCastFrom
+addi r5, r1, RoomscaleCastDelta
 bl RayCast_setFromAndDelta
 
 addi r3, r1, RoomscaleQuery
 li r4, 0
 bl RayCastBodyQuery_worldRayCast
-cmpwi r3, 0
-beq ApplyRoomscaleAfterPlayerVelocity_NoHit
+mr r30, r3
+cmpwi r30, 0
+beq ApplyRoomscaleAfterPlayerVelocity_Consume
 
 addi r3, r1, RoomscaleQuery
 addi r4, r1, RoomscaleHit
 bl RayCast_getHitPosition
 
+ApplyRoomscaleAfterPlayerVelocity_Consume:
 addi r3, r1, RoomscaleQuery
 li r4, 2
 bl RayCastBodyQuery_dtor
 
-lfs f0, RoomscaleHit + 0x0(r1)
-stfs f0, RoomscaleCurrent + 0x0(r1)
-lfs f0, RoomscaleHit + 0x4(r1)
-stfs f0, RoomscaleCurrent + 0x4(r1)
-lfs f0, RoomscaleHit + 0x8(r1)
-stfs f0, RoomscaleCurrent + 0x8(r1)
-b ApplyRoomscaleAfterPlayerVelocity_Warp
-
-ApplyRoomscaleAfterPlayerVelocity_NoHit:
-addi r3, r1, RoomscaleQuery
-li r4, 2
-bl RayCastBodyQuery_dtor
-
-lfs f0, RoomscaleCurrent + 0x0(r1)
-lfs f1, RoomscaleStep + 0x0(r1)
-fadds f0, f0, f1
-stfs f0, RoomscaleCurrent + 0x0(r1)
-
-lfs f0, RoomscaleCurrent + 0x4(r1)
-lfs f1, RoomscaleStep + 0x4(r1)
-fadds f0, f0, f1
-stfs f0, RoomscaleCurrent + 0x4(r1)
-
-lfs f0, RoomscaleCurrent + 0x8(r1)
-lfs f1, RoomscaleStep + 0x8(r1)
-fadds f0, f0, f1
-stfs f0, RoomscaleCurrent + 0x8(r1)
-
-addi r30, r30, -1
-b ApplyRoomscaleAfterPlayerVelocity_Loop
+addi r3, r1, RoomscaleScratch
+mr r4, r30
+bla import.coreinit.hook_ConsumeRoomscaleRaycast
+lwz r31, 0x18(r1)
+cmpwi r3, 2
+beq ApplyRoomscaleAfterPlayerVelocity_Warp
+cmpwi r3, 1
+beq ApplyRoomscaleAfterPlayerVelocity_Loop
+b ApplyRoomscaleAfterPlayerVelocity_Continue
 
 ApplyRoomscaleAfterPlayerVelocity_Warp:
 lwz r11, 0xE8(r31)
@@ -198,8 +162,8 @@ bl SyncPhysicsFieldAfterSetPosition
 ApplyRoomscaleAfterPlayerVelocity_Continue:
 lwz r31, 0x18(r1)
 lwz r30, 0x14(r1)
-lwz r0, 0x124(r1)
-addi r1, r1, 0x120
+lwz r0, 0x114(r1)
+addi r1, r1, 0x110
 mtlr r0
 lwz r3, 0x4(r31)
 lis r12, ContinueAfterApplyRoomscaleAfterPlayerVelocity@ha

@@ -85,6 +85,24 @@ bool s_wasCrouching = false;
 float actualCrouchOffset = 0.0f;
 std::chrono::steady_clock::time_point crouch_state_change_time;
 
+static glm::fvec3 GetAppliedHeadsetOffset(glm::fvec3 eyePos) {
+    if (CemuHooks::IsFirstPerson()) {
+        glm::fvec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
+        eyePos.x -= appliedHeadPos.x;
+        eyePos.z -= appliedHeadPos.z;
+    }
+    return eyePos;
+}
+
+static glm::mat4 GetAppliedHeadsetPose(glm::mat4 pose) {
+    if (CemuHooks::IsFirstPerson()) {
+        glm::fvec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
+        pose[3].x -= appliedHeadPos.x;
+        pose[3].z -= appliedHeadPos.z;
+    }
+    return pose;
+}
+
 void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
@@ -200,7 +218,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         Log::print<ERROR>("hook_UpdateCameraForGameplay: No views available for the middle pose.");
         return;
     }
-    auto& views = viewsOpt.value();
+    glm::mat4 views = GetAppliedHeadsetPose(viewsOpt.value());
 
     // calculate final camera matrix
     glm::mat4 finalPose = glm::inverse(existingGameMtx) * views;
@@ -317,7 +335,7 @@ void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
     std::optional<XrPosef> currPoseOpt = VRManager::instance().XR->GetRenderer()->GetPose(side);
     if (!currPoseOpt.has_value())
         return;
-    glm::fvec3 eyePos = ToGLM(currPoseOpt.value().position);
+    glm::fvec3 eyePos = GetAppliedHeadsetOffset(ToGLM(currPoseOpt.value().position));
     glm::fquat eyeRot = ToGLM(currPoseOpt.value().orientation);
 
     glm::vec3 newPos = basePos + (baseYaw * eyePos);
@@ -542,7 +560,7 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
         std::optional<XrPosef> currPoseOpt = VRManager::instance().XR->GetRenderer()->GetPose(side);
         if (!currPoseOpt.has_value())
             return;
-        glm::fvec3 eyePos = ToGLM(currPoseOpt.value().position);
+        glm::fvec3 eyePos = GetAppliedHeadsetOffset(ToGLM(currPoseOpt.value().position));
         glm::fquat eyeRot = ToGLM(currPoseOpt.value().orientation);
 
         glm::vec3 newPos = basePos + (baseYaw * eyePos);
@@ -646,7 +664,7 @@ std::pair<glm::vec3, glm::fquat> CemuHooks::CalculateVRWorldPose(const BESeadLoo
         return { basePos, baseRot };
     }
 
-    glm::fvec3 eyePos = ToGLM(currPoseOpt.value().position);
+    glm::fvec3 eyePos = GetAppliedHeadsetOffset(ToGLM(currPoseOpt.value().position));
     glm::fquat eyeRot = ToGLM(currPoseOpt.value().orientation);
 
     glm::vec3 newPos = basePos + (baseYaw * eyePos);

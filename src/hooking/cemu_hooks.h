@@ -28,10 +28,14 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_CreateNewActor", &hook_CreateNewActor);
 
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyVelocity", &hook_SetRigidBodyVelocity);
+        osLib_registerHLEFunction("coreinit", "hook_GetRoomscaleDelta", &hook_GetRoomscaleDelta);
+        osLib_registerHLEFunction("coreinit", "hook_BeginRoomscaleMovement", &hook_BeginRoomscaleMovement);
+        osLib_registerHLEFunction("coreinit", "hook_PrepareRoomscaleRaycast", &hook_PrepareRoomscaleRaycast);
+        osLib_registerHLEFunction("coreinit", "hook_ConsumeRoomscaleRaycast", &hook_ConsumeRoomscaleRaycast);
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyTransform", &hook_SetRigidBodyTransform);
+        osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyScale", &hook_SetRigidBodyScale);
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyPosition", &hook_SetRigidBodyPosition);
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyPositionAndRotation", &hook_SetRigidBodyPositionAndRotation);
-        osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyRotation", &hook_SetRigidBodyRotation);
 
         // Stereo Rendering/Camera Hooks
         osLib_registerHLEFunction("coreinit", "hook_BeginCameraSide", &hook_BeginCameraSide);
@@ -137,6 +141,8 @@ public:
     static bool IsScreenOpen(ScreenId screen);
     static bool IsScreenVisible(ScreenId screen);
     static bool IsAnyFadeScreenVisible();
+    static glm::fvec3 GetAppliedRoomscaleHeadPosition();
+    static float GetRoomscaleFadeAmount();
 
     static void DrawDebugOverlays();
 
@@ -171,10 +177,14 @@ private:
     static void hook_CreateNewActor(PPCInterpreter_t* hCPU);
 
     static void hook_SetRigidBodyVelocity(PPCInterpreter_t* hCPU);
+    static void hook_GetRoomscaleDelta(PPCInterpreter_t* hCPU);
+    static void hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU);
+    static void hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU);
+    static void hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU);
     static void hook_SetRigidBodyTransform(PPCInterpreter_t* hCPU);
+    static void hook_SetRigidBodyScale(PPCInterpreter_t* hCPU);
     static void hook_SetRigidBodyPosition(PPCInterpreter_t* hCPU);
     static void hook_SetRigidBodyPositionAndRotation(PPCInterpreter_t* hCPU);
-    static void hook_SetRigidBodyRotation(PPCInterpreter_t* hCPU);
 
     // Camera Hooks
     static void hook_BeginCameraSide(PPCInterpreter_t* hCPU);

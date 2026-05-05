@@ -265,6 +265,13 @@ static glm::vec3 s_manualBodyOffset = glm::vec3(0.0f, 0.0f, -0.075f);
 static glm::mat4 s_handCorrectionRotationLeft = glm::mat4(1.0f);
 static glm::mat4 s_handCorrectionRotationRight = glm::mat4(1.0f);
 
+static glm::fvec3 RemoveHeadsetHorizontalOffset(glm::fvec3 trackedPos) {
+    glm::fvec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
+    trackedPos.x -= appliedHeadPos.x;
+    trackedPos.z -= appliedHeadPos.z;
+    return trackedPos;
+}
+
 void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
@@ -317,8 +324,10 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     const auto& pose = inputs.shared.poseLocation[side];
     glm::fvec3 controllerPos = glm::fvec3();
     glm::fquat controllerRot = glm::identity<glm::fquat>();
-    if (pose.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
+    if (pose.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) {
         controllerPos = ToGLM(pose.pose.position);
+        controllerPos = RemoveHeadsetHorizontalOffset(controllerPos);
+    }
     if (pose.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)
         controllerRot = ToGLM(pose.pose.orientation);
 
@@ -386,6 +395,8 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
 
         // headset in model space
         glm::mat4 headsetModel = glm::inverse(playerMtx4) * cameraMtx * headsetMtx;
+        headsetModel[3].x = 0.0f;
+        headsetModel[3].z = 0.0f;
 
         // extract yaw-only rotation (twist around Y)
         glm::quat headsetRot = glm::quat_cast(headsetModel);
