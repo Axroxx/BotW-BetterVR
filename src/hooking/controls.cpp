@@ -903,6 +903,28 @@ void processJoystickInput(VPADButtons& oldXRStickHold, VPADButtons& newXRStickHo
     oldXRStickHold = newXRStickHold;
 }
 
+static void remapRightStickToCameraZoom(uint32_t& buttonHold, OpenXR::GameState& gameState, XrActionStateVector2f& rightStickSource) {
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return;
+    }
+
+    const bool isInCameraMode = CemuHooks::IsScreenVisible(ScreenId::AppCamera_00);
+    if (!isInCameraMode) {
+        return;
+    }
+
+    const float axisThreshold = GetSettings().axisThreshold;
+    if (rightStickSource.currentState.y >= axisThreshold) {
+        buttonHold |= VPAD_BUTTON_UP;
+    }
+    else if (rightStickSource.currentState.y <= -axisThreshold) {
+        buttonHold |= VPAD_BUTTON_DOWN;
+    }
+
+    rightStickSource.currentState = { 0.0f, 0.0f };
+}
+
 XrTime prev_sample = 0;
 
 void updatePreviousValues(OpenXR::GameState& gameState, uint32_t& buttonHold, HandGestureState& leftGesture, HandGestureState& rightGesture, XrTime inputTime)
@@ -1095,6 +1117,8 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
         // Trigger handling
         processLeftTriggerBindings(newXRBtnHold, inputs, gameState);
         processRightTriggerBindings(newXRBtnHold, inputs, gameState, rightGesture);
+
+        remapRightStickToCameraZoom(newXRBtnHold, gameState, rightStickSource);
     }
     else {
         processMenuInput(newXRBtnHold, inputs, gameState);
