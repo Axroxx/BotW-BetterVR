@@ -3,6 +3,11 @@ moduleMatches = 0x6267BFD0
 
 .origin = codecave
 
+; flag to enable/disable printToCemuConsoleWithFormat (0 = enabled, nonzero = disabled)
+; this is read in the printToCemuConsoleWithFormat function
+0x10416BF0 = DISABLE_PPC_LOGGING_SET: ; normally this is 0x556E6162
+0x10416BF0 = .int 0x00000000 ; set to 0 to enable logging
+
 
 str_WeaponR:
 .string "Weapon_R"

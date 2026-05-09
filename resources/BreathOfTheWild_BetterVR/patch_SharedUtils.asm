@@ -86,6 +86,12 @@ blr
 
 0x03A14E1C = vsnprintfToSafeString:
 
+; flag to enable/disable printToCemuConsoleWithFormat (0 = enabled, nonzero = disabled)
+; this is changed in the patch_debug_CTRL_Logging.asm file to be 0
+0x10416BF0 = DISABLE_PPC_LOGGING_GET: ; normally this is 0x556E6162
+
+
+
 ; r3 = reserved
 ; r4 = reserved
 ; r5 = format string passed by callee
@@ -103,6 +109,12 @@ stw r3, 0x1C(r1)
 stw r4, 0x18(r1)
 stw r5, 0x14(r1)
 stw r6, 0x10(r1)
+stw r7, 0x0C(r1) ; this stores a comparison, not an arg
+
+lis r7, DISABLE_PPC_LOGGING_GET@ha
+lwz r7, DISABLE_PPC_LOGGING_GET@l(r7)
+cmpwi r7, 0
+bne skipPrintToCemuConsoleWithFormat
 
 ; temp string buffer
 addi r3, r1, 0x400
@@ -117,7 +129,10 @@ bla import.coreinit.__os_snprintf
 addi r3, r1, 0x400
 bla import.coreinit.hook_OSReportToConsole
 
+
+skipPrintToCemuConsoleWithFormat:
 ; restore outer stack frame
+lwz r7, 0x0C(r1)
 lwz r6, 0x10(r1)
 lwz r5, 0x14(r1)
 lwz r4, 0x18(r1)
