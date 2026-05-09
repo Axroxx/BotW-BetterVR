@@ -144,7 +144,7 @@ public:
     private:
         void RecreatePipeline();
         void EnsureVertexBuffer(uint32_t requiredBytes);
-        void UpdateSceneSettings(OpenXR::EyeSide side, ID3D12Resource* colorTarget, const glm::mat4& viewProjection);
+        void UpdateSceneSettings(OpenXR::EyeSide side, uint32_t settingsIndex, ID3D12Resource* colorTarget, const glm::mat4& viewProjection, float xrayAlphaScale);
         void RenderVertices(ID3D12GraphicsCommandList* commandList, D3D12_PRIMITIVE_TOPOLOGY topology, ID3D12PipelineState* pipelineState, uint32_t vertexOffset, uint32_t vertexCount);
 
         ComPtr<ID3DBlob> m_vertexShader;
@@ -152,8 +152,10 @@ public:
         ComPtr<ID3D12RootSignature> m_signature;
         ComPtr<ID3D12PipelineState> m_trianglePipelineState;
         ComPtr<ID3D12PipelineState> m_linePipelineState;
+        ComPtr<ID3D12PipelineState> m_xrayTrianglePipelineState;
+        ComPtr<ID3D12PipelineState> m_xrayLinePipelineState;
 
-        std::array<ComPtr<ID3D12Resource>, 2> m_sceneSettingsBuffers;
+        std::array<std::array<ComPtr<ID3D12Resource>, 2>, 2> m_sceneSettingsBuffers;
         ComPtr<ID3D12Resource> m_vertexBuffer;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView = {};
         uint32_t m_vertexBufferCapacity = 0;

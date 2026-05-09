@@ -102,7 +102,12 @@ static void AddRenderLine(DebugDrawRenderData& renderData, const glm::vec3& a, c
     renderData.lineVertices.push_back({ b, color });
 }
 
-static void AddPlanarCircle(DebugDrawRenderData& renderData, const glm::vec3& center, const glm::vec3& axisX, const glm::vec3& axisY, uint32_t color, int segments) {
+static void AddRenderXRayLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color) {
+    renderData.xrayLineVertices.push_back({ a, color });
+    renderData.xrayLineVertices.push_back({ b, color });
+}
+
+static void AddPlanarCircle(DebugDrawRenderData& renderData, const glm::vec3& center, const glm::vec3& axisX, const glm::vec3& axisY, uint32_t color, int segments, bool xray = false) {
     if (segments < 3) {
         return;
     }
@@ -111,7 +116,12 @@ static void AddPlanarCircle(DebugDrawRenderData& renderData, const glm::vec3& ce
     for (int i = 1; i <= segments; ++i) {
         const float angle = (glm::two_pi<float>() * (float)i) / (float)segments;
         const glm::vec3 point = center + (axisX * std::cos(angle)) + (axisY * std::sin(angle));
-        AddRenderLine(renderData, previousPoint, point, color);
+        if (xray) {
+            AddRenderXRayLine(renderData, previousPoint, point, color);
+        }
+        else {
+            AddRenderLine(renderData, previousPoint, point, color);
+        }
         previousPoint = point;
     }
 }
@@ -122,12 +132,23 @@ static void AddTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, con
     renderData.triangleVertices.push_back({ c, color });
 }
 
+static void AddXRayTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, uint32_t color) {
+    renderData.xrayTriangleVertices.push_back({ a, color });
+    renderData.xrayTriangleVertices.push_back({ b, color });
+    renderData.xrayTriangleVertices.push_back({ c, color });
+}
+
 static void AddQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, uint32_t color) {
     AddTriangle(renderData, a, b, c, color);
     AddTriangle(renderData, a, c, d, color);
 }
 
-static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corners, uint32_t color) {
+static void AddXRayQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, uint32_t color) {
+    AddXRayTriangle(renderData, a, b, c, color);
+    AddXRayTriangle(renderData, a, c, d, color);
+}
+
+static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corners, uint32_t color, bool xray) {
     static constexpr float FACE_SHADING[6] = {
         0.78f,
         1.0f,
@@ -141,11 +162,16 @@ static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corner
     for (int i = 0; i < 6; ++i) {
         const int* face = BOX_FACES[i];
         const uint32_t faceColor = ScaleColor(color, FACE_SHADING[i], baseAlphaScale);
-        AddQuad(renderData, corners[face[0]], corners[face[1]], corners[face[2]], corners[face[3]], faceColor);
+        if (xray) {
+            AddXRayQuad(renderData, corners[face[0]], corners[face[1]], corners[face[2]], corners[face[3]], faceColor);
+        }
+        else {
+            AddQuad(renderData, corners[face[0]], corners[face[1]], corners[face[2]], corners[face[3]], faceColor);
+        }
     }
 }
 
-static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, int segments, uint32_t color) {
+static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, int segments, uint32_t color, bool xray) {
     if (segments < 2 || duration <= 0.0f) {
         return;
     }
@@ -178,46 +204,65 @@ static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start
         }
 
         right = glm::normalize(right) * arcWidth;
-        AddQuad(renderData, p0 - right, p0 + right, p1 + right, p1 - right, ribbonColor);
+        if (xray) {
+            AddXRayQuad(renderData, p0 - right, p0 + right, p1 + right, p1 - right, ribbonColor);
+        }
+        else {
+            AddQuad(renderData, p0 - right, p0 + right, p1 + right, p1 - right, ribbonColor);
+        }
     }
 }
 
-void DebugDraw::Line(const glm::vec3& a, const glm::vec3& b, uint32_t color, float thickness) {
+void DebugDraw::Line(const glm::vec3& a, const glm::vec3& b, uint32_t color, float thickness, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::LINE, color, thickness };
     primitive.a = a;
     primitive.b = b;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::Dot(const glm::vec3& position, float radius, uint32_t color) {
+void DebugDraw::Dot(const glm::vec3& position, float radius, uint32_t color, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::DOT, color, 1.0f };
     primitive.a = position;
     primitive.radius = radius;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::PhysicsBody(const glm::vec3& center, float radius, float halfHeight, uint32_t color, float thickness, int segments) {
+void DebugDraw::Sphere(const glm::vec3& position, float radius, uint32_t color, int segments, bool xray) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::SPHERE, color, 1.0f };
+    primitive.a = position;
+    primitive.radius = radius;
+    primitive.segments = segments;
+    primitive.xray = xray;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::PhysicsBody(const glm::vec3& center, float radius, float halfHeight, uint32_t color, float thickness, int segments, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::PHYSICS_BODY, color, thickness };
     primitive.a = center;
     primitive.radius = radius;
     primitive.duration = halfHeight;
     primitive.segments = segments;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::Circle(const glm::vec3& position, float radius, uint32_t color, float thickness, int segments) {
+void DebugDraw::Circle(const glm::vec3& position, float radius, uint32_t color, float thickness, int segments, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::CIRCLE, color, thickness };
     primitive.a = position;
     primitive.radius = radius;
     primitive.segments = segments;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color, int segments) {
+void DebugDraw::Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color, int segments, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::ARC, color, 1.0f };
     primitive.a = start;
@@ -225,31 +270,35 @@ void DebugDraw::Arc(const glm::vec3& start, const glm::vec3& initialVelocity, co
     primitive.c = acceleration;
     primitive.duration = duration;
     primitive.segments = segments;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::Box(const glm::vec3& min, const glm::vec3& max, uint32_t color, float thickness) {
+void DebugDraw::Box(const glm::vec3& min, const glm::vec3& max, uint32_t color, float thickness, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::AABB, color, thickness };
     primitive.a = min;
     primitive.b = max;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color, float thickness) {
+void DebugDraw::Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color, float thickness, bool xray) {
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::ORIENTED_BOX, color, thickness };
     primitive.a = center;
     primitive.b = halfExtents;
     primitive.rotation = rotation;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
-void DebugDraw::Frustum(const glm::mat4& viewProjection, uint32_t color, float thickness) {
+void DebugDraw::Frustum(const glm::mat4& viewProjection, uint32_t color, float thickness, bool xray) {
     glm::mat4 inv = glm::inverse(viewProjection);
     std::lock_guard lk(m_mutex);
     DebugPrimitive primitive = { PrimitiveType::FRUSTUM, color, thickness };
     primitive.inverseVP = inv;
+    primitive.xray = xray;
     m_primitives.push_back(primitive);
 }
 
@@ -280,14 +329,20 @@ void DebugDraw::SnapshotEyeState(uint32_t eyeIndex, long frameIdx) {
     s_frameDebugEyeStates[frameIdx][eyeIndex] = s_latestDebugEyeStates[eyeIndex];
 }
 
-void DebugDraw::AddLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color) {
+void DebugDraw::AddLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color, bool xray) {
+    if (xray) {
+        renderData.xrayLineVertices.push_back({ a, color });
+        renderData.xrayLineVertices.push_back({ b, color });
+        return;
+    }
+
     renderData.lineVertices.push_back({ a, color });
     renderData.lineVertices.push_back({ b, color });
 }
 
-void DebugDraw::AddEdges(DebugDrawRenderData& renderData, const glm::vec3* corners, const int (*edges)[2], int edgeCount, uint32_t color) {
+void DebugDraw::AddEdges(DebugDrawRenderData& renderData, const glm::vec3* corners, const int (*edges)[2], int edgeCount, uint32_t color, bool xray) {
     for (int i = 0; i < edgeCount; ++i) {
-        AddLine(renderData, corners[edges[i][0]], corners[edges[i][1]], color);
+        AddLine(renderData, corners[edges[i][0]], corners[edges[i][1]], color, xray);
     }
 }
 
@@ -326,7 +381,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
     for (const auto& prim : primitives) {
         switch (prim.type) {
             case PrimitiveType::LINE: {
-                AddLine(renderData, prim.a, prim.b, prim.color);
+                AddLine(renderData, prim.a, prim.b, prim.color, prim.xray);
                 break;
             }
 
@@ -334,9 +389,21 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 const glm::vec3 xAxis = glm::vec3(prim.radius, 0.0f, 0.0f);
                 const glm::vec3 yAxis = glm::vec3(0.0f, prim.radius, 0.0f);
                 const glm::vec3 zAxis = glm::vec3(0.0f, 0.0f, prim.radius);
-                AddLine(renderData, prim.a - xAxis, prim.a + xAxis, prim.color);
-                AddLine(renderData, prim.a - yAxis, prim.a + yAxis, prim.color);
-                AddLine(renderData, prim.a - zAxis, prim.a + zAxis, prim.color);
+                AddLine(renderData, prim.a - xAxis, prim.a + xAxis, prim.color, prim.xray);
+                AddLine(renderData, prim.a - yAxis, prim.a + yAxis, prim.color, prim.xray);
+                AddLine(renderData, prim.a - zAxis, prim.a + zAxis, prim.color, prim.xray);
+                break;
+            }
+
+            case PrimitiveType::SPHERE: {
+                const int segments = ResolveCircleSegments(prim.radius, prim.segments);
+                if (segments < 3 || prim.radius <= 0.0f) {
+                    break;
+                }
+
+                AddPlanarCircle(renderData, prim.a, glm::vec3(prim.radius, 0.0f, 0.0f), glm::vec3(0.0f, prim.radius, 0.0f), prim.color, segments, prim.xray);
+                AddPlanarCircle(renderData, prim.a, glm::vec3(prim.radius, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, prim.radius), prim.color, segments, prim.xray);
+                AddPlanarCircle(renderData, prim.a, glm::vec3(0.0f, prim.radius, 0.0f), glm::vec3(0.0f, 0.0f, prim.radius), prim.color, segments, prim.xray);
                 break;
             }
 
@@ -353,15 +420,15 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 const glm::vec3 radiusX = glm::vec3(radius, 0.0f, 0.0f);
                 const glm::vec3 radiusZ = glm::vec3(0.0f, 0.0f, radius);
 
-                AddPlanarCircle(renderData, topCenter, radiusX, radiusZ, prim.color, segments);
-                AddPlanarCircle(renderData, prim.a, radiusX, radiusZ, ScaleColor(prim.color, 0.85f, 0.7f), segments);
-                AddPlanarCircle(renderData, bottomCenter, radiusX, radiusZ, prim.color, segments);
+                AddPlanarCircle(renderData, topCenter, radiusX, radiusZ, prim.color, segments, prim.xray);
+                AddPlanarCircle(renderData, prim.a, radiusX, radiusZ, ScaleColor(prim.color, 0.85f, 0.7f), segments, prim.xray);
+                AddPlanarCircle(renderData, bottomCenter, radiusX, radiusZ, prim.color, segments, prim.xray);
 
-                AddLine(renderData, topCenter + radiusX, bottomCenter + radiusX, prim.color);
-                AddLine(renderData, topCenter - radiusX, bottomCenter - radiusX, prim.color);
-                AddLine(renderData, topCenter + radiusZ, bottomCenter + radiusZ, prim.color);
-                AddLine(renderData, topCenter - radiusZ, bottomCenter - radiusZ, prim.color);
-                AddLine(renderData, bottomCenter, topCenter, ScaleColor(prim.color, 0.7f, 0.6f));
+                AddLine(renderData, topCenter + radiusX, bottomCenter + radiusX, prim.color, prim.xray);
+                AddLine(renderData, topCenter - radiusX, bottomCenter - radiusX, prim.color, prim.xray);
+                AddLine(renderData, topCenter + radiusZ, bottomCenter + radiusZ, prim.color, prim.xray);
+                AddLine(renderData, topCenter - radiusZ, bottomCenter - radiusZ, prim.color, prim.xray);
+                AddLine(renderData, bottomCenter, topCenter, ScaleColor(prim.color, 0.7f, 0.6f), prim.xray);
                 break;
             }
 
@@ -375,7 +442,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 for (int i = 1; i <= segments; ++i) {
                     const float angle = (glm::two_pi<float>() * (float)i) / (float)segments;
                     const glm::vec3 point = prim.a + glm::vec3(std::cos(angle) * prim.radius, 0.0f, std::sin(angle) * prim.radius);
-                    AddLine(renderData, previousPoint, point, prim.color);
+                    AddLine(renderData, previousPoint, point, prim.color, prim.xray);
                     previousPoint = point;
                 }
                 break;
@@ -387,7 +454,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                     break;
                 }
 
-                AddArcRibbon(renderData, prim.a, prim.b, prim.c, prim.duration, segments, prim.color);
+                AddArcRibbon(renderData, prim.a, prim.b, prim.c, prim.duration, segments, prim.color, prim.xray);
 
                 auto evaluatePoint = [&](float t) {
                     return prim.a + prim.b * t + prim.c * (0.5f * t * t);
@@ -397,7 +464,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 for (int i = 1; i <= segments; ++i) {
                     const float t = (prim.duration * (float)i) / (float)segments;
                     const glm::vec3 point = evaluatePoint(t);
-                    AddLine(renderData, previousPoint, point, prim.color);
+                    AddLine(renderData, previousPoint, point, prim.color, prim.xray);
                     previousPoint = point;
                 }
                 break;
@@ -416,8 +483,8 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                     { mx.x, mx.y, mx.z },
                     { mn.x, mx.y, mx.z },
                 };
-                AddSolidBox(renderData, corners, prim.color);
-                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color);
+                AddSolidBox(renderData, corners, prim.color, prim.xray);
+                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color, prim.xray);
                 break;
             }
 
@@ -441,8 +508,8 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                     corners[i] = center + rot * localCorners[i];
                 }
 
-                AddSolidBox(renderData, corners, prim.color);
-                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color);
+                AddSolidBox(renderData, corners, prim.color, prim.xray);
+                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color, prim.xray);
                 break;
             }
 
@@ -464,7 +531,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                     corners[i] = glm::vec3(world) / world.w;
                 }
 
-                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color);
+                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color, prim.xray);
                 break;
             }
         }

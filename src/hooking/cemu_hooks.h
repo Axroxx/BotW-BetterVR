@@ -124,6 +124,12 @@ public:
     static bool IsShowingMenu() {
         return !IsInGame() || IsScreenOpen(ScreenId::ShopBG_00) || IsScreenOpen(ScreenId::MessageDialog);
     }
+    static bool IsRiding(bool ignoreSandSeal = false) {
+        if (ignoreSandSeal) {
+            return s_isRiding > 0;
+        }
+        return s_isRiding > 0 || s_isRidingSandSeal > 0;
+    }
     static bool UseMonoFrameBufferTemporarilyDuringMenusOrPictures();
 
     static std::string s_currentEvent;

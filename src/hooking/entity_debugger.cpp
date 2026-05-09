@@ -294,6 +294,7 @@ void EntityDebugger::DrawEntityInspector() {
             ImGui::DragFloat("Max 3D Box Distance", &m_worldAABBMaxDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
         }
         ImGui::Checkbox("Show Raycast Lines", &m_showRaycastLines);
+        ImGui::Checkbox("Show Roomscale Physics", &m_showRoomscalePhysics);
     }
 
     // display entities

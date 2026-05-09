@@ -149,7 +149,7 @@ cbuffer g_scene : register(b0) {
     float targetWidth;
     float targetHeight;
     float depthBias;
-    float padding0;
+    float xrayAlphaScale;
 };
 
 Texture2D<float> g_sceneDepthTexture : register(t0);
@@ -167,12 +167,13 @@ PSOutput PSMain(PSInput input) {
     float sceneDepth = g_sceneDepthTexture.Sample(g_sampler, uv);
     float overlayDepth = saturate(input.position.z - depthBias);
 
-    if (overlayDepth > sceneDepth + depthBias) {
+    if (xrayAlphaScale <= 0.0f && overlayDepth > sceneDepth + depthBias) {
         discard;
     }
 
     PSOutput output;
     output.Color = input.color;
+    output.Color.a *= xrayAlphaScale > 0.0f ? xrayAlphaScale : 1.0f;
     output.Depth = overlayDepth;
     return output;
 }
@@ -200,7 +201,7 @@ struct debugDrawLineSettings {
     float targetWidth;
     float targetHeight;
     float depthBias;
-    float padding0;
+    float xrayAlphaScale;
 };
 
 // clang-format off

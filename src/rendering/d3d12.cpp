@@ -464,8 +464,11 @@ RND_D3D12::DebugDrawPipeline::DebugDrawPipeline() {
         m_depthHandles[eye].ptr += eye * depthDescriptorStride;
     }
     m_signature = createSignature();
-    m_sceneSettingsBuffers[OpenXR::EyeSide::LEFT] = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(debugDrawLineSettings));
-    m_sceneSettingsBuffers[OpenXR::EyeSide::RIGHT] = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(debugDrawLineSettings));
+    for (uint32_t eye = 0; eye < 2; ++eye) {
+        for (uint32_t settingsIndex = 0; settingsIndex < 2; ++settingsIndex) {
+            m_sceneSettingsBuffers[eye][settingsIndex] = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(debugDrawLineSettings));
+        }
+    }
 }
 
 void RND_D3D12::DebugDrawPipeline::EnsureVertexBuffer(uint32_t requiredBytes) {
@@ -477,16 +480,17 @@ void RND_D3D12::DebugDrawPipeline::EnsureVertexBuffer(uint32_t requiredBytes) {
     m_vertexBuffer = D3D12Utils::CreateConstantBuffer(VRManager::instance().D3D12->GetDevice(), D3D12_HEAP_TYPE_UPLOAD, m_vertexBufferCapacity);
 }
 
-void RND_D3D12::DebugDrawPipeline::UpdateSceneSettings(OpenXR::EyeSide side, ID3D12Resource* colorTarget, const glm::mat4& viewProjection) {
+void RND_D3D12::DebugDrawPipeline::UpdateSceneSettings(OpenXR::EyeSide side, uint32_t settingsIndex, ID3D12Resource* colorTarget, const glm::mat4& viewProjection, float xrayAlphaScale) {
     debugDrawLineSettings settings = {
         .viewProjection = viewProjection,
         .targetWidth = (float)colorTarget->GetDesc().Width,
         .targetHeight = (float)colorTarget->GetDesc().Height,
         .depthBias = 0.0005f,
-        .padding0 = 0.0f,
+        .xrayAlphaScale = xrayAlphaScale,
     };
 
-    ID3D12Resource* sceneSettingsBuffer = m_sceneSettingsBuffers[side].Get();
+    checkAssert(settingsIndex < m_sceneSettingsBuffers[side].size(), "Debug draw scene settings index is out of range!");
+    ID3D12Resource* sceneSettingsBuffer = m_sceneSettingsBuffers[side][settingsIndex].Get();
     checkAssert(sceneSettingsBuffer != nullptr, "Debug draw scene settings buffer is missing!");
     void* data = nullptr;
     const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
@@ -589,6 +593,18 @@ void RND_D3D12::DebugDrawPipeline::RecreatePipeline() {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC lineDesc = baseDesc;
     lineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
     checkHResult(VRManager::instance().D3D12->GetDevice()->CreateGraphicsPipelineState(&lineDesc, IID_PPV_ARGS(&m_linePipelineState)), "Failed to create debug draw line pipeline state!");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC xrayBaseDesc = baseDesc;
+    xrayBaseDesc.DepthStencilState.DepthEnable = false;
+    xrayBaseDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC xrayTriangleDesc = xrayBaseDesc;
+    xrayTriangleDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    checkHResult(VRManager::instance().D3D12->GetDevice()->CreateGraphicsPipelineState(&xrayTriangleDesc, IID_PPV_ARGS(&m_xrayTrianglePipelineState)), "Failed to create debug draw x-ray triangle pipeline state!");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC xrayLineDesc = xrayBaseDesc;
+    xrayLineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+    checkHResult(VRManager::instance().D3D12->GetDevice()->CreateGraphicsPipelineState(&xrayLineDesc, IID_PPV_ARGS(&m_xrayLinePipelineState)), "Failed to create debug draw x-ray line pipeline state!");
 }
 
 void RND_D3D12::DebugDrawPipeline::RenderVertices(ID3D12GraphicsCommandList* commandList, D3D12_PRIMITIVE_TOPOLOGY topology, ID3D12PipelineState* pipelineState, uint32_t vertexOffset, uint32_t vertexCount) {
@@ -633,7 +649,9 @@ void RND_D3D12::DebugDrawPipeline::Render(OpenXR::EyeSide side, ID3D12GraphicsCo
 
     const uint32_t triangleVertexCount = (uint32_t)renderData.triangleVertices.size();
     const uint32_t lineVertexCount = (uint32_t)renderData.lineVertices.size();
-    const uint32_t totalVertexCount = triangleVertexCount + lineVertexCount;
+    const uint32_t xrayTriangleVertexCount = (uint32_t)renderData.xrayTriangleVertices.size();
+    const uint32_t xrayLineVertexCount = (uint32_t)renderData.xrayLineVertices.size();
+    const uint32_t totalVertexCount = triangleVertexCount + lineVertexCount + xrayTriangleVertexCount + xrayLineVertexCount;
     const uint32_t vertexBufferBytes = totalVertexCount * sizeof(DebugDrawVertex);
     EnsureVertexBuffer(vertexBufferBytes);
 
@@ -646,6 +664,12 @@ void RND_D3D12::DebugDrawPipeline::Render(OpenXR::EyeSide side, ID3D12GraphicsCo
     }
     if (lineVertexCount > 0) {
         memcpy(dstVertices + triangleVertexCount, renderData.lineVertices.data(), lineVertexCount * sizeof(DebugDrawVertex));
+    }
+    if (xrayTriangleVertexCount > 0) {
+        memcpy(dstVertices + triangleVertexCount + lineVertexCount, renderData.xrayTriangleVertices.data(), xrayTriangleVertexCount * sizeof(DebugDrawVertex));
+    }
+    if (xrayLineVertexCount > 0) {
+        memcpy(dstVertices + triangleVertexCount + lineVertexCount + xrayTriangleVertexCount, renderData.xrayLineVertices.data(), xrayLineVertexCount * sizeof(DebugDrawVertex));
     }
     m_vertexBuffer->Unmap(0, nullptr);
 
@@ -662,8 +686,8 @@ void RND_D3D12::DebugDrawPipeline::Render(OpenXR::EyeSide side, ID3D12GraphicsCo
     commandList->RSSetViewports(1, &viewport);
     commandList->RSSetScissorRects(1, &scissorRect);
 
-    UpdateSceneSettings(side, colorTarget, viewProjection);
-    commandList->SetGraphicsRootConstantBufferView(1, m_sceneSettingsBuffers[side]->GetGPUVirtualAddress());
+    UpdateSceneSettings(side, 0, colorTarget, viewProjection, 0.0f);
+    commandList->SetGraphicsRootConstantBufferView(1, m_sceneSettingsBuffers[side][0]->GetGPUVirtualAddress());
 
     ID3D12DescriptorHeap* heaps[] = { m_sceneDepthHeap.Get() };
     commandList->SetDescriptorHeaps((UINT)std::size(heaps), heaps);
@@ -672,6 +696,15 @@ void RND_D3D12::DebugDrawPipeline::Render(OpenXR::EyeSide side, ID3D12GraphicsCo
 
     RenderVertices(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, m_trianglePipelineState.Get(), 0, triangleVertexCount);
     RenderVertices(commandList, D3D_PRIMITIVE_TOPOLOGY_LINELIST, m_linePipelineState.Get(), triangleVertexCount, lineVertexCount);
+
+    if (xrayTriangleVertexCount > 0 || xrayLineVertexCount > 0) {
+        const uint32_t xrayTriangleOffset = triangleVertexCount + lineVertexCount;
+        const uint32_t xrayLineOffset = xrayTriangleOffset + xrayTriangleVertexCount;
+        UpdateSceneSettings(side, 1, colorTarget, viewProjection, 0.35f);
+        commandList->SetGraphicsRootConstantBufferView(1, m_sceneSettingsBuffers[side][1]->GetGPUVirtualAddress());
+        RenderVertices(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, m_xrayTrianglePipelineState.Get(), xrayTriangleOffset, xrayTriangleVertexCount);
+        RenderVertices(commandList, D3D_PRIMITIVE_TOPOLOGY_LINELIST, m_xrayLinePipelineState.Get(), xrayLineOffset, xrayLineVertexCount);
+    }
 }
 
 template class RND_D3D12::PresentPipeline<false>;

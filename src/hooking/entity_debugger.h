@@ -24,6 +24,7 @@ public:
     void UpdateKeyboardControls();
     void DrawEntityInspector();
     bool ShouldDrawRaycastLines() const { return m_showRaycastLines; }
+    bool ShouldDrawRoomscalePhysics() const { return m_showRoomscalePhysics; }
     static void DrawFPSOverlay(class RND_Renderer* renderer);
     static void DrawFPSOverlayContent(class RND_Renderer* renderer, bool renderText);
 
@@ -56,4 +57,5 @@ private:
     float m_worldAABBMinDistance = 1.0f;
     float m_worldAABBMaxDistance = 100.0f;
     bool m_showRaycastLines = false;
+    bool m_showRoomscalePhysics = true;
 };
