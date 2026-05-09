@@ -144,6 +144,31 @@ OpenXR::OpenXR() {
 OpenXR::~OpenXR() {
     this->m_renderer.reset();
 
+    for (XrSpace& handSpace : m_inGameHandSpaces) {
+        if (handSpace != XR_NULL_HANDLE) {
+            xrDestroySpace(handSpace);
+            handSpace = XR_NULL_HANDLE;
+        }
+    }
+    for (XrSpace& aimSpace : m_inGameAimSpaces) {
+        if (aimSpace != XR_NULL_HANDLE) {
+            xrDestroySpace(aimSpace);
+            aimSpace = XR_NULL_HANDLE;
+        }
+    }
+    for (XrSpace& handSpace : m_inMenuHandSpaces) {
+        if (handSpace != XR_NULL_HANDLE) {
+            xrDestroySpace(handSpace);
+            handSpace = XR_NULL_HANDLE;
+        }
+    }
+    for (XrSpace& aimSpace : m_inMenuAimSpaces) {
+        if (aimSpace != XR_NULL_HANDLE) {
+            xrDestroySpace(aimSpace);
+            aimSpace = XR_NULL_HANDLE;
+        }
+    }
+
     if (m_headSpace != XR_NULL_HANDLE) {
         xrDestroySpace(m_headSpace);
     }
@@ -409,6 +434,9 @@ void OpenXR::CreateActions() {
         createInfo.subactionPath = m_handPaths[side];
         createInfo.poseInActionSpace = s_xrIdentityPose;
         checkXRResult(xrCreateActionSpace(m_session, &createInfo, &m_inGameHandSpaces[side]), "Failed to create action space for hand pose!");
+
+        createInfo.action = m_inGameAimPoseAction;
+        checkXRResult(xrCreateActionSpace(m_session, &createInfo, &m_inGameAimSpaces[side]), "Failed to create action space for aim pose!");
     }
 
     for (EyeSide side : { EyeSide::LEFT, EyeSide::RIGHT }) {
@@ -417,6 +445,9 @@ void OpenXR::CreateActions() {
         createInfo.subactionPath = m_handPaths[side];
         createInfo.poseInActionSpace = s_xrIdentityPose;
         checkXRResult(xrCreateActionSpace(m_session, &createInfo, &m_inMenuHandSpaces[side]), "Failed to create action space for hand pose!");
+
+        createInfo.action = m_inMenuAimPoseAction;
+        checkXRResult(xrCreateActionSpace(m_session, &createInfo, &m_inMenuAimSpaces[side]), "Failed to create action space for menu aim pose!");
     }
 
     // initialize rumble manager
@@ -481,24 +512,34 @@ std::optional<OpenXR::InputState> OpenXR::UpdateActions(XrTime predictedFrameTim
     newState.shared.inputTime = predictedFrameTime;
 
     for (EyeSide side : { EyeSide::LEFT, EyeSide::RIGHT }) {
-        XrActionStateGetInfo getPoseInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
-        getPoseInfo.action = newState.shared.in_game ? m_inGameGripPoseAction : m_inMenuGripPoseAction;
-        getPoseInfo.subactionPath = m_handPaths[side];
-        newState.shared.pose[side] = { XR_TYPE_ACTION_STATE_POSE };
-        checkXRResult(xrGetActionStatePose(m_session, &getPoseInfo, &newState.shared.pose[side]), "Failed to get pose of controller!");
+        auto locatePose = [&](XrAction action, XrSpace handSpace, XrActionStatePose& poseState, XrSpaceLocation& outLocation, XrSpaceVelocity* outVelocity, const char* errorContext) {
+            XrActionStateGetInfo getPoseInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
+            getPoseInfo.action = action;
+            getPoseInfo.subactionPath = m_handPaths[side];
+            poseState = { XR_TYPE_ACTION_STATE_POSE };
+            checkXRResult(xrGetActionStatePose(m_session, &getPoseInfo, &poseState), errorContext);
 
-        if (newState.shared.pose[side].isActive) {
+            outLocation = { XR_TYPE_SPACE_LOCATION };
+            if (!poseState.isActive) {
+                if (outVelocity != nullptr) {
+                    *outVelocity = { XR_TYPE_SPACE_VELOCITY };
+                }
+                return;
+            }
+
             XrSpaceLocation spaceLocation = { XR_TYPE_SPACE_LOCATION };
             XrSpaceVelocity spaceVelocity = { XR_TYPE_SPACE_VELOCITY };
-            spaceLocation.next = &spaceVelocity;
-            newState.shared.poseVelocity[side].linearVelocity = { 0.0f, 0.0f, 0.0f };
-            newState.shared.poseVelocity[side].angularVelocity = { 0.0f, 0.0f, 0.0f };
-            XrSpace handSpace = newState.shared.in_game ? m_inGameHandSpaces[side] : m_inMenuHandSpaces[side];
+            if (outVelocity != nullptr) {
+                spaceLocation.next = &spaceVelocity;
+                outVelocity->linearVelocity = { 0.0f, 0.0f, 0.0f };
+                outVelocity->angularVelocity = { 0.0f, 0.0f, 0.0f };
+            }
+
             checkXRResult(xrLocateSpace(handSpace, m_stageSpace, predictedFrameTime, &spaceLocation), "Failed to get location from controllers!");
             if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 && (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-                newState.shared.poseLocation[side] = spaceLocation;
+                outLocation = spaceLocation;
 
-                if ((spaceLocation.locationFlags & XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0 && (spaceLocation.locationFlags & XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0) {
+                if (outVelocity != nullptr && (spaceLocation.locationFlags & XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0 && (spaceLocation.locationFlags & XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0) {
                     // rotate angular velocity to world space when it's using a buggy runtime
                     auto mode = GetSettings().AngularVelocityFixer_GetMode();
                     bool isUsingQuestRuntime = m_capabilities.isOculusLinkRuntime;
@@ -509,10 +550,28 @@ std::optional<OpenXR::InputState> OpenXR::UpdateActions(XrTime predictedFrameTim
                         spaceVelocity.angularVelocity = { angularVelocity.x, angularVelocity.y, angularVelocity.z };
                     }
 
-                    newState.shared.poseVelocity[side] = spaceVelocity;
+                    *outVelocity = spaceVelocity;
                 }
             }
-        }
+        };
+
+        locatePose(
+            newState.shared.in_game ? m_inGameGripPoseAction : m_inMenuGripPoseAction,
+            newState.shared.in_game ? m_inGameHandSpaces[side] : m_inMenuHandSpaces[side],
+            newState.shared.pose[side],
+            newState.shared.poseLocation[side],
+            &newState.shared.poseVelocity[side],
+            "Failed to get pose of controller!"
+        );
+
+        locatePose(
+            newState.shared.in_game ? m_inGameAimPoseAction : m_inMenuAimPoseAction,
+            newState.shared.in_game ? m_inGameAimSpaces[side] : m_inMenuAimSpaces[side],
+            newState.shared.aimPose[side],
+            newState.shared.aimPoseLocation[side],
+            nullptr,
+            "Failed to get aim pose of controller!"
+        );
     }
     // update shared actions
     XrActionStateGetInfo getInventoryMapInfo = { XR_TYPE_ACTION_STATE_GET_INFO };

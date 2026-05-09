@@ -5,6 +5,7 @@
 #include "openxr.h"
 #include "swapchain.h"
 #include "texture.h"
+#include "utils/debug_draw.h"
 
 class SharedTexture;
 
@@ -29,6 +30,7 @@ public:
         VkDescriptorSet hudFramebufferDS = VK_NULL_HANDLE;
         VkDescriptorSet hudWithoutAlphaFramebufferDS = VK_NULL_HANDLE;
         float mainFramebufferAspectRatio = 1.0f;
+        RenderUtils::UvTransform mainFramebufferUvTransform = {};
 
         bool ranMotionAnalysis[2] = { false, false };
 
@@ -97,6 +99,7 @@ public:
     void On3DColorCopied(OpenXR::EyeSide side, long frameIdx) {
         m_renderFrames[frameIdx].copiedColor[side] = true;
         if (!m_renderFrames[frameIdx].views.has_value()) m_renderFrames[frameIdx].views = m_currViews;
+        DebugDraw::instance().SnapshotEyeState(side, frameIdx);
     }
 
     void On3DDepthCopied(OpenXR::EyeSide side, long frameIdx) {
@@ -120,10 +123,11 @@ public:
         SharedTexture* CopyDepthToLayer(OpenXR::EyeSide side, VkCommandBuffer copyCmdBuffer, VkImage image, long frameIdx);
         void PrepareRendering(OpenXR::EyeSide side);
         void StartRendering();
-        void Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture);
+        void Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData);
         const std::array<XrCompositionLayerProjectionView, 2>& FinishRendering(long frameIdx);
 
         float GetAspectRatio(OpenXR::EyeSide side) const { return m_recommendedAspectRatios[side]; }
+        const RenderUtils::UvTransform& GetPresentUvTransform(OpenXR::EyeSide side) const { return m_presentUvTransforms[side]; }
         long GetCurrentFrameIdx() const { return m_currentFrameIdx; }
         auto& GetSharedTextures() { return m_textures; }
         auto& GetDepthSharedTextures() { return m_depthTextures; }
@@ -135,6 +139,8 @@ public:
         std::array<std::array<std::unique_ptr<SharedTexture>, 2>, 2> m_textures;
         std::array<std::array<std::unique_ptr<SharedTexture>, 2>, 2> m_depthTextures;
         std::array<float, 2> m_recommendedAspectRatios = { 1.0f, 1.0f };
+        std::array<RenderUtils::UvTransform, 2> m_presentUvTransforms = {};
+        std::unique_ptr<RND_D3D12::DebugDrawPipeline> m_debugDrawPipeline;
 
         std::array<XrCompositionLayerProjectionView, 2> m_projectionViews = {};
         std::array<XrCompositionLayerDepthInfoKHR, 2> m_projectionViewsDepthInfo = {};
@@ -182,7 +188,7 @@ public:
         bool ShouldBlockGameInput() { return ImGui::GetIO().WantCaptureKeyboard; }
 
         void Update();
-        static void Draw3DLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, float aspectRatio, long frameIdx);
+        static void Draw3DLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, float aspectRatio, const RenderUtils::UvTransform& uvTransform, long frameIdx);
         static void DrawHUDLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, long frameIdx);
         void Render(long frameIdx, bool renderBackground, bool isDesktopView);
         void DrawAndCopyToImage(VkCommandBuffer cb, VkImage destImage, long frameIdx, bool isDesktopView);
@@ -208,6 +214,7 @@ public:
     std::unique_ptr<Layer3D> m_layer3D;
     std::unique_ptr<Layer2D> m_layer2D;
     std::unique_ptr<ImGuiOverlay> m_imguiOverlay;
+    float m_gameRenderAspectRatio = 16.0f / 9.0f;
 
     bool IsRendering3D(long frameIdx) {
         return m_renderFrames[frameIdx].presented3D;

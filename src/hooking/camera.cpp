@@ -1,11 +1,23 @@
+#include "pch.h"
+
 #include "cemu_hooks.h"
 #include "instance.h"
 #include "rendering/openxr.h"
 #include "utils/debug_draw.h"
 #include "utils/game_utils.h"
+#include "utils/render_utils.h"
 
 bool CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures() {
     return IsScreenOpen(ScreenId::PauseMenuInfo_00) || VRManager::instance().XR->GetRenderer()->IsGameCapturing3DFrameBuffer();
+}
+
+static std::optional<XrFovf> TryGetRenderFOV(OpenXR::EyeSide side, long frameIdx = -1) {
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return std::nullopt;
+    }
+
+    return RenderUtils::GetRenderFov(renderer->GetFOV(side, frameIdx), renderer->m_gameRenderAspectRatio);
 }
 
 void CemuHooks::hook_BeginCameraSide(PPCInterpreter_t* hCPU) {
@@ -18,58 +30,18 @@ void CemuHooks::hook_BeginCameraSide(PPCInterpreter_t* hCPU) {
     Log::print<RENDERING>("{0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0}", side);
 }
 
-static std::pair<glm::quat, glm::quat> swingTwistY(const glm::quat& q) {
-    glm::vec3 yAxis(0, 1, 0);
-    glm::vec3 r(q.x, q.y, q.z);
-    float dot = glm::dot(r, yAxis);
-    glm::vec3 proj = yAxis * dot;
-    glm::quat twist = glm::normalize(glm::quat(q.w, proj.x, proj.y, proj.z));
-    glm::quat swing = q * glm::conjugate(twist);
-    return { swing, twist };
-}
+static std::optional<XrFovf> GetGameProjectionFOV(OpenXR::EyeSide side, const BESeadPerspectiveProjection& perspectiveProjection, long frameIdx = -1) {
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return std::nullopt;
+    }
 
-// https://github.com/KhronosGroup/OpenXR-SDK/blob/858912260ca616f4c23f7fb61c89228c353eb124/src/common/xr_linear.h#L564C1-L632C2
-// https://github.com/aboood40091/sead/blob/45b629fb032d88b828600a1b787729f2d398f19d/engine/library/modules/src/gfx/seadProjection.cpp#L166
-
-static data_VRProjectionMatrixOut calculateFOVAndOffset(XrFovf viewFOV) {
-    float totalHorizontalFov = viewFOV.angleRight - viewFOV.angleLeft;
-    float totalVerticalFov = viewFOV.angleUp - viewFOV.angleDown;
-
-    float aspectRatio = totalHorizontalFov / totalVerticalFov;
-    float fovY = totalVerticalFov;
-    float projectionCenter_offsetX = (viewFOV.angleRight + viewFOV.angleLeft) / 2.0f;
-    float projectionCenter_offsetY = (viewFOV.angleUp + viewFOV.angleDown) / 2.0f;
-
-    data_VRProjectionMatrixOut ret = {};
-    ret.aspectRatio = aspectRatio;
-    ret.fovY = fovY;
-    ret.offsetX = projectionCenter_offsetX;
-    ret.offsetY = projectionCenter_offsetY;
-
-    return ret;
-}
-
-static glm::mat4 calculateProjectionMatrix(float nearZ, float farZ, const XrFovf& fov) {
-    float l = tanf(fov.angleLeft) * nearZ;
-    float r = tanf(fov.angleRight) * nearZ;
-    float b = tanf(fov.angleDown) * nearZ;
-    float t = tanf(fov.angleUp) * nearZ;
-
-    float invW = 1.0f / (r - l);
-    float invH = 1.0f / (t - b);
-    float invD = 1.0f / (farZ - nearZ);
-
-    glm::mat4 dst = {};
-    dst[0][0] = 2.0f * nearZ * invW;
-    dst[1][1] = 2.0f * nearZ * invH;
-    dst[0][2] = (r + l) * invW;
-    dst[1][2] = (t + b) * invH;
-    dst[2][2] = -(farZ + nearZ) * invD;
-    dst[2][3] = -(2.0f * farZ * nearZ) * invD;
-    dst[3][2] = -1.0f;
-    dst[3][3] = 0.0f;
-
-    return dst;
+    return RenderUtils::ResolveGameProjectionFov(
+        renderer->GetFOV(side, frameIdx),
+        renderer->m_gameRenderAspectRatio,
+        perspectiveProjection.fovYRadiansOrAngle.getLE(),
+        perspectiveProjection.aspect.getLE()
+    );
 }
 
 
@@ -307,7 +279,7 @@ void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
     // overwrite with our stored camera pos/rot
     basePos = s_wsCameraPosition;
     baseRot = s_wsCameraRotation;
-    auto [swing, baseYaw] = swingTwistY(baseRot);
+    auto [swing, baseYaw] = RenderUtils::swingTwistY(baseRot);
     glm::fquat baseYawWithoutClimbingFix = baseYaw;
 
     if (IsFirstPerson()) {
@@ -343,20 +315,7 @@ void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
 
     glm::mat4 newWorldVR = glm::translate(glm::mat4(1.0f), newPos) * glm::mat4_cast(newRot);
     glm::mat4 newViewVR = glm::inverse(newWorldVR);
-
-    if (side == EyeSide::RIGHT && GetSettings().ShowDebugOverlay()) {
-        glm::mat4 proj = calculateProjectionMatrix(GetSettings().GetZNear(), GetSettings().GetZFar(), VRManager::instance().XR->GetRenderer()->GetFOV(side).value());
-            
-        // transpose the sead-convention (row-major) projections to standard column-major
-        glm::mat4 vrProj = glm::transpose(proj);
-
-        glm::mat4 vrVP = vrProj * newViewVR;
-        //DebugDraw::instance().Frustum(vrVP, IM_COL32(0, 255, 0, 255));
-
-        // store the right-eye projection matrix to transform the debug lines with
-        // use right-side due to that being the one shown in the 2D view
-        DebugDraw::instance().SetViewProjection(vrVP);
-    }
+    DebugDraw::instance().UpdateEyeView(side, newViewVR);
 
     camera.mtx.setLEMatrix(newViewVR);
 
@@ -409,11 +368,12 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
     perspectiveProjection.zFar = GetSettings().GetZFar();
     perspectiveProjection.zNear = GetSettings().GetZNear();
 
-    if (!VRManager::instance().XR->GetRenderer()->GetFOV(side).has_value()) {
+    auto currFovOpt = GetGameProjectionFOV(side, perspectiveProjection);
+    if (!currFovOpt.has_value()) {
         return;
     }
-    XrFovf currFOV = VRManager::instance().XR->GetRenderer()->GetFOV(side).value();
-    auto newProjection = calculateFOVAndOffset(currFOV);
+    XrFovf currFOV = currFovOpt.value();
+    auto newProjection = RenderUtils::CalculateFOVAndOffset(currFOV);
 
     perspectiveProjection.aspect = newProjection.aspectRatio;
     perspectiveProjection.fovYRadiansOrAngle = newProjection.fovY;
@@ -424,7 +384,7 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
     perspectiveProjection.offset.x = newProjection.offsetX;
     perspectiveProjection.offset.y = newProjection.offsetY;
 
-    glm::fmat4 newMatrix = calculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
+    glm::fmat4 newMatrix = RenderUtils::CalculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
     perspectiveProjection.matrix = newMatrix;
 
     // calculate device matrix
@@ -438,6 +398,7 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
     newDeviceMatrix[2][2] = (newDeviceMatrix[2][2] + newDeviceMatrix[3][2] * zOffset) * zScale;
     newDeviceMatrix[2][3] = newDeviceMatrix[2][3] * zScale + newDeviceMatrix[3][3] * zOffset;
 
+    DebugDraw::instance().UpdateEyeProjection(side, glm::transpose(newDeviceMatrix));
     perspectiveProjection.deviceMatrix = newDeviceMatrix;
 
     perspectiveProjection.dirty = false;
@@ -469,15 +430,16 @@ void CemuHooks::hook_ModifyLightPrePassProjectionMatrix(PPCInterpreter_t* hCPU) 
     BESeadPerspectiveProjection perspectiveProjection = {};
     readMemory(projectionIn, &perspectiveProjection);
 
-    if (!VRManager::instance().XR->GetRenderer()->GetFOV(side).has_value()) {
+    auto currFovOpt = GetGameProjectionFOV(side, perspectiveProjection);
+    if (!currFovOpt.has_value()) {
         return;
     }
 
     Log::print<RENDERING>("[{}] Modify light prepass projection", side);
 
 
-    XrFovf currFOV = VRManager::instance().XR->GetRenderer()->GetFOV(side).value();
-    auto newProjection = calculateFOVAndOffset(currFOV);
+    XrFovf currFOV = currFovOpt.value();
+    auto newProjection = RenderUtils::CalculateFOVAndOffset(currFOV);
 
     perspectiveProjection.aspect = newProjection.aspectRatio;
     perspectiveProjection.fovYRadiansOrAngle = newProjection.fovY;
@@ -488,7 +450,7 @@ void CemuHooks::hook_ModifyLightPrePassProjectionMatrix(PPCInterpreter_t* hCPU) 
     perspectiveProjection.offset.x = newProjection.offsetX;
     perspectiveProjection.offset.y = newProjection.offsetY;
 
-    glm::fmat4 newMatrix = calculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
+    glm::fmat4 newMatrix = RenderUtils::CalculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
     perspectiveProjection.matrix = newMatrix;
 
     // calculate device matrix
@@ -548,7 +510,7 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
 
         // ignore the current rotation since it is already changed by the gameplay camera hooking
         baseRot = s_wsCameraRotation;
-        auto [swing, baseYaw] = swingTwistY(baseRot);
+        auto [swing, baseYaw] = RenderUtils::swingTwistY(baseRot);
 
         if (IsFirstPerson()) {
             // take link's direction, then rotate the headset position
@@ -568,7 +530,6 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
 
         glm::mat4 newWorldVR = glm::translate(glm::mat4(1.0f), newPos) * glm::mat4_cast(newRot);
         glm::mat4 newViewVR = glm::inverse(newWorldVR);
-
         camera.mtx.setLEMatrix(newViewVR);
 
         camera.pos = newPos;
@@ -587,14 +548,15 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
     BESeadPerspectiveProjection perspectiveProjection = {};
     readMemory(projectionPtr, &perspectiveProjection);
 
-    if (!VRManager::instance().XR->GetRenderer()->GetFOV(side).has_value()) {
+    auto currFovOpt = GetGameProjectionFOV(side, perspectiveProjection);
+    if (!currFovOpt.has_value()) {
         return;
     }
 
     Log::print<RENDERING>("[{}] ModifyProjectionUsingCamera: {}", side, perspectiveProjection);
 
-    XrFovf currFOV = VRManager::instance().XR->GetRenderer()->GetFOV(side).value();
-    auto newProjection = calculateFOVAndOffset(currFOV);
+    XrFovf currFOV = currFovOpt.value();
+    auto newProjection = RenderUtils::CalculateFOVAndOffset(currFOV);
 
     perspectiveProjection.aspect = newProjection.aspectRatio;
     perspectiveProjection.fovYRadiansOrAngle = newProjection.fovY;
@@ -605,7 +567,7 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
     perspectiveProjection.offset.x = newProjection.offsetX;
     perspectiveProjection.offset.y = newProjection.offsetY;
 
-    glm::fmat4 newMatrix = calculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
+    glm::fmat4 newMatrix = RenderUtils::CalculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
     perspectiveProjection.matrix = newMatrix;
 
     // calculate device matrix
@@ -638,7 +600,7 @@ std::pair<glm::vec3, glm::fquat> CemuHooks::CalculateVRWorldPose(const BESeadLoo
     basePos = s_wsCameraPosition;
     baseRot = s_wsCameraRotation;
 
-    auto [swing, baseYaw] = swingTwistY(baseRot);
+    auto [swing, baseYaw] = RenderUtils::swingTwistY(baseRot);
     if (IsFirstPerson()) {
         // take link's direction, then rotate the headset position
         BEMatrix34 playerMtx = {};
@@ -698,14 +660,14 @@ void CemuHooks::hook_CheckIfCameraCanSeePos(PPCInterpreter_t* hCPU) {
 
     for (int i = 0; i < 2; ++i) {
         OpenXR::EyeSide side = (i == 0) ? EyeSide::LEFT : EyeSide::RIGHT;
-        if (auto fovOpt = VRManager::instance().XR->GetRenderer()->GetFOV(side)) {
+        if (auto fovOpt = TryGetRenderFOV(side)) {
             auto [pos, rot] = CalculateVRWorldPose(camera, side);
 
             // pull the camera backwards a bit to account for it being a third-person game that encompassed a bigger area
             pos += rot * glm::vec3(0.0f, 0.0f, 1.0f);
 
             glm::mat4 view = glm::inverse(glm::translate(glm::mat4(1.0f), pos) * glm::mat4_cast(rot));
-            glm::mat4 proj = glm::transpose(calculateProjectionMatrix(nearClip, farClip, fovOpt.value()));
+            glm::mat4 proj = glm::transpose(RenderUtils::CalculateProjectionMatrix(nearClip, farClip, fovOpt.value()));
             glm::mat4 vp = proj * view;
 
             frustum.update(vp);
@@ -725,7 +687,7 @@ void CemuHooks::hook_CheckIfCameraCanSeePos(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_ModifyPixelUniformBlockData(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    auto currFovOpt = VRManager::instance().XR->GetRenderer()->GetFOV(EyeSide::RIGHT);
+    auto currFovOpt = TryGetRenderFOV(EyeSide::RIGHT);
     if (!currFovOpt.has_value()) {
         return;
     }
@@ -734,7 +696,7 @@ void CemuHooks::hook_ModifyPixelUniformBlockData(PPCInterpreter_t* hCPU) {
     readMemory(hCPU->gpr[5], &ubData);
 
     XrFovf currFOV = currFovOpt.value();
-    auto newProjection = calculateFOVAndOffset(currFOV);
+    auto newProjection = RenderUtils::CalculateFOVAndOffset(currFOV);
 
     ubData.x = 0.5f + newProjection.offsetX.getLE();
     ubData.y = 0.5f + newProjection.offsetY.getLE();

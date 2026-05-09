@@ -2,6 +2,8 @@
 
 #include "openxr.h"
 #include "texture.h"
+#include "utils/render_utils.h"
+#include "utils/debug_draw.h"
 
 class RND_Renderer;
 

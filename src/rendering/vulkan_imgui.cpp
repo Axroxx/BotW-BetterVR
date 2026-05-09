@@ -3,7 +3,6 @@
 #include "hooking/imgui_menus.h"
 #include "instance.h"
 #include "utils/vulkan_utils.h"
-#include "utils/debug_draw.h"
 #include "vulkan.h"
 #include "utils/mod_settings.h"
 
@@ -397,23 +396,36 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
         backgroundDrawList->AddImage((ImTextureID)(withAlpha ? frame.hudFramebufferDS : frame.hudWithoutAlphaFramebufferDS), hudPos, ImVec2(hudPos.x + hudSize.x, hudPos.y + hudSize.y));
     };
 
+    auto renderMainBackground = [&](bool centerToRecordedAspect) {
+        ImVec2 bgPos = ImVec2(0, 0);
+        ImVec2 bgSize = windowSize;
+        ImVec2 uvMin = ImVec2(frame.mainFramebufferUvTransform.offsetX, frame.mainFramebufferUvTransform.offsetY);
+        ImVec2 uvMax = ImVec2(frame.mainFramebufferUvTransform.offsetX + frame.mainFramebufferUvTransform.scaleX, frame.mainFramebufferUvTransform.offsetY + frame.mainFramebufferUvTransform.scaleY);
+
+        if (centerToRecordedAspect) {
+            ImVec2 framebufferRes = ImVec2((float)m_outputRes.width, (float)m_outputRes.height);
+            float targetAspect = frame.mainFramebufferAspectRatio;
+            if (!(targetAspect > 0.0f)) {
+                targetAspect = 16.0f / 9.0f;
+            }
+
+            ImVec4 centeredRegion = CalculateCenteredAspectRegion(framebufferRes, targetAspect);
+            ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
+
+            bgPos = ImVec2(centeredRegion.x / fbScale.x, centeredRegion.y / fbScale.y);
+            bgSize = ImVec2(centeredRegion.z / fbScale.x, centeredRegion.w / fbScale.y);
+        }
+
+        backgroundDrawList->AddImage((ImTextureID)frame.mainFramebufferDS, bgPos, ImVec2(bgPos.x + bgSize.x, bgPos.y + bgSize.y), uvMin, uvMax);
+    };
+
     if (renderBackground || CemuHooks::UseBlackBarsDuringEvents()) {
         bool shouldRender3DBackground = VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx) || CemuHooks::UseBlackBarsDuringEvents();
         bool shouldRenderHUDWithAlpha = shouldRender3DBackground && !CemuHooks::UseBlackBarsDuringEvents();
 
         if (shouldRender3DBackground) {
             // draw 3d first so the hud can blend on top of it
-            backgroundDrawList->AddImage((ImTextureID)frame.mainFramebufferDS, ImVec2(0, 0), windowSize, ImVec2(0, 0), ImVec2(1, 1));
-
-            // clip world-space debug draw to the cropped 3d view
-            ImVec2 displaySize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y / 2 / frame.mainFramebufferAspectRatio);
-            ImVec2 displayOffset = ImVec2(ImGui::GetIO().DisplaySize.x / 2 - (displaySize.x / 2), ImGui::GetIO().DisplaySize.y / 2 - (displaySize.y / 2));
-            ImVec2 textureSize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-
-            ImVec2 croppedUv0 = ImVec2(displayOffset.x / textureSize.x, displayOffset.y / textureSize.y);
-            ImVec2 croppedUv1 = ImVec2((displayOffset.x + displaySize.x) / textureSize.x, (displayOffset.y + displaySize.y) / textureSize.y);
-
-            DebugDraw::instance().Render(glm::vec2(0.0f, 0.0f), glm::vec2(windowSize.x, windowSize.y), glm::vec2(croppedUv0.x, croppedUv0.y), glm::vec2(croppedUv1.x, croppedUv1.y));
+            renderMainBackground(isDesktopView);
         }
 
         renderHUDBackground(shouldRenderHUDWithAlpha, true);
@@ -886,10 +898,6 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                             }
                         });
 
-                        DrawSettingRow("Show Debugging Overlays (for developers)", [&]() {
-                            settings.enableDebugOverlay.AddToGUI(&changed);
-                        });
-
                         DrawSettingRow("No Camera Movement in First-Person Cutscenes", [&]() {
                             settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(&changed);
                         });
@@ -902,6 +910,11 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                         else {
                             settings.buggyAngularVelocity = AngularVelocityFixerMode::AUTO;
                         }
+
+                        DrawSettingRow("Show Debugging Overlays (for developers)", [&]() {
+                            settings.enableDebugOverlay.AddToGUI(&changed);
+                        });
+
                     }
 
                     ImGui::NewLine();
@@ -1177,11 +1190,12 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     }
 }
 
-void RND_Renderer::ImGuiOverlay::Draw3DLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, float aspectRatio, long frameIdx) {
+void RND_Renderer::ImGuiOverlay::Draw3DLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, float aspectRatio, const RenderUtils::UvTransform& uvTransform, long frameIdx) {
     auto& frame = VRManager::instance().XR->GetRenderer()->GetFrame(frameIdx);
 
     frame.mainFramebuffer->vkCopyFromImage(cb, srcImage);
     frame.mainFramebufferAspectRatio = aspectRatio;
+    frame.mainFramebufferUvTransform = uvTransform;
 }
 
 void RND_Renderer::ImGuiOverlay::DrawHUDLayerAsBackground(VkCommandBuffer cb, VkImage srcImage, long frameIdx) {

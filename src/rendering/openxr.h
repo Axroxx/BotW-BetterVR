@@ -59,6 +59,8 @@ public:
             std::array<XrActionStatePose, 2> pose;
             std::array<XrSpaceLocation, 2> poseLocation;
             std::array<XrSpaceVelocity, 2> poseVelocity;
+            std::array<XrActionStatePose, 2> aimPose;
+            std::array<XrSpaceLocation, 2> aimPoseLocation;
             std::array<XrSpaceLocation, 2> hmdRelativePoseLocation;
 
             XrActionStateBoolean inventory_map;
@@ -197,7 +199,9 @@ private:
     XrSpace m_stageSpace = XR_NULL_HANDLE;
     XrSpace m_headSpace = XR_NULL_HANDLE;
     std::array<XrSpace, 2> m_inGameHandSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+    std::array<XrSpace, 2> m_inGameAimSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     std::array<XrSpace, 2> m_inMenuHandSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+    std::array<XrSpace, 2> m_inMenuAimSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     std::array<XrPath, 2> m_handPaths = { XR_NULL_PATH, XR_NULL_PATH };
 
     XrAction m_inGameGripPoseAction = XR_NULL_HANDLE;

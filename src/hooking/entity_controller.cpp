@@ -2,6 +2,7 @@
 
 #include "cemu_hooks.h"
 #include "instance.h"
+#include "utils/debug_draw.h"
 #include "utils/game_utils.h"
 
 enum RoomscaleHookResult : uint32_t {
@@ -18,12 +19,6 @@ struct RoomscaleRaycastScratch {
     BEType<uint32_t> layerMask = 0;
     BEType<uint32_t> reserved = 0;
 };
-
-static_assert(offsetof(RoomscaleRaycastScratch, currentPos) == 0x00, "Roomscale scratch current position offset mismatch");
-static_assert(offsetof(RoomscaleRaycastScratch, castFrom) == 0x0C, "Roomscale scratch cast from offset mismatch");
-static_assert(offsetof(RoomscaleRaycastScratch, castDelta) == 0x18, "Roomscale scratch cast delta offset mismatch");
-static_assert(offsetof(RoomscaleRaycastScratch, hitPos) == 0x24, "Roomscale scratch hit position offset mismatch");
-static_assert(offsetof(RoomscaleRaycastScratch, layerMask) == 0x30, "Roomscale scratch layer mask offset mismatch");
 
 struct RoomscaleState {
     bool hasPreviousHeadPos = false;
@@ -140,6 +135,34 @@ static void PrimeRoomscaleBaseline(const glm::fvec3& headPos) {
     UpdateRoomscaleFade();
 }
 
+static bool ShouldDrivePlayerBodyWithVR(const glm::fvec3& currentHeadPos, PlayerBase& player) {
+    if (!CemuHooks::IsFirstPerson() || !CemuHooks::IsInGame() || GetSettings().GetPlayMode() != PlayMode::STANDING) {
+        PrimeRoomscaleBaseline(currentHeadPos);
+        return false;
+    }
+
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr || !VRManager::instance().XR->m_capabilities.supportsPositional) {
+        PrimeRoomscaleBaseline(currentHeadPos);
+        return false;
+    }
+
+    if (!GameUtils::TryReadPlayerBase(player)) {
+        PrimeRoomscaleBaseline(currentHeadPos);
+        return false;
+    }
+
+    PlayerMoveBitFlags moveBits = player.moveBitFlags.getLE();
+    OpenXR::GameState gameState = VRManager::instance().XR->m_gameState.load();
+    bool shouldDisablePlayerBodyDrive = gameState.is_climbing || gameState.is_paragliding || gameState.is_riding_mount || HAS_FLAG(moveBits, PlayerMoveBitFlags::IS_SWIMMING_OR_CLIMBING | PlayerMoveBitFlags::IS_SWIMMING);
+    if (shouldDisablePlayerBodyDrive) {
+        PrimeRoomscaleBaseline(currentHeadPos);
+        return false;
+    }
+
+    return true;
+}
+
 static bool TryGetRoomscaleMoveDelta(uint32_t controller, glm::fvec3& currentHeadPos, glm::fvec3& roomDelta, glm::fvec3& worldDelta) {
     currentHeadPos = glm::fvec3(0.0f);
     roomDelta = glm::fvec3(0.0f);
@@ -159,28 +182,8 @@ static bool TryGetRoomscaleMoveDelta(uint32_t controller, glm::fvec3& currentHea
     currentHeadPos = currentHeadPosOpt.value();
     s_roomscaleState.trackedHeadPos = currentHeadPos;
 
-    if (!CemuHooks::IsFirstPerson() || !CemuHooks::IsInGame() || GetSettings().GetPlayMode() != PlayMode::STANDING) {
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
-    auto* renderer = VRManager::instance().XR->GetRenderer();
-    if (renderer == nullptr || !VRManager::instance().XR->m_capabilities.supportsPositional) {
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
     PlayerBase player = {};
-    if (!GameUtils::TryReadPlayerBase(player)) {
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
-    PlayerMoveBitFlags moveBits = player.moveBitFlags.getLE();
-    OpenXR::GameState gameState = VRManager::instance().XR->m_gameState.load();
-    bool shouldDisableRoomscale = gameState.is_climbing || gameState.is_paragliding || gameState.is_riding_mount || HAS_FLAG(moveBits, PlayerMoveBitFlags::IS_SWIMMING_OR_CLIMBING | PlayerMoveBitFlags::IS_SWIMMING);
-    if (shouldDisableRoomscale) {
-        PrimeRoomscaleBaseline(currentHeadPos);
+    if (!ShouldDrivePlayerBodyWithVR(currentHeadPos, player)) {
         return false;
     }
 
@@ -239,28 +242,6 @@ float CemuHooks::GetRoomscaleFadeAmount() {
     return s_roomscaleFadeAmount.load(std::memory_order_relaxed);
 }
 
-
-void CemuHooks::hook_GetRoomscaleDelta(PPCInterpreter_t* hCPU) {
-    hCPU->instructionPointer = hCPU->sprNew.LR;
-
-    uint32_t controller = hCPU->gpr[3];
-    BEVec3 deltaBE = {};
-    writeMemory(hCPU->gpr[4], &deltaBE);
-    hCPU->gpr[3] = 0;
-
-    glm::fvec3 currentHeadPos = {};
-    glm::fvec3 roomDelta = {};
-    glm::fvec3 worldDelta = {};
-    if (!TryGetRoomscaleMoveDelta(controller, currentHeadPos, roomDelta, worldDelta)) {
-        return;
-    }
-    (void)currentHeadPos;
-
-    deltaBE = BEVec3{};
-    deltaBE = worldDelta;
-    writeMemory(hCPU->gpr[4], &deltaBE);
-    hCPU->gpr[3] = 1;
-}
 
 void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;

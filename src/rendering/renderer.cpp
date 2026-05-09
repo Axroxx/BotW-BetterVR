@@ -1,7 +1,10 @@
+#include "pch.h"
+
 #include "renderer.h"
 #include "instance.h"
 #include "texture.h"
 #include "utils/d3d12_utils.h"
+#include "utils/render_utils.h"
 
 std::atomic_bool RND_Renderer::Layer2D::s_isBowAimingActive = false;
 
@@ -94,7 +97,10 @@ void RND_Renderer::EndFrame() {
         frameIdx = 1;
     }
 
+    DebugDrawRenderData debugDrawData = frameIdx != -1 ? DebugDraw::instance().TakeRenderData(frameIdx) : DebugDraw::instance().TakeRenderData();
+
     if (frameIdx != -1) {
+
         if (m_layer2D) {
             m_layer2D->StartRendering();
             m_layer2D->Render(frameIdx);
@@ -111,8 +117,8 @@ void RND_Renderer::EndFrame() {
         if (m_layer3D) {
             if (m_renderFrames[frameIdx].Is3DComplete()) {
                 m_layer3D->StartRendering();
-                m_layer3D->Render(OpenXR::EyeSide::LEFT, frameIdx, fadeTexture);
-                m_layer3D->Render(OpenXR::EyeSide::RIGHT, frameIdx, fadeTexture);
+                m_layer3D->Render(OpenXR::EyeSide::LEFT, frameIdx, fadeTexture, debugDrawData);
+                m_layer3D->Render(OpenXR::EyeSide::RIGHT, frameIdx, fadeTexture, debugDrawData);
                 layer3DViews = m_layer3D->FinishRendering(frameIdx);
                 layer3D.layerFlags = 0;
                 layer3D.space = VRManager::instance().XR->m_stageSpace;
@@ -170,19 +176,26 @@ void RND_Renderer::EndFrame() {
 RND_Renderer::Layer3D::Layer3D(VkExtent2D inputRes, VkExtent2D outputRes) {
     auto viewConfs = VRManager::instance().XR->GetViewConfigurations();
 
-    this->m_recommendedAspectRatios[OpenXR::EyeSide::LEFT] = (float)viewConfs[0].recommendedImageRectWidth / (float)viewConfs[0].recommendedImageRectHeight;
-    this->m_recommendedAspectRatios[OpenXR::EyeSide::RIGHT] = (float)viewConfs[1].recommendedImageRectWidth / (float)viewConfs[1].recommendedImageRectHeight;
+    const float inputAspectRatio = (float)inputRes.width / (float)inputRes.height;
+    this->m_recommendedAspectRatios[OpenXR::EyeSide::LEFT] = inputAspectRatio;
+    this->m_recommendedAspectRatios[OpenXR::EyeSide::RIGHT] = inputAspectRatio;
+
+    for (int side = 0; side < 2; ++side) {
+        std::optional<XrFovf> rawFov = VRManager::instance().XR->GetRenderer()->GetFOV((OpenXR::EyeSide)side);
+        m_presentUvTransforms[side] = RenderUtils::GetPresentationUvTransform(rawFov, inputAspectRatio);
+    }
 
     this->m_presentPipelines[OpenXR::EyeSide::LEFT] = std::make_unique<RND_D3D12::PresentPipeline<true>>(VRManager::instance().XR->GetRenderer());
     this->m_presentPipelines[OpenXR::EyeSide::RIGHT] = std::make_unique<RND_D3D12::PresentPipeline<true>>(VRManager::instance().XR->GetRenderer());
+    this->m_debugDrawPipeline = std::make_unique<RND_D3D12::DebugDrawPipeline>();
 
     this->m_swapchains[OpenXR::EyeSide::LEFT] = std::make_unique<Swapchain<DXGI_FORMAT_R8G8B8A8_UNORM_SRGB>>(outputRes.width, outputRes.height, viewConfs[0].recommendedSwapchainSampleCount);
     this->m_swapchains[OpenXR::EyeSide::RIGHT] = std::make_unique<Swapchain<DXGI_FORMAT_R8G8B8A8_UNORM_SRGB>>(outputRes.width, outputRes.height, viewConfs[1].recommendedSwapchainSampleCount);
     this->m_depthSwapchains[OpenXR::EyeSide::LEFT] = std::make_unique<Swapchain<DXGI_FORMAT_D32_FLOAT>>(outputRes.width, outputRes.height, viewConfs[0].recommendedSwapchainSampleCount);
     this->m_depthSwapchains[OpenXR::EyeSide::RIGHT] = std::make_unique<Swapchain<DXGI_FORMAT_D32_FLOAT>>(outputRes.width, outputRes.height, viewConfs[1].recommendedSwapchainSampleCount);
 
-    this->m_presentPipelines[OpenXR::EyeSide::LEFT]->BindSettings((float)outputRes.width, (float)outputRes.height);
-    this->m_presentPipelines[OpenXR::EyeSide::RIGHT]->BindSettings((float)outputRes.width, (float)outputRes.height);
+    this->m_presentPipelines[OpenXR::EyeSide::LEFT]->BindSettings((float)outputRes.width, (float)outputRes.height, m_presentUvTransforms[OpenXR::EyeSide::LEFT]);
+    this->m_presentPipelines[OpenXR::EyeSide::RIGHT]->BindSettings((float)outputRes.width, (float)outputRes.height, m_presentUvTransforms[OpenXR::EyeSide::RIGHT]);
 
     // initialize textures
     for (int i = 0; i < 2; ++i) {
@@ -269,22 +282,26 @@ void RND_Renderer::Layer3D::StartRendering() {
     this->m_depthSwapchains[OpenXR::EyeSide::RIGHT]->StartRendering();
 }
 
-void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture) {
+void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData) {
     ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
     ID3D12CommandQueue* queue = VRManager::instance().D3D12->GetCommandQueue();
     ID3D12CommandAllocator* allocator = VRManager::instance().D3D12->GetFrameAllocator();
 
-    RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, side, frameIdx, fadeTexture](RND_D3D12::CommandContext<false>* context) {
+    RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, side, frameIdx, fadeTexture, &debugDrawData](RND_D3D12::CommandContext<false>* context) {
         context->GetRecordList()->SetName(L"RenderSharedTexture");
         auto& texture = m_textures[side][frameIdx];
         auto& depthTexture = m_depthTextures[side][frameIdx];
         checkAssert(fadeTexture != nullptr, "Layer3D fade texture is missing!");
 
+        m_presentPipelines[side]->SetUvTransform(RenderUtils::GetPresentationUvTransform(
+            VRManager::instance().XR->GetRenderer()->GetFOV(side, frameIdx),
+            VRManager::instance().XR->GetRenderer()->m_gameRenderAspectRatio
+        ));
+
         context->WaitFor(texture.get(), texture->GetD3D12WaitValue());
         context->WaitFor(depthTexture.get(), depthTexture->GetD3D12WaitValue());
 
         // swapchains are already in D3D12_RESOURCE_STATE_RENDER_TARGET and depth in D3D12_RESOURCE_STATE_DEPTH_WRITE according to OpenXR spec
-
         m_presentPipelines[side]->BindAttachment(0, texture->d3d12GetTexture());
         m_presentPipelines[side]->BindAttachment(1, depthTexture->d3d12GetTexture(), DXGI_FORMAT_R32_FLOAT);
         m_presentPipelines[side]->BindAttachment(2, fadeTexture->d3d12GetTexture());

@@ -28,7 +28,6 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_CreateNewActor", &hook_CreateNewActor);
 
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyVelocity", &hook_SetRigidBodyVelocity);
-        osLib_registerHLEFunction("coreinit", "hook_GetRoomscaleDelta", &hook_GetRoomscaleDelta);
         osLib_registerHLEFunction("coreinit", "hook_BeginRoomscaleMovement", &hook_BeginRoomscaleMovement);
         osLib_registerHLEFunction("coreinit", "hook_PrepareRoomscaleRaycast", &hook_PrepareRoomscaleRaycast);
         osLib_registerHLEFunction("coreinit", "hook_ConsumeRoomscaleRaycast", &hook_ConsumeRoomscaleRaycast);
@@ -177,7 +176,6 @@ private:
     static void hook_CreateNewActor(PPCInterpreter_t* hCPU);
 
     static void hook_SetRigidBodyVelocity(PPCInterpreter_t* hCPU);
-    static void hook_GetRoomscaleDelta(PPCInterpreter_t* hCPU);
     static void hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU);
     static void hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU);
     static void hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU);

@@ -19,6 +19,10 @@ cbuffer g_settings : register(b1) {
     float renderHeight;
     float swapchainWidth;
     float swapchainHeight;
+    float uvOffsetX;
+    float uvOffsetY;
+    float uvScaleX;
+    float uvScaleY;
     float customFadeAmount;
     float customFadeColorR;
     float customFadeColorG;
@@ -42,7 +46,7 @@ PSInput VSMain(VSInput input) {
 }
 
 PSOutput PSMain(PSInput input) {
-	float2 samplePosition = input.uv;
+	float2 samplePosition = float2(uvOffsetX, uvOffsetY) + input.uv * float2(uvScaleX, uvScaleY);
 
     float4 colorTexture = g_colorTexture.Sample(g_sampler, samplePosition);
     float depthTexture = g_depthTexture.Sample(g_sampler, samplePosition);
@@ -88,6 +92,10 @@ cbuffer g_settings : register(b1) {
     float renderHeight;
     float swapchainWidth;
     float swapchainHeight;
+    float uvOffsetX;
+    float uvOffsetY;
+    float uvScaleX;
+    float uvScaleY;
     float customFadeAmount;
     float customFadeColorR;
     float customFadeColorG;
@@ -109,7 +117,7 @@ PSInput VSMain(VSInput input) {
 }
 
 PSOutput PSMain(PSInput input) {
-	float2 samplePosition = input.uv;
+	float2 samplePosition = float2(uvOffsetX, uvOffsetY) + input.uv * float2(uvScaleX, uvScaleY);
 
     float4 colorTexture = g_colorTexture.Sample(g_sampler, samplePosition);
 
@@ -120,17 +128,79 @@ PSOutput PSMain(PSInput input) {
 }
 )hlsl";
 
+constexpr char debugDrawLineHLSL[] = R"hlsl(
+struct VSInput {
+    float3 position : POSITION;
+    float4 color : COLOR0;
+};
+
+struct PSInput {
+    float4 position : SV_POSITION;
+    float4 color : COLOR0;
+};
+
+struct PSOutput {
+    float4 Color : SV_TARGET;
+    float Depth : SV_DEPTH;
+};
+
+cbuffer g_scene : register(b0) {
+    float4x4 viewProjection;
+    float targetWidth;
+    float targetHeight;
+    float depthBias;
+    float padding0;
+};
+
+Texture2D<float> g_sceneDepthTexture : register(t0);
+SamplerState g_sampler : register(s0);
+
+PSInput VSMain(VSInput input) {
+    PSInput output;
+    output.position = mul(viewProjection, float4(input.position, 1.0f));
+    output.color = input.color;
+    return output;
+}
+
+PSOutput PSMain(PSInput input) {
+    float2 uv = float2(input.position.x / targetWidth, input.position.y / targetHeight);
+    float sceneDepth = g_sceneDepthTexture.Sample(g_sampler, uv);
+    float overlayDepth = saturate(input.position.z - depthBias);
+
+    if (overlayDepth > sceneDepth + depthBias) {
+        discard;
+    }
+
+    PSOutput output;
+    output.Color = input.color;
+    output.Depth = overlayDepth;
+    return output;
+}
+)hlsl";
+
 
 struct presentSettings {
     float renderWidth;
     float renderHeight;
     float swapchainWidth;
     float swapchainHeight;
+    float uvOffsetX;
+    float uvOffsetY;
+    float uvScaleX;
+    float uvScaleY;
     float customFadeAmount;
     float customFadeColorR;
     float customFadeColorG;
     float customFadeColorB;
     float isFadeActive;
+};
+
+struct debugDrawLineSettings {
+    glm::mat4 viewProjection;
+    float targetWidth;
+    float targetHeight;
+    float depthBias;
+    float padding0;
 };
 
 // clang-format off

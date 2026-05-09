@@ -53,6 +53,7 @@ private:
     std::string m_filter = std::string(256, '\0');
     bool m_showWorldLabels = false;
     bool m_showWorldAABBs = false;
+    float m_worldAABBMinDistance = 1.0f;
     float m_worldAABBMaxDistance = 100.0f;
     bool m_showRaycastLines = false;
 };

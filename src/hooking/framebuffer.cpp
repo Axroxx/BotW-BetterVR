@@ -1,8 +1,11 @@
+#include "pch.h"
+
 #include "framebuffer.h"
 #include "instance.h"
 #include "layer.h"
 #include "utils/vulkan_utils.h"
 #include "utils/debug_draw.h"
+#include "utils/render_utils.h"
 
 
 std::mutex lockImageResolutions;
@@ -101,6 +104,7 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                         swapchainRes = VkExtent2D{ viewConfs[0].recommendedImageRectWidth, viewConfs[0].recommendedImageRectHeight };
                     }
 
+                    renderer->m_gameRenderAspectRatio = (float)renderRes.width / (float)renderRes.height;
                     layer3D = std::make_unique<RND_Renderer::Layer3D>(renderRes, swapchainRes);
                     layer2D = std::make_unique<RND_Renderer::Layer2D>(renderRes, swapchainRes);
                     for (auto& textures : layer3D->GetSharedTextures()) {
@@ -202,8 +206,9 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
             // imgui needs only one eye to render Cemu's 2D output, so use right side since it looks better
             if (side == EyeSide::RIGHT) {
                 // note: Uses vkCmdCopyImage to copy the (right-eye-only) image to the imgui overlay's texture
-                float aspectRatio = layer3D->GetAspectRatio(side);
-                imguiOverlay->Draw3DLayerAsBackground(commandBuffer, image, aspectRatio, frameIdx);
+                float desktopAspectRatio = layer3D->GetAspectRatio(side);
+                const RenderUtils::UvTransform& desktopUvTransform = layer3D->GetPresentUvTransform(side);
+                imguiOverlay->Draw3DLayerAsBackground(commandBuffer, image, desktopAspectRatio, desktopUvTransform, frameIdx);
             }
 
             // clear the image to be transparent to allow for the HUD to be rendered on top of it which results in a transparent HUD layer
@@ -258,9 +263,6 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                     imguiOverlay->Render(frameIdx, true, true);
                     imguiOverlay->Update();
                     imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, true);
-
-                    // Clear debug draw primitives now that both eyes have been rendered
-                    DebugDraw::instance().Clear();
 
                     returnToLayout();
                     return;

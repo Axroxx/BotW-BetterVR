@@ -200,28 +200,13 @@ void EntityDebugger::UpdateEntityMemory() {
         glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
         bool matchesFilter = m_filter.empty() || actorName.find(m_filter) != std::string::npos;
 
-        if (m_showWorldLabels && matchesFilter && distance <= m_worldAABBMaxDistance) {
-            float labelFontScale = 0.325f;
-            if (distance <= 8.0f) {
-                labelFontScale = 0.72f;
-            }
-            else if (distance <= 16.0f) {
-                labelFontScale = 0.6f;
-            }
-            else if (distance <= 40.0f) {
-                labelFontScale = 0.45f;
-            }
-
-            DebugDraw::instance().Text(pos, actorName, IM_COL32(255, 255, 255, 255), ImVec2(6.0f, -18.0f), labelFontScale);
-        }
-
-        if (m_showWorldAABBs && matchesFilter && distance <= m_worldAABBMaxDistance) {
+        if (m_showWorldAABBs && matchesFilter && distance >= m_worldAABBMinDistance && distance <= m_worldAABBMaxDistance) {
             if (glm::all(glm::greaterThan(halfExtents, glm::vec3(0.0f)))) {
                 glm::fvec3 worldCenter = pos + glm::mat3_cast(rot) * localCenter;
-                DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 10), 1.0f);
+                DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 1), 1.0f);
             }
             else {
-                DebugDraw::instance().Dot(pos, 3.0f, IM_COL32(255, 255, 255, 180));
+                DebugDraw::instance().Dot(pos, 0.15f, IM_COL32(255, 255, 255, 255/1));
             }
         }
 
@@ -301,11 +286,12 @@ void EntityDebugger::DrawEntityInspector() {
     ImGui::BeginChild("ScrollArea", ImVec2(0, 0));
 
     if (ImGui::CollapsingHeader("World Space Overlay", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Checkbox("Show Entity Names In 3D View", &m_showWorldLabels);
         ImGui::Checkbox("Show Entity Boxes In 3D View", &m_showWorldAABBs);
         if (m_showWorldAABBs) {
             ImGui::SetNextItemWidth(160.0f);
-            ImGui::DragFloat("3D Box Distance", &m_worldAABBMaxDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
+            ImGui::DragFloat("Min 3D Box Distance", &m_worldAABBMinDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::DragFloat("Max 3D Box Distance", &m_worldAABBMaxDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
         }
         ImGui::Checkbox("Show Raycast Lines", &m_showRaycastLines);
     }
