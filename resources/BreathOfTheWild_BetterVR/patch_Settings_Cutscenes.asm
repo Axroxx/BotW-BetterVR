@@ -40,7 +40,7 @@ data_TableOfCutsceneEventsSettings:
 .string "BalladOfHeroes,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
 .string "BalladOfHeroGerudo,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
 .string "BalladOfHeroGoron,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
-.string "BalladOfHeroRito,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF"
+.string "BalladOfHeroRito,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
 .string "BalladOfHeroZora,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; Contains a ton of stuff. Hard to tell.
 .string "bf2_collabo,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "BloodyMoonRelief,FP_ON,PAN_ON,HND_OFF,CTRL_OFF"
@@ -418,7 +418,7 @@ data_TableOfCutsceneEventsSettings:
 .string "Npc_FaronHatago_001,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_FaronWoods001,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_FaronWoods003,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
-.string "Npc_FaronWoods006,FP_ON,PAN_ON,HND_OFF,CTRL_OFF" ; Brigo on the bridge
+.string "Npc_FaronWoods006,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; Brigo on the bridge. The NPC points towards the dueling peaks so the additional camera pan is not really required. And immersion is more important, here.
 .string "Npc_FaronWoods007,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_FaronWoods008,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
 .string "Npc_FaronWoods009,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF"
