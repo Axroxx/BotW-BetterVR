@@ -97,6 +97,25 @@ static float ResolveArcWidth(float duration) {
     return glm::clamp(duration * 0.03f, 0.025f, 0.06f);
 }
 
+static void AddRenderLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color) {
+    renderData.lineVertices.push_back({ a, color });
+    renderData.lineVertices.push_back({ b, color });
+}
+
+static void AddPlanarCircle(DebugDrawRenderData& renderData, const glm::vec3& center, const glm::vec3& axisX, const glm::vec3& axisY, uint32_t color, int segments) {
+    if (segments < 3) {
+        return;
+    }
+
+    glm::vec3 previousPoint = center + axisX;
+    for (int i = 1; i <= segments; ++i) {
+        const float angle = (glm::two_pi<float>() * (float)i) / (float)segments;
+        const glm::vec3 point = center + (axisX * std::cos(angle)) + (axisY * std::sin(angle));
+        AddRenderLine(renderData, previousPoint, point, color);
+        previousPoint = point;
+    }
+}
+
 static void AddTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, uint32_t color) {
     renderData.triangleVertices.push_back({ a, color });
     renderData.triangleVertices.push_back({ b, color });
@@ -176,6 +195,16 @@ void DebugDraw::Dot(const glm::vec3& position, float radius, uint32_t color) {
     DebugPrimitive primitive = { PrimitiveType::DOT, color, 1.0f };
     primitive.a = position;
     primitive.radius = radius;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::PhysicsBody(const glm::vec3& center, float radius, float halfHeight, uint32_t color, float thickness, int segments) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::PHYSICS_BODY, color, thickness };
+    primitive.a = center;
+    primitive.radius = radius;
+    primitive.duration = halfHeight;
+    primitive.segments = segments;
     m_primitives.push_back(primitive);
 }
 
@@ -308,6 +337,31 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 AddLine(renderData, prim.a - xAxis, prim.a + xAxis, prim.color);
                 AddLine(renderData, prim.a - yAxis, prim.a + yAxis, prim.color);
                 AddLine(renderData, prim.a - zAxis, prim.a + zAxis, prim.color);
+                break;
+            }
+
+            case PrimitiveType::PHYSICS_BODY: {
+                const float radius = prim.radius;
+                const float halfHeight = prim.duration;
+                const int segments = ResolveCircleSegments(radius, prim.segments);
+                if (radius <= 0.0f || halfHeight <= 0.0f || segments < 3) {
+                    break;
+                }
+
+                const glm::vec3 topCenter = prim.a + glm::vec3(0.0f, halfHeight, 0.0f);
+                const glm::vec3 bottomCenter = prim.a - glm::vec3(0.0f, halfHeight, 0.0f);
+                const glm::vec3 radiusX = glm::vec3(radius, 0.0f, 0.0f);
+                const glm::vec3 radiusZ = glm::vec3(0.0f, 0.0f, radius);
+
+                AddPlanarCircle(renderData, topCenter, radiusX, radiusZ, prim.color, segments);
+                AddPlanarCircle(renderData, prim.a, radiusX, radiusZ, ScaleColor(prim.color, 0.85f, 0.7f), segments);
+                AddPlanarCircle(renderData, bottomCenter, radiusX, radiusZ, prim.color, segments);
+
+                AddLine(renderData, topCenter + radiusX, bottomCenter + radiusX, prim.color);
+                AddLine(renderData, topCenter - radiusX, bottomCenter - radiusX, prim.color);
+                AddLine(renderData, topCenter + radiusZ, bottomCenter + radiusZ, prim.color);
+                AddLine(renderData, topCenter - radiusZ, bottomCenter - radiusZ, prim.color);
+                AddLine(renderData, bottomCenter, topCenter, ScaleColor(prim.color, 0.7f, 0.6f));
                 break;
             }
 

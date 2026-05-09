@@ -38,6 +38,7 @@ public:
     // -- Submit primitives (thread-safe, callable from any thread) --
     void Line(const glm::vec3& a, const glm::vec3& b, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f);
     void Dot(const glm::vec3& position, float radius = 0.15f, uint32_t color = DebugDrawColor(0, 255, 0));
+    void PhysicsBody(const glm::vec3& center, float radius, float halfHeight, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0);
     // World-space ring on the XZ plane using the game's Y-up convention.
     void Circle(const glm::vec3& position, float radius = 1.0f, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0);
     void Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color = DebugDrawColor(255, 220, 64, 200), int segments = 0);
@@ -59,6 +60,7 @@ private:
     enum class PrimitiveType : uint8_t {
         LINE,
         DOT,
+        PHYSICS_BODY,
         CIRCLE,
         ARC,
         AABB,
@@ -73,6 +75,7 @@ private:
 
         // LINE: a, b
         // DOT: a = center, radius used
+        // PHYSICS_BODY: a = center, radius used, duration = halfHeight, segments used
         // CIRCLE: a = center, radius/segments used
         // ARC: a = start, b = initial velocity, c = acceleration, duration/segments used
         // AABB: a = min, b = max
