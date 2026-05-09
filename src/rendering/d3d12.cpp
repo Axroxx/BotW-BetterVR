@@ -380,5 +380,299 @@ void RND_D3D12::PresentPipeline<depth>::Render(ID3D12GraphicsCommandList* cmdLis
     cmdList->DrawIndexedInstanced((UINT)std::size(screenIndices), 1, 0, 0, 0);
 }
 
+RND_D3D12::DebugDrawPipeline::DebugDrawPipeline() {
+    m_vertexShader = D3D12Utils::CompileShader(debugDrawLineHLSL, "VSMain", "vs_5_1");
+    m_pixelShader = D3D12Utils::CompileShader(debugDrawLineHLSL, "PSMain", "ps_5_1");
+
+    auto createSignature = []() {
+        D3D12_DESCRIPTOR_RANGE sceneDepthRange[] = {
+            {
+                .RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+                .NumDescriptors = 1,
+                .BaseShaderRegister = 0,
+                .RegisterSpace = 0,
+                .OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
+            }
+        };
+
+        D3D12_ROOT_PARAMETER rootParams[2] = {};
+        rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        rootParams[0].DescriptorTable.NumDescriptorRanges = (UINT)std::size(sceneDepthRange);
+        rootParams[0].DescriptorTable.pDescriptorRanges = sceneDepthRange;
+        rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[1].Descriptor.ShaderRegister = 0;
+        rootParams[1].Descriptor.RegisterSpace = 0;
+        rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+        D3D12_STATIC_SAMPLER_DESC sampler = {
+            .Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+            .AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            .AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            .AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            .MipLODBias = 0.0f,
+            .MaxAnisotropy = 0,
+            .ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+            .BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK,
+            .MinLOD = 0.0f,
+            .MaxLOD = D3D12_FLOAT32_MAX,
+            .ShaderRegister = 0,
+            .RegisterSpace = 0,
+            .ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL,
+        };
+
+        D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {
+            .NumParameters = (UINT)std::size(rootParams),
+            .pParameters = rootParams,
+            .NumStaticSamplers = 1,
+            .pStaticSamplers = &sampler,
+            .Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
+        };
+
+        ComPtr<ID3DBlob> serializedBlob;
+        ComPtr<ID3DBlob> error;
+        if (HRESULT res = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1_0, &serializedBlob, &error); FAILED(res)) {
+            checkHResult(res, std::format("Failed to serialize debug draw root signature! {}", std::string((const char*)error->GetBufferPointer(), error->GetBufferSize())).c_str());
+        }
+
+        ComPtr<ID3D12RootSignature> rootSignature;
+        checkHResult(VRManager::instance().D3D12->GetDevice()->CreateRootSignature(0, serializedBlob->GetBufferPointer(), serializedBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature)), "Failed to create debug draw root signature!");
+        return rootSignature;
+    };
+
+    ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
+    m_sceneDepthHeap = D3D12Utils::CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true, 2);
+    m_targetHeap = D3D12Utils::CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, false, 2);
+    m_depthHeap = D3D12Utils::CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, false, 2);
+    const UINT sceneDepthDescriptorStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const UINT targetDescriptorStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    const UINT depthDescriptorStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+    const D3D12_CPU_DESCRIPTOR_HANDLE sceneDepthHeapStart = m_sceneDepthHeap->GetCPUDescriptorHandleForHeapStart();
+    const D3D12_GPU_DESCRIPTOR_HANDLE sceneDepthGpuHeapStart = m_sceneDepthHeap->GetGPUDescriptorHandleForHeapStart();
+    const D3D12_CPU_DESCRIPTOR_HANDLE targetHeapStart = m_targetHeap->GetCPUDescriptorHandleForHeapStart();
+    const D3D12_CPU_DESCRIPTOR_HANDLE depthHeapStart = m_depthHeap->GetCPUDescriptorHandleForHeapStart();
+    for (int eye = 0; eye < 2; ++eye) {
+        m_sceneDepthHandles[eye] = sceneDepthHeapStart;
+        m_sceneDepthHandles[eye].ptr += eye * sceneDepthDescriptorStride;
+        m_sceneDepthGpuHandles[eye] = sceneDepthGpuHeapStart;
+        m_sceneDepthGpuHandles[eye].ptr += eye * sceneDepthDescriptorStride;
+
+        m_targetHandles[eye] = targetHeapStart;
+        m_targetHandles[eye].ptr += eye * targetDescriptorStride;
+
+        m_depthHandles[eye] = depthHeapStart;
+        m_depthHandles[eye].ptr += eye * depthDescriptorStride;
+    }
+    m_signature = createSignature();
+    m_sceneSettingsBuffers[OpenXR::EyeSide::LEFT] = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(debugDrawLineSettings));
+    m_sceneSettingsBuffers[OpenXR::EyeSide::RIGHT] = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(debugDrawLineSettings));
+}
+
+void RND_D3D12::DebugDrawPipeline::EnsureVertexBuffer(uint32_t requiredBytes) {
+    if (requiredBytes <= m_vertexBufferCapacity) {
+        return;
+    }
+
+    m_vertexBufferCapacity = std::max(requiredBytes, std::max(m_vertexBufferCapacity * 2, 4096u));
+    m_vertexBuffer = D3D12Utils::CreateConstantBuffer(VRManager::instance().D3D12->GetDevice(), D3D12_HEAP_TYPE_UPLOAD, m_vertexBufferCapacity);
+}
+
+void RND_D3D12::DebugDrawPipeline::UpdateSceneSettings(OpenXR::EyeSide side, ID3D12Resource* colorTarget, const glm::mat4& viewProjection) {
+    debugDrawLineSettings settings = {
+        .viewProjection = viewProjection,
+        .targetWidth = (float)colorTarget->GetDesc().Width,
+        .targetHeight = (float)colorTarget->GetDesc().Height,
+        .depthBias = 0.0005f,
+        .padding0 = 0.0f,
+    };
+
+    ID3D12Resource* sceneSettingsBuffer = m_sceneSettingsBuffers[side].Get();
+    checkAssert(sceneSettingsBuffer != nullptr, "Debug draw scene settings buffer is missing!");
+    void* data = nullptr;
+    const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
+    checkHResult(sceneSettingsBuffer->Map(0, &readRange, &data), "Failed to map memory for debug draw scene settings!");
+    memcpy(data, &settings, sizeof(settings));
+    sceneSettingsBuffer->Unmap(0, nullptr);
+}
+
+void RND_D3D12::DebugDrawPipeline::RecreatePipeline() {
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        {
+            .SemanticName = "POSITION",
+            .SemanticIndex = 0,
+            .Format = DXGI_FORMAT_R32G32B32_FLOAT,
+            .InputSlot = 0,
+            .AlignedByteOffset = 0,
+            .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            .InstanceDataStepRate = 0,
+        },
+        {
+            .SemanticName = "COLOR",
+            .SemanticIndex = 0,
+            .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+            .InputSlot = 0,
+            .AlignedByteOffset = 12,
+            .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            .InstanceDataStepRate = 0,
+        },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC baseDesc = {};
+    baseDesc.InputLayout = { inputLayout, (UINT)std::size(inputLayout) };
+    baseDesc.pRootSignature = m_signature.Get();
+    baseDesc.VS = { m_vertexShader->GetBufferPointer(), m_vertexShader->GetBufferSize() };
+    baseDesc.PS = { m_pixelShader->GetBufferPointer(), m_pixelShader->GetBufferSize() };
+    baseDesc.BlendState = {
+        .AlphaToCoverageEnable = false,
+        .IndependentBlendEnable = false,
+    };
+    baseDesc.BlendState.RenderTarget[0] = {
+        .BlendEnable = true,
+        .LogicOpEnable = false,
+        .SrcBlend = D3D12_BLEND_SRC_ALPHA,
+        .DestBlend = D3D12_BLEND_INV_SRC_ALPHA,
+        .BlendOp = D3D12_BLEND_OP_ADD,
+        .SrcBlendAlpha = D3D12_BLEND_ONE,
+        .DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA,
+        .BlendOpAlpha = D3D12_BLEND_OP_ADD,
+        .LogicOp = D3D12_LOGIC_OP_NOOP,
+        .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL,
+    };
+    baseDesc.SampleMask = UINT_MAX;
+    baseDesc.RasterizerState = {
+        .FillMode = D3D12_FILL_MODE_SOLID,
+        .CullMode = D3D12_CULL_MODE_NONE,
+        .FrontCounterClockwise = false,
+        .DepthBias = D3D12_DEFAULT_DEPTH_BIAS,
+        .DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
+        .SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,
+        .DepthClipEnable = true,
+        .MultisampleEnable = false,
+        .AntialiasedLineEnable = false,
+        .ForcedSampleCount = 0,
+        .ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF,
+    };
+    baseDesc.DepthStencilState = {
+        .DepthEnable = true,
+        .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
+        .DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL,
+        .StencilEnable = false,
+        .StencilReadMask = D3D12_DEFAULT_STENCIL_READ_MASK,
+        .StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK,
+        .FrontFace = {
+            .StencilFailOp = D3D12_STENCIL_OP_KEEP,
+            .StencilDepthFailOp = D3D12_STENCIL_OP_KEEP,
+            .StencilPassOp = D3D12_STENCIL_OP_KEEP,
+            .StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS,
+        },
+        .BackFace = {
+            .StencilFailOp = D3D12_STENCIL_OP_KEEP,
+            .StencilDepthFailOp = D3D12_STENCIL_OP_KEEP,
+            .StencilPassOp = D3D12_STENCIL_OP_KEEP,
+            .StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS,
+        },
+    };
+    baseDesc.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
+    baseDesc.NumRenderTargets = 1;
+    baseDesc.RTVFormats[0] = m_targetFormats[0];
+    baseDesc.DSVFormat = m_targetFormats[1];
+    baseDesc.SampleDesc.Count = 1;
+    baseDesc.SampleDesc.Quality = 0;
+    baseDesc.NodeMask = 0;
+    baseDesc.CachedPSO = { nullptr, 0 };
+    baseDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC triangleDesc = baseDesc;
+    triangleDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    checkHResult(VRManager::instance().D3D12->GetDevice()->CreateGraphicsPipelineState(&triangleDesc, IID_PPV_ARGS(&m_trianglePipelineState)), "Failed to create debug draw triangle pipeline state!");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC lineDesc = baseDesc;
+    lineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+    checkHResult(VRManager::instance().D3D12->GetDevice()->CreateGraphicsPipelineState(&lineDesc, IID_PPV_ARGS(&m_linePipelineState)), "Failed to create debug draw line pipeline state!");
+}
+
+void RND_D3D12::DebugDrawPipeline::RenderVertices(ID3D12GraphicsCommandList* commandList, D3D12_PRIMITIVE_TOPOLOGY topology, ID3D12PipelineState* pipelineState, uint32_t vertexOffset, uint32_t vertexCount) {
+    if (pipelineState == nullptr || vertexCount == 0) {
+        return;
+    }
+
+    commandList->SetPipelineState(pipelineState);
+    commandList->IASetPrimitiveTopology(topology);
+    commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+    commandList->DrawInstanced(vertexCount, 1, vertexOffset, 0);
+}
+
+void RND_D3D12::DebugDrawPipeline::Render(OpenXR::EyeSide side, ID3D12GraphicsCommandList* commandList, ID3D12Resource* sceneDepthTexture, ID3D12Resource* colorTarget, DXGI_FORMAT colorFormat, ID3D12Resource* depthTarget, DXGI_FORMAT depthFormat, const DebugDrawRenderData& renderData, const glm::mat4& viewProjection) {
+    if (renderData.IsEmpty()) {
+        return;
+    }
+
+    if (colorFormat != m_targetFormats[0] || depthFormat != m_targetFormats[1] || m_trianglePipelineState == nullptr || m_linePipelineState == nullptr) {
+        m_targetFormats[0] = colorFormat;
+        m_targetFormats[1] = depthFormat;
+        RecreatePipeline();
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = D3D12Utils::ToSRVFormat(sceneDepthTexture->GetDesc().Format);
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    VRManager::instance().D3D12->GetDevice()->CreateShaderResourceView(sceneDepthTexture, &srvDesc, m_sceneDepthHandles[side]);
+
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+    rtvDesc.Format = colorFormat;
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    VRManager::instance().D3D12->GetDevice()->CreateRenderTargetView(colorTarget, &rtvDesc, m_targetHandles[side]);
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format = depthFormat;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+    VRManager::instance().D3D12->GetDevice()->CreateDepthStencilView(depthTarget, &dsvDesc, m_depthHandles[side]);
+
+    const uint32_t triangleVertexCount = (uint32_t)renderData.triangleVertices.size();
+    const uint32_t lineVertexCount = (uint32_t)renderData.lineVertices.size();
+    const uint32_t totalVertexCount = triangleVertexCount + lineVertexCount;
+    const uint32_t vertexBufferBytes = totalVertexCount * sizeof(DebugDrawVertex);
+    EnsureVertexBuffer(vertexBufferBytes);
+
+    void* vertexData = nullptr;
+    const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
+    checkHResult(m_vertexBuffer->Map(0, &readRange, &vertexData), "Failed to map memory for debug draw vertex buffer!");
+    DebugDrawVertex* dstVertices = (DebugDrawVertex*)vertexData;
+    if (triangleVertexCount > 0) {
+        memcpy(dstVertices, renderData.triangleVertices.data(), triangleVertexCount * sizeof(DebugDrawVertex));
+    }
+    if (lineVertexCount > 0) {
+        memcpy(dstVertices + triangleVertexCount, renderData.lineVertices.data(), lineVertexCount * sizeof(DebugDrawVertex));
+    }
+    m_vertexBuffer->Unmap(0, nullptr);
+
+    m_vertexBufferView = {
+        .BufferLocation = m_vertexBuffer->GetGPUVirtualAddress(),
+        .SizeInBytes = vertexBufferBytes,
+        .StrideInBytes = sizeof(DebugDrawVertex),
+    };
+
+    commandList->SetGraphicsRootSignature(m_signature.Get());
+
+    D3D12_VIEWPORT viewport = { 0.0f, 0.0f, (float)colorTarget->GetDesc().Width, (float)colorTarget->GetDesc().Height, 0.0f, 1.0f };
+    D3D12_RECT scissorRect = { 0, 0, (LONG)colorTarget->GetDesc().Width, (LONG)colorTarget->GetDesc().Height };
+    commandList->RSSetViewports(1, &viewport);
+    commandList->RSSetScissorRects(1, &scissorRect);
+
+    UpdateSceneSettings(side, colorTarget, viewProjection);
+    commandList->SetGraphicsRootConstantBufferView(1, m_sceneSettingsBuffers[side]->GetGPUVirtualAddress());
+
+    ID3D12DescriptorHeap* heaps[] = { m_sceneDepthHeap.Get() };
+    commandList->SetDescriptorHeaps((UINT)std::size(heaps), heaps);
+    commandList->SetGraphicsRootDescriptorTable(0, m_sceneDepthGpuHandles[side]);
+    commandList->OMSetRenderTargets(1, &m_targetHandles[side], true, &m_depthHandles[side]);
+
+    RenderVertices(commandList, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, m_trianglePipelineState.Get(), 0, triangleVertexCount);
+    RenderVertices(commandList, D3D_PRIMITIVE_TOPOLOGY_LINELIST, m_linePipelineState.Get(), triangleVertexCount, lineVertexCount);
+}
+
 template class RND_D3D12::PresentPipeline<false>;
 template class RND_D3D12::PresentPipeline<true>;

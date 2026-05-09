@@ -1,195 +1,350 @@
 #include "pch.h"
 #include "debug_draw.h"
 
-// -----------------------------------------------------------------------
-// Primitive submission (thread-safe)
-// -----------------------------------------------------------------------
+struct DebugEyeRenderState {
+    glm::mat4 view = glm::mat4(1.0f);
+    glm::mat4 projection = glm::mat4(1.0f);
+    glm::mat4 viewProjection = glm::mat4(1.0f);
+    bool hasView = false;
+    bool hasProjection = false;
 
-void DebugDraw::Line(const glm::vec3& a, const glm::vec3& b, uint32_t color, float thickness) {
-    std::lock_guard lk(m_mutex);
-    m_primitives.push_back({ PrimitiveType::LINE, color, thickness, a, b });
-}
-
-void DebugDraw::Dot(const glm::vec3& position, float radius, uint32_t color) {
-    std::lock_guard lk(m_mutex);
-    m_primitives.push_back({ PrimitiveType::CIRCLE, color, 1.0f, position, {}, glm::identity<glm::quat>(), glm::mat4(1.0f), radius, 0, true });
-}
-
-void DebugDraw::Circle(const glm::vec3& position, float radius, uint32_t color, float thickness, int segments) {
-    std::lock_guard lk(m_mutex);
-    m_primitives.push_back({ PrimitiveType::CIRCLE, color, thickness, position, {}, glm::identity<glm::quat>(), glm::mat4(1.0f), radius, segments, false });
-}
-
-void DebugDraw::Box(const glm::vec3& min, const glm::vec3& max, uint32_t color, float thickness) {
-    std::lock_guard lk(m_mutex);
-    m_primitives.push_back({ PrimitiveType::AABB, color, thickness, min, max });
-}
-
-void DebugDraw::Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color, float thickness) {
-    std::lock_guard lk(m_mutex);
-    m_primitives.push_back({ PrimitiveType::ORIENTED_BOX, color, thickness, center, halfExtents, rotation });
-}
-
-void DebugDraw::Frustum(const glm::mat4& viewProjection, uint32_t color, float thickness) {
-    // Store the inverse VP so we can extract the 8 frustum corners during rendering
-    glm::mat4 inv = glm::inverse(viewProjection);
-    std::lock_guard lk(m_mutex);
-    m_primitives.push_back({ PrimitiveType::FRUSTUM, color, thickness, {}, {}, glm::identity<glm::quat>(), inv });
-}
-
-void DebugDraw::Text(const glm::vec3& position, std::string text, uint32_t color, const ImVec2& pixelOffset, float fontScale) {
-    std::lock_guard lk(m_mutex);
-    DebugPrimitive primitive = { PrimitiveType::TEXT, color, 1.0f, position };
-    primitive.text = std::move(text);
-    primitive.pixelOffset = pixelOffset;
-    primitive.fontScale = fontScale;
-    m_primitives.push_back(std::move(primitive));
-}
-
-// -----------------------------------------------------------------------
-// Projection helpers
-// -----------------------------------------------------------------------
-
-static constexpr float NEAR_CLIP_W = 0.001f;
-
-bool DebugDraw::ProjectPoint(const glm::mat4& vp, const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax, const glm::vec3& worldPos, glm::vec4& clipOut, ImVec2& screenOut) {
-    clipOut = vp * glm::vec4(worldPos, 1.0f);
-
-    if (clipOut.w <= NEAR_CLIP_W) {
-        return false; // behind near plane
+    void Reset() {
+        view = glm::mat4(1.0f);
+        projection = glm::mat4(1.0f);
+        viewProjection = glm::mat4(1.0f);
+        hasView = false;
+        hasProjection = false;
     }
 
-    float invW = 1.0f / clipOut.w;
-    float ndcX = clipOut.x * invW;
-    float ndcY = clipOut.y * invW;
-
-    glm::vec2 uvRange = glm::max(uvMax - uvMin, glm::vec2(0.0001f));
-    float u = ndcX * 0.5f + 0.5f;
-    float v = -ndcY * 0.5f + 0.5f;
-
-    // NDC [-1,1] -> cropped UV range -> viewport sub-region in ImGui logical coords
-    screenOut.x = viewportPos.x + ((u - uvMin.x) / uvRange.x) * viewportSize.x;
-    screenOut.y = viewportPos.y + ((v - uvMin.y) / uvRange.y) * viewportSize.y; // Y flipped (screen Y goes down)
-
-    return true;
-}
-
-void DebugDraw::DrawClippedLine(ImDrawList* drawList, const glm::mat4& vp, const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax, const glm::vec3& a, const glm::vec3& b, uint32_t color, float thickness) {
-    glm::vec4 clipA = vp * glm::vec4(a, 1.0f);
-    glm::vec4 clipB = vp * glm::vec4(b, 1.0f);
-
-    bool behindA = clipA.w <= NEAR_CLIP_W;
-    bool behindB = clipB.w <= NEAR_CLIP_W;
-
-    if (behindA && behindB) {
-        return; // entire line is behind camera
+    void UpdateView(const glm::mat4& newView) {
+        view = newView;
+        hasView = true;
+        if (hasProjection) {
+            viewProjection = projection * view;
+        }
     }
 
-    // Clip the line segment against the near plane (w = NEAR_CLIP_W)
-    // Using parametric form: clip(t) = clipA + t * (clipB - clipA)
-    // We want to find t where w(t) = NEAR_CLIP_W
-    if (behindA) {
-        float t = (NEAR_CLIP_W - clipA.w) / (clipB.w - clipA.w);
-        clipA = clipA + t * (clipB - clipA);
-    }
-    else if (behindB) {
-        float t = (NEAR_CLIP_W - clipA.w) / (clipB.w - clipA.w);
-        clipB = clipA + t * (clipB - clipA);
+    void UpdateProjection(const glm::mat4& newProjection) {
+        projection = newProjection;
+        hasProjection = true;
+        if (hasView) {
+            viewProjection = projection * view;
+        }
     }
 
-    // Perspective divide and viewport mapping
-    // NDC [-1,1] maps to the viewport sub-region, not the full screen
-    glm::vec2 uvRange = glm::max(uvMax - uvMin, glm::vec2(0.0001f));
-    auto toScreen = [&](const glm::vec4& clip) -> ImVec2 {
-        float invW = 1.0f / clip.w;
-        float ndcX = clip.x * invW;
-        float ndcY = clip.y * invW;
-        float u = ndcX * 0.5f + 0.5f;
-        float v = -ndcY * 0.5f + 0.5f;
-        return ImVec2(
-            viewportPos.x + ((u - uvMin.x) / uvRange.x) * viewportSize.x,
-            viewportPos.y + ((v - uvMin.y) / uvRange.y) * viewportSize.y
-        );
-    };
-
-    drawList->AddLine(toScreen(clipA), toScreen(clipB), color, thickness);
-}
-
-void DebugDraw::DrawEdges(ImDrawList* drawList, const glm::mat4& vp, const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax, const glm::vec3* corners, const int (*edges)[2], int edgeCount, uint32_t color, float thickness) {
-    for (int i = 0; i < edgeCount; ++i) {
-        DrawClippedLine(drawList, vp, viewportPos, viewportSize, uvMin, uvMax, corners[edges[i][0]], corners[edges[i][1]], color, thickness);
+    bool IsValid() const {
+        return hasView && hasProjection;
     }
-}
+};
 
-// -----------------------------------------------------------------------
-// Box edge table (shared by AABB and oriented box)
-// -----------------------------------------------------------------------
+static std::mutex s_debugEyeStateMutex;
+static std::array<DebugEyeRenderState, 2> s_latestDebugEyeStates = {};
+static std::array<std::array<DebugEyeRenderState, 2>, 2> s_frameDebugEyeStates = {};
 
-// 12 edges of a box connecting 8 corners
 static constexpr int BOX_EDGES[12][2] = {
     { 0, 1 },
     { 1, 2 },
     { 2, 3 },
-    { 3, 0 }, // bottom face
+    { 3, 0 },
     { 4, 5 },
     { 5, 6 },
     { 6, 7 },
-    { 7, 4 }, // top face
+    { 7, 4 },
     { 0, 4 },
     { 1, 5 },
     { 2, 6 },
-    { 3, 7 }, // vertical edges
+    { 3, 7 },
 };
 
-// -----------------------------------------------------------------------
-// VP matrix storage
-// -----------------------------------------------------------------------
+static constexpr int BOX_FACES[6][4] = {
+    { 0, 1, 2, 3 },
+    { 4, 5, 6, 7 },
+    { 0, 1, 5, 4 },
+    { 3, 2, 6, 7 },
+    { 0, 4, 7, 3 },
+    { 1, 5, 6, 2 },
+};
 
-void DebugDraw::SetViewProjection(const glm::mat4& vp) {
-    std::lock_guard lk(m_mutex);
-    m_viewProjection = vp;
-    m_hasVP = true;
+static uint8_t GetColorChannel(uint32_t color, int shift) {
+    return (uint8_t)((color >> shift) & 0xFFu);
 }
 
-// -----------------------------------------------------------------------
-// Render
-// -----------------------------------------------------------------------
+static uint32_t ScaleColor(uint32_t color, float rgbScale, float alphaScale = 1.0f) {
+    const uint8_t r = (uint8_t)glm::clamp((int)std::lround((float)GetColorChannel(color, 0) * rgbScale), 0, 255);
+    const uint8_t g = (uint8_t)glm::clamp((int)std::lround((float)GetColorChannel(color, 8) * rgbScale), 0, 255);
+    const uint8_t b = (uint8_t)glm::clamp((int)std::lround((float)GetColorChannel(color, 16) * rgbScale), 0, 255);
+    const uint8_t a = (uint8_t)glm::clamp((int)std::lround((float)GetColorChannel(color, 24) * alphaScale), 0, 255);
+    return DebugDrawColor(r, g, b, a);
+}
 
-void DebugDraw::Render(const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax) {
-    std::lock_guard lk(m_mutex);
+static int ResolveCircleSegments(float radius, int segments) {
+    if (segments > 0) {
+        return segments;
+    }
 
-    if (m_primitives.empty() || !m_hasVP) {
+    return glm::clamp((int)std::ceil(radius * 24.0f), 24, 96);
+}
+
+static int ResolveArcSegments(float duration, int segments) {
+    if (segments > 0) {
+        return segments;
+    }
+
+    return glm::clamp((int)std::ceil(duration * 36.0f), 12, 96);
+}
+
+static float ResolveArcWidth(float duration) {
+    return glm::clamp(duration * 0.03f, 0.025f, 0.06f);
+}
+
+static void AddTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, uint32_t color) {
+    renderData.triangleVertices.push_back({ a, color });
+    renderData.triangleVertices.push_back({ b, color });
+    renderData.triangleVertices.push_back({ c, color });
+}
+
+static void AddQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, uint32_t color) {
+    AddTriangle(renderData, a, b, c, color);
+    AddTriangle(renderData, a, c, d, color);
+}
+
+static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corners, uint32_t color) {
+    static constexpr float FACE_SHADING[6] = {
+        0.78f,
+        1.0f,
+        0.9f,
+        0.7f,
+        0.82f,
+        0.62f,
+    };
+
+    const float baseAlphaScale = GetColorChannel(color, 24) < 255 ? 0.65f : 0.35f;
+    for (int i = 0; i < 6; ++i) {
+        const int* face = BOX_FACES[i];
+        const uint32_t faceColor = ScaleColor(color, FACE_SHADING[i], baseAlphaScale);
+        AddQuad(renderData, corners[face[0]], corners[face[1]], corners[face[2]], corners[face[3]], faceColor);
+    }
+}
+
+static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, int segments, uint32_t color) {
+    if (segments < 2 || duration <= 0.0f) {
         return;
     }
 
-    const glm::mat4& viewProjection = m_viewProjection;
+    auto evaluatePoint = [&](float t) {
+        return start + initialVelocity * t + acceleration * (0.5f * t * t);
+    };
 
-    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    const float arcWidth = ResolveArcWidth(duration);
+    const glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+    const uint32_t ribbonColor = ScaleColor(color, 0.95f, 0.45f);
 
-    // Clip all debug draw output to the 3D viewport region
-    ImVec2 clipMin = ImVec2(viewportPos.x, viewportPos.y);
-    ImVec2 clipMax = ImVec2(viewportPos.x + viewportSize.x, viewportPos.y + viewportSize.y);
-    drawList->PushClipRect(clipMin, clipMax, true);
+    for (int i = 0; i < segments; ++i) {
+        const float t0 = (duration * (float)i) / (float)segments;
+        const float t1 = (duration * (float)(i + 1)) / (float)segments;
+        const glm::vec3 p0 = evaluatePoint(t0);
+        const glm::vec3 p1 = evaluatePoint(t1);
+        glm::vec3 tangent = p1 - p0;
+        if (glm::length2(tangent) <= 0.000001f) {
+            continue;
+        }
 
-    for (const auto& prim : m_primitives) {
+        tangent = glm::normalize(tangent);
+        glm::vec3 right = glm::cross(tangent, worldUp);
+        if (glm::length2(right) <= 0.000001f) {
+            right = glm::cross(tangent, glm::vec3(1.0f, 0.0f, 0.0f));
+            if (glm::length2(right) <= 0.000001f) {
+                continue;
+            }
+        }
+
+        right = glm::normalize(right) * arcWidth;
+        AddQuad(renderData, p0 - right, p0 + right, p1 + right, p1 - right, ribbonColor);
+    }
+}
+
+void DebugDraw::Line(const glm::vec3& a, const glm::vec3& b, uint32_t color, float thickness) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::LINE, color, thickness };
+    primitive.a = a;
+    primitive.b = b;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Dot(const glm::vec3& position, float radius, uint32_t color) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::DOT, color, 1.0f };
+    primitive.a = position;
+    primitive.radius = radius;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Circle(const glm::vec3& position, float radius, uint32_t color, float thickness, int segments) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::CIRCLE, color, thickness };
+    primitive.a = position;
+    primitive.radius = radius;
+    primitive.segments = segments;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color, int segments) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::ARC, color, 1.0f };
+    primitive.a = start;
+    primitive.b = initialVelocity;
+    primitive.c = acceleration;
+    primitive.duration = duration;
+    primitive.segments = segments;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Box(const glm::vec3& min, const glm::vec3& max, uint32_t color, float thickness) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::AABB, color, thickness };
+    primitive.a = min;
+    primitive.b = max;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color, float thickness) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::ORIENTED_BOX, color, thickness };
+    primitive.a = center;
+    primitive.b = halfExtents;
+    primitive.rotation = rotation;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Frustum(const glm::mat4& viewProjection, uint32_t color, float thickness) {
+    glm::mat4 inv = glm::inverse(viewProjection);
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::FRUSTUM, color, thickness };
+    primitive.inverseVP = inv;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::UpdateEyeView(uint32_t eyeIndex, const glm::mat4& view) {
+    if (eyeIndex >= s_latestDebugEyeStates.size()) {
+        return;
+    }
+
+    std::scoped_lock lock(s_debugEyeStateMutex);
+    s_latestDebugEyeStates[eyeIndex].UpdateView(view);
+}
+
+void DebugDraw::UpdateEyeProjection(uint32_t eyeIndex, const glm::mat4& projection) {
+    if (eyeIndex >= s_latestDebugEyeStates.size()) {
+        return;
+    }
+
+    std::scoped_lock lock(s_debugEyeStateMutex);
+    s_latestDebugEyeStates[eyeIndex].UpdateProjection(projection);
+}
+
+void DebugDraw::SnapshotEyeState(uint32_t eyeIndex, long frameIdx) {
+    if (eyeIndex >= s_latestDebugEyeStates.size() || frameIdx < 0 || frameIdx >= (long)s_frameDebugEyeStates.size()) {
+        return;
+    }
+
+    std::scoped_lock lock(s_debugEyeStateMutex);
+    s_frameDebugEyeStates[frameIdx][eyeIndex] = s_latestDebugEyeStates[eyeIndex];
+}
+
+void DebugDraw::AddLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color) {
+    renderData.lineVertices.push_back({ a, color });
+    renderData.lineVertices.push_back({ b, color });
+}
+
+void DebugDraw::AddEdges(DebugDrawRenderData& renderData, const glm::vec3* corners, const int (*edges)[2], int edgeCount, uint32_t color) {
+    for (int i = 0; i < edgeCount; ++i) {
+        AddLine(renderData, corners[edges[i][0]], corners[edges[i][1]], color);
+    }
+}
+
+DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
+    std::vector<DebugPrimitive> primitives;
+    {
+        std::lock_guard lk(m_mutex);
+        primitives.swap(m_primitives);
+    }
+
+    DebugDrawRenderData renderData;
+
+    {
+        std::scoped_lock lock(s_debugEyeStateMutex);
+        if (frameIdx >= 0 && frameIdx < (long)s_frameDebugEyeStates.size()) {
+            for (uint32_t eyeIndex = 0; eyeIndex < s_frameDebugEyeStates[frameIdx].size(); ++eyeIndex) {
+                const DebugEyeRenderState& eyeState = s_frameDebugEyeStates[frameIdx][eyeIndex];
+                if (eyeState.IsValid()) {
+                    renderData.viewProjections[eyeIndex] = eyeState.viewProjection;
+                    renderData.hasViewProjections[eyeIndex] = true;
+                }
+                s_frameDebugEyeStates[frameIdx][eyeIndex].Reset();
+            }
+        }
+        else {
+            for (uint32_t eyeIndex = 0; eyeIndex < s_latestDebugEyeStates.size(); ++eyeIndex) {
+                const DebugEyeRenderState& eyeState = s_latestDebugEyeStates[eyeIndex];
+                if (eyeState.IsValid()) {
+                    renderData.viewProjections[eyeIndex] = eyeState.viewProjection;
+                    renderData.hasViewProjections[eyeIndex] = true;
+                }
+            }
+        }
+    }
+
+    for (const auto& prim : primitives) {
         switch (prim.type) {
             case PrimitiveType::LINE: {
-                DrawClippedLine(drawList, viewProjection, viewportPos, viewportSize, uvMin, uvMax, prim.a, prim.b, prim.color, prim.thickness);
+                AddLine(renderData, prim.a, prim.b, prim.color);
+                break;
+            }
+
+            case PrimitiveType::DOT: {
+                const glm::vec3 xAxis = glm::vec3(prim.radius, 0.0f, 0.0f);
+                const glm::vec3 yAxis = glm::vec3(0.0f, prim.radius, 0.0f);
+                const glm::vec3 zAxis = glm::vec3(0.0f, 0.0f, prim.radius);
+                AddLine(renderData, prim.a - xAxis, prim.a + xAxis, prim.color);
+                AddLine(renderData, prim.a - yAxis, prim.a + yAxis, prim.color);
+                AddLine(renderData, prim.a - zAxis, prim.a + zAxis, prim.color);
                 break;
             }
 
             case PrimitiveType::CIRCLE: {
-                glm::vec4 clipCenter;
-                ImVec2 center;
-                if (!ProjectPoint(viewProjection, viewportPos, viewportSize, uvMin, uvMax, prim.a, clipCenter, center)) {
+                const int segments = ResolveCircleSegments(prim.radius, prim.segments);
+                if (segments < 3 || prim.radius <= 0.0f) {
                     break;
                 }
 
-                if (prim.filled) {
-                    drawList->AddCircleFilled(center, prim.radius, prim.color, prim.segments);
+                glm::vec3 previousPoint = prim.a + glm::vec3(prim.radius, 0.0f, 0.0f);
+                for (int i = 1; i <= segments; ++i) {
+                    const float angle = (glm::two_pi<float>() * (float)i) / (float)segments;
+                    const glm::vec3 point = prim.a + glm::vec3(std::cos(angle) * prim.radius, 0.0f, std::sin(angle) * prim.radius);
+                    AddLine(renderData, previousPoint, point, prim.color);
+                    previousPoint = point;
                 }
-                else {
-                    drawList->AddCircle(center, prim.radius, prim.color, prim.segments, prim.thickness);
+                break;
+            }
+
+            case PrimitiveType::ARC: {
+                const int segments = ResolveArcSegments(prim.duration, prim.segments);
+                if (segments < 2 || prim.duration <= 0.0f) {
+                    break;
+                }
+
+                AddArcRibbon(renderData, prim.a, prim.b, prim.c, prim.duration, segments, prim.color);
+
+                auto evaluatePoint = [&](float t) {
+                    return prim.a + prim.b * t + prim.c * (0.5f * t * t);
+                };
+
+                glm::vec3 previousPoint = evaluatePoint(0.0f);
+                for (int i = 1; i <= segments; ++i) {
+                    const float t = (prim.duration * (float)i) / (float)segments;
+                    const glm::vec3 point = evaluatePoint(t);
+                    AddLine(renderData, previousPoint, point, prim.color);
+                    previousPoint = point;
                 }
                 break;
             }
@@ -197,7 +352,6 @@ void DebugDraw::Render(const glm::vec2& viewportPos, const glm::vec2& viewportSi
             case PrimitiveType::AABB: {
                 const glm::vec3& mn = prim.a;
                 const glm::vec3& mx = prim.b;
-
                 glm::vec3 corners[8] = {
                     { mn.x, mn.y, mn.z },
                     { mx.x, mn.y, mn.z },
@@ -208,8 +362,8 @@ void DebugDraw::Render(const glm::vec2& viewportPos, const glm::vec2& viewportSi
                     { mx.x, mx.y, mx.z },
                     { mn.x, mx.y, mx.z },
                 };
-
-                DrawEdges(drawList, viewProjection, viewportPos, viewportSize, uvMin, uvMax, corners, BOX_EDGES, 12, prim.color, prim.thickness);
+                AddSolidBox(renderData, corners, prim.color);
+                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color);
                 break;
             }
 
@@ -217,8 +371,6 @@ void DebugDraw::Render(const glm::vec2& viewportPos, const glm::vec2& viewportSi
                 const glm::vec3& center = prim.a;
                 const glm::vec3& half = prim.b;
                 const glm::mat3 rot = glm::mat3_cast(prim.rotation);
-
-                // Local-space corners of a unit box scaled by halfExtents
                 const glm::vec3 localCorners[8] = {
                     { -half.x, -half.y, -half.z },
                     { +half.x, -half.y, -half.z },
@@ -235,58 +387,37 @@ void DebugDraw::Render(const glm::vec2& viewportPos, const glm::vec2& viewportSi
                     corners[i] = center + rot * localCorners[i];
                 }
 
-                DrawEdges(drawList, viewProjection, viewportPos, viewportSize, uvMin, uvMax, corners, BOX_EDGES, 12, prim.color, prim.thickness);
+                AddSolidBox(renderData, corners, prim.color);
+                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color);
                 break;
             }
 
             case PrimitiveType::FRUSTUM: {
-                // Extract the 8 corners of the frustum from the inverse VP matrix
-                // NDC corners: x,y in [-1,1], z in [-1,1] (OpenGL convention, matching
-                // the hand-written projection formula in calculateProjectionMatrix)
-                const glm::mat4& invVP = prim.inverseVP;
-
                 static constexpr glm::vec4 ndcCorners[8] = {
-                    { -1, -1, -1, 1 }, // near bottom-left
-                    { +1, -1, -1, 1 }, // near bottom-right
-                    { +1, +1, -1, 1 }, // near top-right
-                    { -1, +1, -1, 1 }, // near top-left
-                    { -1, -1, +1, 1 }, // far bottom-left
-                    { +1, -1, +1, 1 }, // far bottom-right
-                    { +1, +1, +1, 1 }, // far top-right
-                    { -1, +1, +1, 1 }, // far top-left
+                    { -1, -1, -1, 1 },
+                    { +1, -1, -1, 1 },
+                    { +1, +1, -1, 1 },
+                    { -1, +1, -1, 1 },
+                    { -1, -1, +1, 1 },
+                    { +1, -1, +1, 1 },
+                    { +1, +1, +1, 1 },
+                    { -1, +1, +1, 1 },
                 };
 
                 glm::vec3 corners[8];
                 for (int i = 0; i < 8; ++i) {
-                    glm::vec4 world = invVP * ndcCorners[i];
+                    const glm::vec4 world = prim.inverseVP * ndcCorners[i];
                     corners[i] = glm::vec3(world) / world.w;
                 }
 
-                DrawEdges(drawList, viewProjection, viewportPos, viewportSize, uvMin, uvMax, corners, BOX_EDGES, 12, prim.color, prim.thickness);
-                break;
-            }
-
-            case PrimitiveType::TEXT: {
-                glm::vec4 clipCenter;
-                ImVec2 screenPos;
-                if (!ProjectPoint(viewProjection, viewportPos, viewportSize, uvMin, uvMax, prim.a, clipCenter, screenPos)) {
-                    break;
-                }
-
-                screenPos.x += prim.pixelOffset.x;
-                screenPos.y += prim.pixelOffset.y;
-                drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize() * prim.fontScale, screenPos, prim.color, prim.text.c_str());
+                AddEdges(renderData, corners, BOX_EDGES, 12, prim.color);
                 break;
             }
         }
     }
 
-    drawList->PopClipRect();
+    return renderData;
 }
-
-// -----------------------------------------------------------------------
-// Clear
-// -----------------------------------------------------------------------
 
 void DebugDraw::Clear() {
     std::lock_guard lk(m_mutex);

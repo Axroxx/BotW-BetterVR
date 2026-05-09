@@ -309,6 +309,20 @@ void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTe
         m_presentPipelines[side]->BindDepthTarget(m_depthSwapchains[side]->GetTexture(), m_depthSwapchains[side]->GetFormat());
         m_presentPipelines[side]->Render(context->GetRecordList(), m_swapchains[side]->GetTexture());
 
+        if (m_debugDrawPipeline != nullptr && debugDrawData.hasViewProjections[side]) {
+            m_debugDrawPipeline->Render(
+                side,
+                context->GetRecordList(),
+                depthTexture->d3d12GetTexture(),
+                m_swapchains[side]->GetTexture(),
+                m_swapchains[side]->GetFormat(),
+                m_depthSwapchains[side]->GetTexture(),
+                m_depthSwapchains[side]->GetFormat(),
+                debugDrawData,
+                debugDrawData.viewProjections[side]
+            );
+        }
+
         // no transition needed here as OpenXR requires the swapchain to be returned in RENDER_TARGET/DEPTH_WRITE too
 
         context->Signal(texture.get(), texture->GetD3D12SignalValue());

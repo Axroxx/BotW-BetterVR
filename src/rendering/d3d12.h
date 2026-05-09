@@ -134,6 +134,40 @@ public:
         std::vector<std::pair<Texture*, uint64_t>> m_signalTo;
     };
 
+    class DebugDrawPipeline {
+    public:
+        DebugDrawPipeline();
+        ~DebugDrawPipeline() = default;
+
+        void Render(OpenXR::EyeSide side, ID3D12GraphicsCommandList* commandList, ID3D12Resource* sceneDepthTexture, ID3D12Resource* colorTarget, DXGI_FORMAT colorFormat, ID3D12Resource* depthTarget, DXGI_FORMAT depthFormat, const DebugDrawRenderData& renderData, const glm::mat4& viewProjection);
+
+    private:
+        void RecreatePipeline();
+        void EnsureVertexBuffer(uint32_t requiredBytes);
+        void UpdateSceneSettings(OpenXR::EyeSide side, ID3D12Resource* colorTarget, const glm::mat4& viewProjection);
+        void RenderVertices(ID3D12GraphicsCommandList* commandList, D3D12_PRIMITIVE_TOPOLOGY topology, ID3D12PipelineState* pipelineState, uint32_t vertexOffset, uint32_t vertexCount);
+
+        ComPtr<ID3DBlob> m_vertexShader;
+        ComPtr<ID3DBlob> m_pixelShader;
+        ComPtr<ID3D12RootSignature> m_signature;
+        ComPtr<ID3D12PipelineState> m_trianglePipelineState;
+        ComPtr<ID3D12PipelineState> m_linePipelineState;
+
+        std::array<ComPtr<ID3D12Resource>, 2> m_sceneSettingsBuffers;
+        ComPtr<ID3D12Resource> m_vertexBuffer;
+        D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView = {};
+        uint32_t m_vertexBufferCapacity = 0;
+
+        ComPtr<ID3D12DescriptorHeap> m_sceneDepthHeap;
+        ComPtr<ID3D12DescriptorHeap> m_targetHeap;
+        ComPtr<ID3D12DescriptorHeap> m_depthHeap;
+        std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> m_sceneDepthHandles = {};
+        std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 2> m_sceneDepthGpuHandles = {};
+        std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> m_targetHandles = {};
+        std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> m_depthHandles = {};
+        std::array<DXGI_FORMAT, 2> m_targetFormats = { DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN };
+    };
+
 private:
     ComPtr<ID3D12Device> m_device;
     ComPtr<ID3D12CommandQueue> m_queue;

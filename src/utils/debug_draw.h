@@ -1,11 +1,32 @@
 #pragma once
 
+#include <array>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <imgui.h>
+#include <cstdint>
 #include <mutex>
-#include <string>
 #include <vector>
+
+constexpr uint32_t DebugDrawColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+    return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | ((uint32_t)a << 24);
+}
+
+struct DebugDrawVertex {
+    glm::vec3 position = glm::vec3(0.0f);
+    uint32_t color = 0;
+};
+
+using DebugDrawLineVertex = DebugDrawVertex;
+using DebugDrawTriangleVertex = DebugDrawVertex;
+
+struct DebugDrawRenderData {
+    std::vector<DebugDrawTriangleVertex> triangleVertices;
+    std::vector<DebugDrawLineVertex> lineVertices;
+    std::array<glm::mat4, 2> viewProjections = { glm::mat4(1.0f), glm::mat4(1.0f) };
+    std::array<bool, 2> hasViewProjections = { false, false };
+
+    bool IsEmpty() const { return triangleVertices.empty() && lineVertices.empty(); }
+};
 
 class DebugDraw {
 public:
@@ -15,29 +36,21 @@ public:
     }
 
     // -- Submit primitives (thread-safe, callable from any thread) --
-    void Line(const glm::vec3& a, const glm::vec3& b, uint32_t color = IM_COL32(0, 255, 0, 255), float thickness = 1.0f);
-    void Dot(const glm::vec3& position, float radius = 4.0f, uint32_t color = IM_COL32(0, 255, 0, 255));
-    void Circle(const glm::vec3& position, float radius = 6.0f, uint32_t color = IM_COL32(0, 255, 0, 255), float thickness = 1.0f, int segments = 0);
-    void Box(const glm::vec3& min, const glm::vec3& max, uint32_t color = IM_COL32(0, 255, 0, 255), float thickness = 1.0f);
-    void Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color = IM_COL32(0, 255, 0, 255), float thickness = 1.0f);
-    void Frustum(const glm::mat4& viewProjection, uint32_t color = IM_COL32(255, 255, 0, 255), float thickness = 1.0f);
-    void Text(const glm::vec3& position, std::string text, uint32_t color = IM_COL32(255, 255, 255, 255), const ImVec2& pixelOffset = ImVec2(0.0f, 0.0f), float fontScale = 0.7f);
+    void Line(const glm::vec3& a, const glm::vec3& b, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f);
+    void Dot(const glm::vec3& position, float radius = 0.15f, uint32_t color = DebugDrawColor(0, 255, 0));
+    // World-space ring on the XZ plane using the game's Y-up convention.
+    void Circle(const glm::vec3& position, float radius = 1.0f, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0);
+    void Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color = DebugDrawColor(255, 220, 64, 200), int segments = 0);
+    void Box(const glm::vec3& min, const glm::vec3& max, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f);
+    void Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f);
+    void Frustum(const glm::mat4& viewProjection, uint32_t color = DebugDrawColor(255, 255, 0), float thickness = 1.0f);
 
-    // -- VP matrix for rendering (set from camera hooks) --
-    // Stores the view-projection matrix used for rendering debug primitives.
-    // Must be a standard column-major VP matrix in game world space.
-    // Call from the camera hook each frame.
-    void SetViewProjection(const glm::mat4& vp);
+    void UpdateEyeView(uint32_t eyeIndex, const glm::mat4& view);
+    void UpdateEyeProjection(uint32_t eyeIndex, const glm::mat4& projection);
+    void SnapshotEyeState(uint32_t eyeIndex, long frameIdx);
 
-    // -- Called by the overlay renderer each time it draws --
+    DebugDrawRenderData TakeRenderData(long frameIdx = -1);
 
-    // Projects all submitted primitives using the stored VP matrix and draws
-    // them onto ImGui::GetForegroundDrawList(). Does NOT clear the buffer,
-    // so the same primitives can be rendered for multiple eyes/passes.
-    void Render(const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin = glm::vec2(0.0f), const glm::vec2& uvMax = glm::vec2(1.0f));
-
-    /// Clears all submitted primitives. Call once per game frame, after all
-    /// Render() calls for that frame are complete.
     void Clear();
 
 private:
@@ -45,11 +58,12 @@ private:
 
     enum class PrimitiveType : uint8_t {
         LINE,
+        DOT,
         CIRCLE,
+        ARC,
         AABB,
         ORIENTED_BOX,
         FRUSTUM,
-        TEXT,
     };
 
     struct DebugPrimitive {
@@ -58,29 +72,26 @@ private:
         float thickness;
 
         // LINE: a, b
-        // CIRCLE: a = center, radius/segments/filled used
+        // DOT: a = center, radius used
+        // CIRCLE: a = center, radius/segments used
+        // ARC: a = start, b = initial velocity, c = acceleration, duration/segments used
         // AABB: a = min, b = max
         // ORIENTED_BOX: a = center, b = halfExtents, rotation used
         // FRUSTUM: inverseVP used
         glm::vec3 a = {};
         glm::vec3 b = {};
+        glm::vec3 c = {};
         glm::quat rotation = glm::identity<glm::quat>();
         glm::mat4 inverseVP = glm::mat4(1.0f);
         float radius = 1.0f;
+        float duration = 0.0f;
         int segments = 0;
-        bool filled = false;
-        std::string text;
-        ImVec2 pixelOffset = ImVec2(0.0f, 0.0f);
-        float fontScale = 0.7f;
     };
 
     std::mutex m_mutex;
     std::vector<DebugPrimitive> m_primitives;
-    glm::mat4 m_viewProjection = glm::mat4(1.0f);
-    bool m_hasVP = false;
 
     // Internal helpers
-    static bool ProjectPoint(const glm::mat4& vp, const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax, const glm::vec3& worldPos, glm::vec4& clipOut, ImVec2& screenOut);
-    static void DrawClippedLine(ImDrawList* drawList, const glm::mat4& vp, const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax, const glm::vec3& a, const glm::vec3& b, uint32_t color, float thickness);
-    static void DrawEdges(ImDrawList* drawList, const glm::mat4& vp, const glm::vec2& viewportPos, const glm::vec2& viewportSize, const glm::vec2& uvMin, const glm::vec2& uvMax, const glm::vec3* corners, const int (*edges)[2], int edgeCount, uint32_t color, float thickness);
+    static void AddLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color);
+    static void AddEdges(DebugDrawRenderData& renderData, const glm::vec3* corners, const int (*edges)[2], int edgeCount, uint32_t color);
 };
