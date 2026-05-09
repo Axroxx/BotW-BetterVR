@@ -26,27 +26,44 @@ $shadowNearbyStart = 1.0 # the starting distance should be kept at 1.0
 $shadowNearbyEnd = 1.0
 $shadowFarStart = 1.0
 $shadowFarEnd = 1.0
+$recordingOutput:int = 0
 
 # Should be set to 1 or 2 (changes verbosity of loggin) when trying to log the layout of panes while they're getting loaded for debugging purposes
 $enableUltrawideDebugLogging:int = 0
+
+# Recording Output (BetterVR)
+
+[Preset]
+name = Disabled (Default)
+category = Recording Mode
+default = 1
+$recordingOutput:int = 0
+
+[Preset]
+name = Enabled (May Lower VR Quality And Performance)
+category = Recording Mode
+$recordingOutput:int = 1
 
 # VR Resolution Multiplier (BetterVR)
 
 [Preset]
 name = __BETTERVR_05_NAME__ (0.5x, Not Recommended Except For 8K VR headsets)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_05_WIDTH__
 $height = __BETTERVR_05_HEIGHT__
 
 [Preset]
 name = __BETTERVR_075_NAME__ (0.75x, Lower GPU Cost)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_075_WIDTH__
 $height = __BETTERVR_075_HEIGHT__
 
 [Preset]
 name = __BETTERVR_10_NAME__ (1x, Native Headset Resolution, Default)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 default = 1
 $width = __BETTERVR_10_WIDTH__
 $height = __BETTERVR_10_HEIGHT__
@@ -54,38 +71,66 @@ $height = __BETTERVR_10_HEIGHT__
 [Preset]
 name = __BETTERVR_125_NAME__ (1.25x, Slightly Sharper)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_125_WIDTH__
 $height = __BETTERVR_125_HEIGHT__
 
 [Preset]
 name = __BETTERVR_15_NAME__ (1.5x, Balanced Quality)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_15_WIDTH__
 $height = __BETTERVR_15_HEIGHT__
 
 [Preset]
 name = __BETTERVR_175_NAME__ (1.75x, Sharper Image)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_175_WIDTH__
 $height = __BETTERVR_175_HEIGHT__
 
 [Preset]
 name = __BETTERVR_20_NAME__ (2x, Better Anti-Aliasing, Recommended)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_20_WIDTH__
 $height = __BETTERVR_20_HEIGHT__
 
 [Preset]
 name = __BETTERVR_225_NAME__ (2.25x, High Clarity)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_225_WIDTH__
 $height = __BETTERVR_225_HEIGHT__
 
 [Preset]
 name = __BETTERVR_30_NAME__ (3x, Best Anti-Aliasing, Requires A Good GPU)
 category = VR Resolution Multiplier
+condition = ($recordingOutput == 0)
 $width = __BETTERVR_30_WIDTH__
 $height = __BETTERVR_30_HEIGHT__
+
+[Preset]
+name = 1920x1080 (16:9 Recording)
+category = VR Resolution Multiplier
+condition = ($recordingOutput == 1)
+$width = 1920
+$height = 1080
+
+[Preset]
+name = 2560x1440 (16:9 Recording, Default)
+category = VR Resolution Multiplier
+condition = ($recordingOutput == 1)
+default = 1
+$width = 2560
+$height = 1440
+
+[Preset]
+name = 3840x2160 (16:9 Recording)
+category = VR Resolution Multiplier
+condition = ($recordingOutput == 1)
+$width = 3840
+$height = 2160
 
 # Anti-Aliasing
 

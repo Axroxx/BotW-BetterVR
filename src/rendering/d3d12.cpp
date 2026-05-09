@@ -227,9 +227,10 @@ void RND_D3D12::PresentPipeline<depth>::BindDepthTarget(ID3D12Resource* dstTextu
 }
 
 template <bool depth>
-void RND_D3D12::PresentPipeline<depth>::BindSettings(float screenWidth, float screenHeight) {
+void RND_D3D12::PresentPipeline<depth>::BindSettings(float screenWidth, float screenHeight, const RenderUtils::UvTransform& uvTransform) {
     m_renderWidth = screenWidth;
     m_renderHeight = screenHeight;
+    m_uvTransform = uvTransform;
     m_settingsBuffer = D3D12Utils::CreateConstantBuffer(VRManager::instance().D3D12->GetDevice(), D3D12_HEAP_TYPE_UPLOAD, sizeof(presentSettings));
 }
 
@@ -240,6 +241,10 @@ void RND_D3D12::PresentPipeline<depth>::UpdateSettingsBuffer(ID3D12Resource* swa
         .renderHeight = m_renderHeight,
         .swapchainWidth = static_cast<float>(swapchain->GetDesc().Width),
         .swapchainHeight = static_cast<float>(swapchain->GetDesc().Height),
+        .uvOffsetX = m_uvTransform.offsetX,
+        .uvOffsetY = m_uvTransform.offsetY,
+        .uvScaleX = m_uvTransform.scaleX,
+        .uvScaleY = m_uvTransform.scaleY,
         .customFadeAmount = 0.0f,
         .customFadeColorR = 0.0f,
         .customFadeColorG = 0.0f,

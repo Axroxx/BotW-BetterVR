@@ -48,7 +48,8 @@ public:
         void BindAttachment(uint32_t attachmentIdx, ID3D12Resource* srcTexture, DXGI_FORMAT overwriteFormat = DXGI_FORMAT_UNKNOWN);
         void BindTarget(uint32_t targetIdx, ID3D12Resource* dstTexture, DXGI_FORMAT overwriteFormat = DXGI_FORMAT_UNKNOWN);
         void BindDepthTarget(ID3D12Resource* dstTexture, DXGI_FORMAT overwriteFormat);
-        void BindSettings(float screenWidth, float screenHeight);
+        void BindSettings(float screenWidth, float screenHeight, const RenderUtils::UvTransform& uvTransform = {});
+        void SetUvTransform(const RenderUtils::UvTransform& uvTransform) { m_uvTransform = uvTransform; }
         void Render(ID3D12GraphicsCommandList* commandList, ID3D12Resource* swapchain);
 
     private:
@@ -57,6 +58,7 @@ public:
         RND_Renderer* m_renderer = nullptr;
         float m_renderWidth = 0.0f;
         float m_renderHeight = 0.0f;
+        RenderUtils::UvTransform m_uvTransform = {};
 
         void RecreatePipeline();
 
