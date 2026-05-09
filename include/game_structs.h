@@ -191,12 +191,8 @@ struct ActorWiiU : BaseProc {
     BEType<float> modelOpacityRelated;
     PADDED_BYTES(0x344, 0x348);
     struct {
-        BEType<float> minX;
-        BEType<float> minY;
-        BEType<float> minZ;
-        BEType<float> maxX;
-        BEType<float> maxY;
-        BEType<float> maxZ;
+        BEVec3 min;
+        BEVec3 max;
     } aabb;
     BEType<ActorFlags2> flags2;
     BEType<ActorFlags2> flags2Copy;

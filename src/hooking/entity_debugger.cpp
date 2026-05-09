@@ -184,8 +184,8 @@ void EntityDebugger::UpdateEntityMemory() {
         }
         SetRotation(actorId, mtx.getRotLE());
 
-        BEVec3 aabbMin = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.minX));
-        BEVec3 aabbMax = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.maxX));
+        BEVec3 aabbMin = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.min));
+        BEVec3 aabbMax = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.max));
         if (aabbMin.x.getLE() != 0.0f) {
             SetAABB(actorId, aabbMin.getLE(), aabbMax.getLE());
         }
@@ -227,8 +227,8 @@ void EntityDebugger::UpdateEntityMemory() {
         // addField.operator()<float>("startModelOpacity", offsetof(ActorWiiU, startModelOpacity));
         // addField.operator()<float>("modelOpacity", offsetof(ActorWiiU, modelOpacity));
         // addField.operator()<uint8_t>("opacityOrDoFlushOpacityToGPU", offsetof(ActorWiiU, opacityOrDoFlushOpacityToGPU));
-        addField.operator()<BEVec3>("aabb_min", offsetof(ActorWiiU, aabb.minX));
-        addField.operator()<BEVec3>("aabb_max", offsetof(ActorWiiU, aabb.maxX));
+        addField.operator()<BEVec3>("aabb_min", offsetof(ActorWiiU, aabb.min));
+        addField.operator()<BEVec3>("aabb_max", offsetof(ActorWiiU, aabb.max));
         addField.operator()<uint32_t>("flags2", offsetof(ActorWiiU, flags2));
         addField.operator()<uint32_t>("flags2Copy", offsetof(ActorWiiU, flags2Copy));
         addField.operator()<uint32_t>("flags", offsetof(ActorWiiU, flags));
