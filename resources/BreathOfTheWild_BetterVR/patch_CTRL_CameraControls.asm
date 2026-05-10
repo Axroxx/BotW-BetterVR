@@ -45,6 +45,65 @@ blr
 
 ; ==================================================================================
 
+adjustGameplayCameraPivot:
+stwu r1, -0x20(r1)
+mflr r0
+stw r0, 0x24(r1)
+stw r3, 0x1C(r1)
+stw r4, 0x18(r1)
+stw r5, 0x14(r1)
+
+lis r12, 0x02B9
+ori r12, r12, 0x7B28
+mtctr r12
+bctrl
+
+lwz r3, 0x1C(r1)
+lwz r4, 0x18(r1)
+lwz r5, 0x14(r1)
+bl import.coreinit.hook_AdjustGameplayCameraPivot
+
+lwz r5, 0x14(r1)
+lwz r4, 0x18(r1)
+lwz r3, 0x1C(r1)
+lwz r0, 0x24(r1)
+addi r1, r1, 0x20
+mtlr r0
+blr
+
+adjustGameplayCameraPivot_InsideCameraPivotCalc:
+stwu r1, -0x20(r1)
+mflr r0
+stw r0, 0x24(r1)
+stw r3, 0x1C(r1)
+stw r4, 0x18(r1)
+stw r5, 0x14(r1)
+
+lis r12, 0x02B9
+ori r12, r12, 0x7834
+mtctr r12
+bctrl
+
+lwz r3, 0x1C(r1)
+lwz r4, 0x18(r1)
+lwz r5, 0x14(r1)
+bl import.coreinit.hook_AdjustGameplayCameraPivot
+
+lwz r5, 0x14(r1)
+lwz r4, 0x18(r1)
+lwz r3, 0x1C(r1)
+lwz r0, 0x24(r1)
+addi r1, r1, 0x20
+mtlr r0
+blr
+
+0x02B97C34 = bla adjustGameplayCameraPivot_InsideCameraPivotCalc
+0x02B99AB4 = bla adjustGameplayCameraPivot
+0x02B9CCB8 = bla adjustGameplayCameraPivot
+
+
+; ==================================================================================
+
 cameraModePtr:
 .int 0
 

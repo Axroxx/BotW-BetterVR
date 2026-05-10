@@ -902,6 +902,10 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                             settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(&changed);
                         });
 
+                        DrawSettingRow("Always Force Physics Model To Match Headset Yaw", [&]() {
+                            settings.forcePhysicsModelToFollowHeadsetYaw.AddToGUI(&changed);
+                        });
+
                         if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
                             DrawSettingRow("Angular Velocity Fixer", [&]() {
                                 settings.buggyAngularVelocity.AddComboToGUI(&changed, ModSettings::toDisplayString);

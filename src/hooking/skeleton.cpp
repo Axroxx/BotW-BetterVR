@@ -265,6 +265,17 @@ static glm::vec3 s_manualBodyOffset = glm::vec3(0.0f, 0.0f, -0.075f);
 static glm::mat4 s_handCorrectionRotationLeft = glm::mat4(1.0f);
 static glm::mat4 s_handCorrectionRotationRight = glm::mat4(1.0f);
 
+static glm::fquat ExtractPlayerBodyYaw(const glm::fmat4& sourceMtx) {
+    glm::fquat sourceRot = glm::quat_cast(sourceMtx);
+    float yProj = glm::dot(glm::fvec3(sourceRot.x, sourceRot.y, sourceRot.z), glm::fvec3(0.0f, 1.0f, 0.0f));
+    glm::fquat yawRot(sourceRot.w, 0.0f, yProj, 0.0f);
+    float lenSq = glm::dot(yawRot, yawRot);
+    yawRot = (lenSq > 0.000001f) ? yawRot * (1.0f / sqrtf(lenSq)) : glm::identity<glm::fquat>();
+
+    // fix body inversion
+    return yawRot * glm::angleAxis(glm::radians(180.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+}
+
 static glm::fvec3 RemoveHeadsetHorizontalOffset(glm::fvec3 trackedPos) {
     glm::fvec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
     trackedPos.x -= appliedHeadPos.x;
@@ -398,15 +409,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         headsetModel[3].x = 0.0f;
         headsetModel[3].z = 0.0f;
 
-        // extract yaw-only rotation (twist around Y)
-        glm::quat headsetRot = glm::quat_cast(headsetModel);
-        float yProj = glm::dot(glm::vec3(headsetRot.x, headsetRot.y, headsetRot.z), glm::vec3(0, 1, 0));
-        glm::quat yawRot(headsetRot.w, 0, yProj, 0);
-        float lenSq = glm::dot(yawRot, yawRot);
-        yawRot = (lenSq > 0.000001f) ? yawRot * (1.0f / sqrtf(lenSq)) : glm::identity<glm::quat>();
-
-        // fix body inversion
-        yawRot = yawRot * glm::angleAxis(glm::radians(180.0f), glm::vec3(0, 1, 0));
+        glm::fquat yawRot = ExtractPlayerBodyYaw(headsetModel);
 
         // position the root so that yawRot * eyeOffset lands at the headset position
         glm::vec3 targetPos = glm::vec3(headsetModel[3]) - (yawRot * eyeOffset) + (yawRot * s_manualBodyOffset);

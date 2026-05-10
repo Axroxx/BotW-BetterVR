@@ -51,6 +51,8 @@ float hardcodedCrouchOffset = 0.3f;
 
 glm::fvec3 s_wsCameraPosition = glm::fvec3();
 glm::fquat s_wsCameraRotation = glm::identity<glm::fquat>();
+glm::fvec3 s_lastGameplayCameraTarget = glm::fvec3();
+bool s_hasGameplayCameraTarget = false;
 bool s_isSwimming = false;
 bool s_isCrouching = false;
 bool s_wasCrouching = false;
@@ -75,6 +77,92 @@ static glm::mat4 GetAppliedHeadsetPose(glm::mat4 pose) {
     return pose;
 }
 
+static std::optional<std::pair<glm::fvec3, glm::fquat>> TryGetAppliedEyePose(OpenXR::EyeSide side) {
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return std::nullopt;
+    }
+
+    auto eyePoseOpt = renderer->GetPose(side);
+    if (!eyePoseOpt.has_value()) {
+        return std::nullopt;
+    }
+
+    return { { GetAppliedHeadsetOffset(ToGLM(eyePoseOpt.value().position)), ToGLM(eyePoseOpt.value().orientation) } };
+}
+
+static bool TryUpdateGameplayCameraTarget(const glm::fvec3& cameraPos, const glm::fvec3& cameraTarget, const glm::fvec3& cameraUp) {
+    if (!std::isfinite(cameraPos.x) || !std::isfinite(cameraPos.y) || !std::isfinite(cameraPos.z) ||
+        !std::isfinite(cameraTarget.x) || !std::isfinite(cameraTarget.y) || !std::isfinite(cameraTarget.z) ||
+        !std::isfinite(cameraUp.x) || !std::isfinite(cameraUp.y) || !std::isfinite(cameraUp.z)) {
+        return false;
+    }
+
+    glm::fvec3 forward = cameraTarget - cameraPos;
+    if (glm::dot(forward, forward) <= 1.0e-6f || glm::dot(cameraUp, cameraUp) <= 1.0e-6f) {
+        return false;
+    }
+
+    s_lastGameplayCameraTarget = cameraTarget;
+    s_hasGameplayCameraTarget = true;
+    return true;
+}
+
+static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
+    glm::fvec3 newPos = gameplayPos;
+    if (CemuHooks::IsFirstPerson()) {
+        BEMatrix34 playerMtx = {};
+        CemuHooks::readMemory(CemuHooks::s_playerMtxAddress, &playerMtx);
+        glm::fvec3 playerPos = playerMtx.getPos().getLE();
+
+        if (CemuHooks::IsRiding()) {
+            playerPos.y -= hardcodedRidingOffset + GetSettings().GetPlayerHeightOffset();
+        }
+        else if (s_isSwimming) {
+            playerPos.y += hardcodedSwimOffset + GetSettings().GetPlayerHeightOffset();
+        }
+        else {
+            playerPos.y += GetSettings().GetPlayerHeightOffset() - actualCrouchOffset;
+        }
+
+        newPos = playerPos;
+    }
+
+    return newPos;
+}
+
+static std::pair<glm::vec3, glm::fquat> BuildGameplayCameraPose(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot, OpenXR::EyeSide side) {
+    glm::fvec3 basePos = ResolveGameplayAnchorPosition(gameplayPos);
+    glm::fquat baseYaw = RenderUtils::swingTwistY(gameplayRot).second;
+
+    auto eyePoseOpt = TryGetAppliedEyePose(side);
+    if (!eyePoseOpt.has_value()) {
+        return { basePos, gameplayRot };
+    }
+
+    auto [eyePos, eyeRot] = eyePoseOpt.value();
+    return { basePos + (baseYaw * eyePos), baseYaw * eyeRot };
+}
+
+static void UpdateGameplayReferenceCameraMtx(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot) {
+    glm::fvec3 basePos = ResolveGameplayAnchorPosition(gameplayPos);
+    glm::fquat baseYaw = RenderUtils::swingTwistY(gameplayRot).second;
+    CemuHooks::s_lastCameraMtx = glm::translate(glm::identity<glm::fmat4>(), basePos) * glm::mat4(baseYaw);
+}
+
+static std::pair<glm::fvec3, glm::fquat> ResolveGameplayBasePose(const BESeadLookAtCamera& camera) {
+    glm::mat4x3 viewMatrix = camera.mtx.getLEMatrix();
+    glm::mat4 worldGame = glm::inverse(glm::mat4(viewMatrix));
+    glm::fvec3 basePos = glm::vec3(worldGame[3]);
+    glm::fquat baseRot = glm::quat_cast(worldGame);
+
+    if (!s_hasGameplayCameraTarget || CemuHooks::GetFramesSinceLastCameraUpdate() > 4) {
+        return { basePos, baseRot };
+    }
+
+    return { s_wsCameraPosition, s_wsCameraRotation };
+}
+
 void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
@@ -84,20 +172,16 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
 
     // read the camera matrix from the game's memory
     uint32_t ppc_cameraMatrixOffsetIn = hCPU->gpr[31];
-    OpenXR::EyeSide side = hCPU->gpr[3] == 0 ? EyeSide::LEFT : EyeSide::RIGHT;
     ActCamera actCam = {};
     readMemory(ppc_cameraMatrixOffsetIn, &actCam);
 
     // extract components from the existing camera matrix
     glm::fvec3 oldCameraPosition = actCam.finalCamMtx.pos.getLE();
     glm::fvec3 oldCameraTarget = actCam.finalCamMtx.target.getLE();
-    glm::fvec3 oldCameraForward = glm::normalize(oldCameraTarget - oldCameraPosition);
     glm::fvec3 oldCameraUp = actCam.finalCamMtx.up.getLE();
-    glm::fvec3 oldCameraUnknown = actCam.finalCamMtx.unknown.getLE();
-    float extraValue0 = actCam.finalCamMtx.zNear.getLE();
-    float extraValue1 = actCam.finalCamMtx.zFar.getLE();
+    float oldCameraDistance = glm::distance(oldCameraPosition, oldCameraTarget);
 
-    Log::print<RENDERING>("[{}] Getting gameplay camera (pos = {})", side, oldCameraPosition);
+    Log::print<RENDERING>("Getting gameplay camera (pos = {})", oldCameraPosition);
 
     if (GetSettings().GetCameraMode() == CameraMode::FIRST_PERSON) {
         // remove verticality from the camera position to avoid pitch changes that aren't from the VR headset
@@ -106,11 +190,10 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
 
     // construct glm matrix from the existing camera parameters
     glm::mat4 existingGameMtx = glm::lookAtRH(oldCameraPosition, oldCameraTarget, oldCameraUp);
+    glm::fquat gameplayRotation = glm::quat_cast(glm::inverse(existingGameMtx));
 
-    // pass real camera position and rotation to be used elsewhere
-    // GetRenderCamera recalculates the left and right eye positions from the base camera position
     s_wsCameraPosition = oldCameraPosition;
-    s_wsCameraRotation = glm::quat_cast(glm::inverse(existingGameMtx));
+    s_wsCameraRotation = gameplayRotation;
 
     // rebase the rotation to the player position
     if (IsFirstPerson()) {
@@ -126,7 +209,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         auto gameState = VRManager::instance().XR->m_gameState.load();
         // Unreliable flag, need to investigate
         gameState.is_climbing = HAS_FLAG(moveBits, PlayerMoveBitFlags::IS_SWIMMING_OR_CLIMBING | PlayerMoveBitFlags::IS_CLIMBING_WALL) || s_isLadderClimbing == 2;
-        gameState.is_riding_mount = (s_isRiding == 2 || s_isRidingSandSeal == 2) ? true : false;
+        gameState.is_riding_mount = CemuHooks::IsRiding(false);
         gameState.is_paragliding = HAS_FLAG(moveBits, PlayerMoveBitFlags::IS_GLIDER_ACTIVE);
         VRManager::instance().XR->m_gameState.store(gameState);
 
@@ -152,12 +235,10 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
             actualCrouchOffset = s_isCrouching ? test : 0.0f;
         }
 
-        // read player MTX
-        BEMatrix34& mtx = actor.mtx;
         glm::fvec3 playerPos = actor.mtx.getPos().getLE();
 
-        if (s_isRiding) {
-            playerPos.y -= hardcodedRidingOffset;
+        if (CemuHooks::IsRiding()) {
+            playerPos.y -= hardcodedRidingOffset + GetSettings().GetPlayerHeightOffset();
         }
         else if (s_isSwimming) {
             float playerHeight = VRManager::instance().XR->GetRenderer()->GetMiddlePose().value()[3].y;
@@ -180,7 +261,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
 
         s_wasCrouching = s_isCrouching;
 
-        glm::mat4 playerMtx4 = glm::inverse(glm::translate(glm::identity<glm::mat4>(), playerPos) * glm::mat4(s_wsCameraRotation));
+        glm::mat4 playerMtx4 = glm::inverse(glm::translate(glm::identity<glm::mat4>(), playerPos) * glm::mat4(gameplayRotation));
         existingGameMtx = playerMtx4;
     }
 
@@ -199,19 +280,47 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     glm::fvec3 camPos = glm::fvec3(finalPose[3]);
     glm::fvec3 forward = -glm::normalize(glm::fvec3(finalPose[2]));
     glm::fvec3 up = glm::normalize(glm::fvec3(finalPose[1]));
-
-    float oldCameraDistance = glm::distance(oldCameraPosition, oldCameraTarget);
     glm::fvec3 target = camPos + forward * oldCameraDistance;
+
+    if (!TryUpdateGameplayCameraTarget(camPos, target, up)) {
+        return;
+    }
+
+    UpdateGameplayReferenceCameraMtx(s_wsCameraPosition, s_wsCameraRotation);
 
     actCam.finalCamMtx.pos = camPos;
     actCam.finalCamMtx.target = target;
     actCam.finalCamMtx.up = up;
-    //actCam.finalCamMtx.up = glm::fvec3(0.0f, 1.0f, 0.0f);
 
     // write back the modified camera matrix to the game's memory
     uint32_t ppc_cameraMatrixOffsetOut = hCPU->gpr[31];
     writeMemory(ppc_cameraMatrixOffsetOut, &actCam);
     s_framesSinceLastCameraUpdate = 0;
+}
+
+void CemuHooks::hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    if (!s_hasGameplayCameraTarget || CemuHooks::GetFramesSinceLastCameraUpdate() > 4 || UseBlackBarsDuringEvents()) {
+        return;
+    }
+
+    uint32_t pivotPtr = hCPU->gpr[4];
+    if (pivotPtr == 0) {
+        return;
+    }
+
+    BEVec3 pivot = {};
+    readMemory(pivotPtr, &pivot);
+
+    glm::fvec3 currentPivot = pivot.getLE();
+    glm::fvec3 pivotDelta = s_lastGameplayCameraTarget - currentPivot;
+    if (!std::isfinite(pivotDelta.x) || !std::isfinite(pivotDelta.y) || !std::isfinite(pivotDelta.z) || glm::dot(pivotDelta, pivotDelta) <= 1.0e-6f) {
+        return;
+    }
+
+    pivot = currentPivot + pivotDelta;
+    writeMemory(pivotPtr, &pivot);
 }
 
 void CemuHooks::hook_FixStaminaGaugeScreenPosition(PPCInterpreter_t* hCPU) {
@@ -267,51 +376,9 @@ void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
     readMemory(cameraIn, &camera);
 
     Log::print<RENDERING>("[{}] Getting render camera", side);
-
-    //s_lastCameraMtx = glm::fmat4x3(glm::inverse(glm::mat4(camera.mtx.getLEMatrix()))); // glm::inverse(glm::lookAtRH(camera.pos.getLE(), camera.at.getLE(), camera.up.getLE()));
-
-    // in-game camera
-    glm::mat4x3 viewMatrix = camera.mtx.getLEMatrix();
-    glm::mat4 worldGame = glm::inverse(glm::mat4(viewMatrix));
-    glm::vec3 basePos = glm::vec3(worldGame[3]);
-    glm::quat baseRot = glm::quat_cast(worldGame);
-
-    // overwrite with our stored camera pos/rot
-    basePos = s_wsCameraPosition;
-    baseRot = s_wsCameraRotation;
-    auto [swing, baseYaw] = RenderUtils::swingTwistY(baseRot);
-    glm::fquat baseYawWithoutClimbingFix = baseYaw;
-
-    if (IsFirstPerson()) {
-        // take link's direction, then rotate the headset position
-        BEMatrix34 playerMtx = {};
-        readMemory(s_playerMtxAddress, &playerMtx);
-        glm::fvec3 playerPos = playerMtx.getPos().getLE();
-
-        if (s_isRiding) {
-            playerPos.y -= hardcodedRidingOffset;
-        }
-        else if (s_isSwimming) {
-            playerPos.y += hardcodedSwimOffset + GetSettings().GetPlayerHeightOffset();
-        }
-        else {
-            playerPos.y += GetSettings().GetPlayerHeightOffset() - actualCrouchOffset;
-        }
-
-        basePos = playerPos;
-    }
-
-    s_lastCameraMtx = glm::fmat4x3(glm::translate(glm::identity<glm::fmat4>(), basePos) * glm::mat4(baseYawWithoutClimbingFix));
-
-    // vr camera
-    std::optional<XrPosef> currPoseOpt = VRManager::instance().XR->GetRenderer()->GetPose(side);
-    if (!currPoseOpt.has_value())
-        return;
-    glm::fvec3 eyePos = GetAppliedHeadsetOffset(ToGLM(currPoseOpt.value().position));
-    glm::fquat eyeRot = ToGLM(currPoseOpt.value().orientation);
-
-    glm::vec3 newPos = basePos + (baseYaw * eyePos);
-    glm::fquat newRot = baseYaw * eyeRot;
+    auto [gameplayPos, gameplayRot] = ResolveGameplayBasePose(camera);
+    UpdateGameplayReferenceCameraMtx(gameplayPos, gameplayRot);
+    auto [newPos, newRot] = BuildGameplayCameraPose(gameplayPos, gameplayRot, side);
 
     glm::mat4 newWorldVR = glm::translate(glm::mat4(1.0f), newPos) * glm::mat4_cast(newRot);
     glm::mat4 newViewVR = glm::inverse(newWorldVR);
@@ -501,32 +568,8 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
         readMemory(cameraPtr, &camera);
 
         Log::print<RENDERING>("[{}] ModifyProjectionUsingCamera at {:08X}: {}", side, cameraPtr, camera);
-
-        // in-game camera
-        glm::mat4x3 viewMatrix = camera.mtx.getLEMatrix();
-        glm::mat4 worldGame = glm::inverse(glm::mat4(viewMatrix));
-        glm::vec3 basePos = glm::vec3(worldGame[3]);
-        glm::quat baseRot = glm::quat_cast(worldGame);
-
-        // ignore the current rotation since it is already changed by the gameplay camera hooking
-        baseRot = s_wsCameraRotation;
-        auto [swing, baseYaw] = RenderUtils::swingTwistY(baseRot);
-
-        if (IsFirstPerson()) {
-            // take link's direction, then rotate the headset position
-            BEMatrix34 playerMtx = {};
-            readMemory(s_playerMtxAddress, &playerMtx);
-        }
-
-        // vr camera
-        std::optional<XrPosef> currPoseOpt = VRManager::instance().XR->GetRenderer()->GetPose(side);
-        if (!currPoseOpt.has_value())
-            return;
-        glm::fvec3 eyePos = GetAppliedHeadsetOffset(ToGLM(currPoseOpt.value().position));
-        glm::fquat eyeRot = ToGLM(currPoseOpt.value().orientation);
-
-        glm::vec3 newPos = basePos + (baseYaw * eyePos);
-        glm::fquat newRot = baseYaw * eyeRot;
+        auto [gameplayPos, gameplayRot] = ResolveGameplayBasePose(camera);
+        auto [newPos, newRot] = BuildGameplayCameraPose(gameplayPos, gameplayRot, side);
 
         glm::mat4 newWorldVR = glm::translate(glm::mat4(1.0f), newPos) * glm::mat4_cast(newRot);
         glm::mat4 newViewVR = glm::inverse(newWorldVR);
@@ -590,49 +633,8 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
 }
 
 std::pair<glm::vec3, glm::fquat> CemuHooks::CalculateVRWorldPose(const BESeadLookAtCamera& camera, uint8_t side) {
-    // in-game camera
-    glm::mat4x3 viewMatrix = camera.mtx.getLEMatrix();
-    glm::mat4 worldGame = glm::inverse(glm::mat4(viewMatrix));
-    glm::vec3 basePos = glm::vec3(worldGame[3]);
-    glm::quat baseRot = glm::quat_cast(worldGame);
-
-    // overwrite with our stored camera pos/rot
-    basePos = s_wsCameraPosition;
-    baseRot = s_wsCameraRotation;
-
-    auto [swing, baseYaw] = RenderUtils::swingTwistY(baseRot);
-    if (IsFirstPerson()) {
-        // take link's direction, then rotate the headset position
-        BEMatrix34 playerMtx = {};
-        readMemory(s_playerMtxAddress, &playerMtx);
-        glm::fvec3 playerPos = playerMtx.getPos().getLE();
-
-        if (s_isRiding) {
-            playerPos.y -= hardcodedRidingOffset;
-        }
-        else if (s_isSwimming) {
-            playerPos.y += hardcodedSwimOffset;
-        }
-        else {
-            playerPos.y += GetSettings().GetPlayerHeightOffset() - actualCrouchOffset;
-        }
-
-        basePos = playerPos;
-    }
-
-    // vr camera
-    std::optional<XrPosef> currPoseOpt = VRManager::instance().XR->GetRenderer()->GetPose((OpenXR::EyeSide)side);
-    if (!currPoseOpt.has_value()) {
-        return { basePos, baseRot };
-    }
-
-    glm::fvec3 eyePos = GetAppliedHeadsetOffset(ToGLM(currPoseOpt.value().position));
-    glm::fquat eyeRot = ToGLM(currPoseOpt.value().orientation);
-
-    glm::vec3 newPos = basePos + (baseYaw * eyePos);
-    glm::fquat newRot = baseYaw * eyeRot;
-
-    return { newPos, newRot };
+    auto [gameplayPos, gameplayRot] = ResolveGameplayBasePose(camera);
+    return BuildGameplayCameraPose(gameplayPos, gameplayRot, (OpenXR::EyeSide)side);
 }
 
 void CemuHooks::hook_CheckIfCameraCanSeePos(PPCInterpreter_t* hCPU) {

@@ -57,5 +57,5 @@ private:
     float m_worldAABBMinDistance = 1.0f;
     float m_worldAABBMaxDistance = 100.0f;
     bool m_showRaycastLines = false;
-    bool m_showRoomscalePhysics = true;
+    bool m_showRoomscalePhysics = false;
 };
