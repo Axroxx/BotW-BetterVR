@@ -31,6 +31,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_BeginRoomscaleMovement", &hook_BeginRoomscaleMovement);
         osLib_registerHLEFunction("coreinit", "hook_PrepareRoomscaleRaycast", &hook_PrepareRoomscaleRaycast);
         osLib_registerHLEFunction("coreinit", "hook_ConsumeRoomscaleRaycast", &hook_ConsumeRoomscaleRaycast);
+        osLib_registerHLEFunction("coreinit", "hook_BuildRoomscaleWarpTransform", &hook_BuildRoomscaleWarpTransform);
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyTransform", &hook_SetRigidBodyTransform);
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyScale", &hook_SetRigidBodyScale);
         osLib_registerHLEFunction("coreinit", "hook_SetRigidBodyPosition", &hook_SetRigidBodyPosition);
@@ -186,6 +187,7 @@ private:
     static void hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU);
     static void hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU);
     static void hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU);
+    static void hook_BuildRoomscaleWarpTransform(PPCInterpreter_t* hCPU);
     static void hook_SetRigidBodyTransform(PPCInterpreter_t* hCPU);
     static void hook_SetRigidBodyScale(PPCInterpreter_t* hCPU);
     static void hook_SetRigidBodyPosition(PPCInterpreter_t* hCPU);

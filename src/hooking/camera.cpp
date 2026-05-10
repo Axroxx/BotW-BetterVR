@@ -92,9 +92,7 @@ static std::optional<std::pair<glm::fvec3, glm::fquat>> TryGetAppliedEyePose(Ope
 }
 
 static bool TryUpdateGameplayCameraTarget(const glm::fvec3& cameraPos, const glm::fvec3& cameraTarget, const glm::fvec3& cameraUp) {
-    if (!std::isfinite(cameraPos.x) || !std::isfinite(cameraPos.y) || !std::isfinite(cameraPos.z) ||
-        !std::isfinite(cameraTarget.x) || !std::isfinite(cameraTarget.y) || !std::isfinite(cameraTarget.z) ||
-        !std::isfinite(cameraUp.x) || !std::isfinite(cameraUp.y) || !std::isfinite(cameraUp.z)) {
+    if (!glm::any(glm::isfinite(cameraPos)) || !glm::any(glm::isfinite(cameraTarget)) || !glm::any(glm::isfinite(cameraUp))) {
         return false;
     }
 
