@@ -8,10 +8,10 @@
     "implementation_version": "1",
     "description": "Vulkan layer used to breath some VR into BotW for Cemu, using OpenXR!",
     "enable_environment": {
-      "ENABLE_BETTERVR_MOD": "1"
+      "${BETTERVR_LAYER_ENABLE_ENV}": "1"
     },
     "disable_environment": {
-      "DISABLE_BETTERVR_MOD": "1"
+      "${BETTERVR_LAYER_DISABLE_ENV}": "1"
     },
     "functions": {
       "vkNegotiateLoaderLayerInterfaceVersion": "VRLayer_NegotiateLoaderLayerInterfaceVersion",

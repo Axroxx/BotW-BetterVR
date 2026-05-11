@@ -8,6 +8,9 @@
 #include "launcher_common.h"
 
 static constexpr wchar_t VulkanImplicitLayersRegistryPath[] = L"SOFTWARE\\Khronos\\Vulkan\\ImplicitLayers";
+static constexpr wchar_t VulkanExplicitLayersRegistryPath[] = L"SOFTWARE\\Khronos\\Vulkan\\ExplicitLayers";
+static constexpr wchar_t BetterVREnableEnvironmentVariable[] = L"ENABLE_BETTERVR_MOD";
+static constexpr wchar_t BetterVRAdminEnableEnvironmentVariable[] = L"ENABLE_BETTERVR_MOD_ADMIN";
 static constexpr std::string_view BundledGraphicPackName = "BreathOfTheWild_BetterVR";
 static constexpr std::string_view BundledGraphicPackPrefix = "BreathOfTheWild_BetterVR/";
 static constexpr std::string_view BundledDownloadedGraphicsPrefix = "BreathOfTheWild_Graphics/";
@@ -24,6 +27,11 @@ static constexpr std::wstring_view LegacyLaunchFiles[] = {
     L"BetterVR_Layer.dll",
     L"VkLayer_BetterVR_Hook.dll",
     L"BetterVR.txt",
+};
+
+enum class LayerInstallScope {
+    CurrentUser,
+    Machine
 };
 
 struct EmbeddedAssetView {
@@ -168,6 +176,33 @@ static bool EnsureOpenXRRuntimeReady() {
     return true;
 }
 
+static bool IsProcessElevated() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        LogLine("Failed to open the launcher process token; defaulting to current-user Vulkan registration");
+        return false;
+    }
+
+    TOKEN_ELEVATION elevation{};
+    DWORD bytesReturned = 0;
+    const BOOL queryResult = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &bytesReturned);
+    CloseHandle(token);
+    if (!queryResult) {
+        LogLine("Failed to query launcher token elevation; defaulting to current-user Vulkan registration");
+        return false;
+    }
+
+    return elevation.TokenIsElevated != 0;
+}
+
+static std::string GetRegistryKeyLocation(HKEY rootKey, const wchar_t* registryPath) {
+    return std::string(rootKey == HKEY_LOCAL_MACHINE ? "HKEY_LOCAL_MACHINE" : "HKEY_CURRENT_USER") + "\\" + Narrow(std::wstring(registryPath));
+}
+
+static fs::path GetScopedLayerManifestPath(const LauncherPaths& paths, LayerInstallScope scope) {
+    return scope == LayerInstallScope::Machine ? paths.targetPack / "BetterVR_Layer.admin.json" : paths.runtimeLayerJson;
+}
+
 static bool ExtractRuntimeFiles(const LauncherPaths& paths) {
     if (!EnsureDirectory(paths.targetPack, "Failed to create runtime directory")) {
         return false;
@@ -247,50 +282,58 @@ static std::string ToLower(std::string value) {
 }
 
 static bool IsBetterVRRegistryValue(const std::wstring& valueName) {
-    const std::string lowered = ToLower(Narrow(valueName));
-    return lowered.find("bettervr") != std::string::npos && lowered.ends_with("bettervr_layer.json");
+    const std::string lowered = ToLower(Narrow(fs::path(valueName).filename()));
+    return lowered == "bettervr_layer.json" || lowered == "bettervr_layer.admin.json";
 }
 
-static bool RemoveBetterVREntriesFromRegistryKey(const wchar_t* registryPath) {
+static std::vector<std::wstring> CollectBetterVRRegistryValueNames(HKEY key) {
+    std::vector<std::wstring> valueNames;
+    DWORD valueCount = 0;
+    DWORD maxValueNameLength = 0;
+    if (RegQueryInfoKeyW(key, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &valueCount, &maxValueNameLength, nullptr, nullptr, nullptr) != ERROR_SUCCESS) {
+        return valueNames;
+    }
+
+    std::wstring valueName(maxValueNameLength + 1, L'\0');
+    for (DWORD index = 0; index < valueCount; ++index) {
+        DWORD valueNameLength = static_cast<DWORD>(valueName.size());
+        DWORD type = 0;
+        const LONG enumResult = RegEnumValueW(key, index, valueName.empty() ? nullptr : &valueName[0], &valueNameLength, nullptr, &type, nullptr, nullptr);
+        if (enumResult != ERROR_SUCCESS) {
+            continue;
+        }
+
+        valueName.resize(valueNameLength);
+        if (type == REG_DWORD && IsBetterVRRegistryValue(valueName)) {
+            valueNames.push_back(valueName);
+        }
+        valueName.resize(maxValueNameLength + 1);
+    }
+
+    return valueNames;
+}
+
+static bool RemoveBetterVREntriesFromRegistryKey(HKEY rootKey, const wchar_t* registryPath) {
     HKEY key = nullptr;
-    const LONG openResult = RegOpenKeyExW(HKEY_CURRENT_USER, registryPath, 0, KEY_READ | KEY_SET_VALUE, &key);
+    const LONG openResult = RegOpenKeyExW(rootKey, registryPath, 0, KEY_READ | KEY_SET_VALUE, &key);
     if (openResult == ERROR_FILE_NOT_FOUND) {
         return true;
     }
     if (openResult != ERROR_SUCCESS) {
-        LogLine("Failed to open registry key: " + Narrow(std::wstring(registryPath)));
+        LogLine("Failed to open registry key: " + GetRegistryKeyLocation(rootKey, registryPath));
         return false;
     }
 
-    std::vector<std::wstring> valuesToDelete;
-    DWORD valueCount = 0;
-    DWORD maxValueNameLength = 0;
-    if (RegQueryInfoKeyW(key, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &valueCount, &maxValueNameLength, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-        std::wstring valueName(maxValueNameLength + 1, L'\0');
-        for (DWORD index = 0; index < valueCount; ++index) {
-            DWORD valueNameLength = static_cast<DWORD>(valueName.size());
-            DWORD type = 0;
-            const LONG enumResult = RegEnumValueW(key, index, valueName.empty() ? nullptr : &valueName[0], &valueNameLength, nullptr, &type, nullptr, nullptr);
-            if (enumResult != ERROR_SUCCESS) {
-                continue;
-            }
-
-            valueName.resize(valueNameLength);
-            if (type == REG_DWORD && IsBetterVRRegistryValue(valueName)) {
-                valuesToDelete.push_back(valueName);
-            }
-            valueName.resize(maxValueNameLength + 1);
-        }
-    }
+    const std::vector<std::wstring> valuesToDelete = CollectBetterVRRegistryValueNames(key);
 
     bool success = true;
     for (const std::wstring& valueName : valuesToDelete) {
         const LONG deleteResult = RegDeleteValueW(key, valueName.c_str());
         if (deleteResult == ERROR_SUCCESS || deleteResult == ERROR_FILE_NOT_FOUND) {
-            LogLine("Removed Vulkan layer registration: " + Narrow(valueName));
+            LogLine("Removed Vulkan layer registration from " + GetRegistryKeyLocation(rootKey, registryPath) + ": " + Narrow(valueName));
         }
         else {
-            LogLine("Failed to remove Vulkan layer registration: " + Narrow(valueName));
+            LogLine("Failed to remove Vulkan layer registration from " + GetRegistryKeyLocation(rootKey, registryPath) + ": " + Narrow(valueName));
             success = false;
         }
     }
@@ -299,43 +342,73 @@ static bool RemoveBetterVREntriesFromRegistryKey(const wchar_t* registryPath) {
     return success;
 }
 
-static bool RemoveBetterVRLayerRegistryEntries() {
-    bool success = true;
-    // Clean up entries from the current implicit layers location
-    if (!RemoveBetterVREntriesFromRegistryKey(VulkanImplicitLayersRegistryPath)) {
-        success = false;
+static bool RegistryKeyContainsBetterVREntries(HKEY rootKey, const wchar_t* registryPath) {
+    HKEY key = nullptr;
+    const LONG openResult = RegOpenKeyExW(rootKey, registryPath, 0, KEY_READ, &key);
+    if (openResult == ERROR_FILE_NOT_FOUND) {
+        return false;
     }
-    // Also clean up stale entries from the old explicit layers location
-    if (!RemoveBetterVREntriesFromRegistryKey(L"SOFTWARE\\Khronos\\Vulkan\\ExplicitLayers")) {
-        success = false;
-    }
-    return success;
-}
-
-static bool RegisterImplicitLayer(const LauncherPaths& paths) {
-    if (!RemoveBetterVRLayerRegistryEntries()) {
+    if (openResult != ERROR_SUCCESS) {
+        LogLine("Failed to inspect registry key: " + GetRegistryKeyLocation(rootKey, registryPath));
         return false;
     }
 
+    const bool containsEntries = !CollectBetterVRRegistryValueNames(key).empty();
+    RegCloseKey(key);
+    return containsEntries;
+}
+
+static bool RemoveBetterVRLayerRegistryEntries(bool canModifyMachineWideEntries) {
+    bool success = true;
+    if (!RemoveBetterVREntriesFromRegistryKey(HKEY_CURRENT_USER, VulkanImplicitLayersRegistryPath)) {
+        success = false;
+    }
+    if (!RemoveBetterVREntriesFromRegistryKey(HKEY_CURRENT_USER, VulkanExplicitLayersRegistryPath)) {
+        success = false;
+    }
+
+    if (canModifyMachineWideEntries) {
+        if (!RemoveBetterVREntriesFromRegistryKey(HKEY_LOCAL_MACHINE, VulkanImplicitLayersRegistryPath)) {
+            success = false;
+        }
+        if (!RemoveBetterVREntriesFromRegistryKey(HKEY_LOCAL_MACHINE, VulkanExplicitLayersRegistryPath)) {
+            success = false;
+        }
+    }
+    else if (RegistryKeyContainsBetterVREntries(HKEY_LOCAL_MACHINE, VulkanImplicitLayersRegistryPath)
+        || RegistryKeyContainsBetterVREntries(HKEY_LOCAL_MACHINE, VulkanExplicitLayersRegistryPath)) {
+        LogLine("Machine-wide BetterVR Vulkan layer registrations are still present. Keeping the BetterVR files in place because a non-elevated cleanup cannot remove those registry entries.");
+    }
+
+    return success;
+}
+
+static bool RegisterImplicitLayer(const LauncherPaths& paths, LayerInstallScope scope) {
+    if (!RemoveBetterVRLayerRegistryEntries(scope == LayerInstallScope::Machine)) {
+        return false;
+    }
+
+    const HKEY rootKey = scope == LayerInstallScope::Machine ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+    const fs::path layerManifestPath = GetScopedLayerManifestPath(paths, scope);
     HKEY key = nullptr;
     DWORD disposition = 0;
-    const LONG createResult = RegCreateKeyExW(HKEY_CURRENT_USER, VulkanImplicitLayersRegistryPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, &disposition);
+    const LONG createResult = RegCreateKeyExW(rootKey, VulkanImplicitLayersRegistryPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, &disposition);
     if (createResult != ERROR_SUCCESS) {
-        LogLine("Failed to create Vulkan ImplicitLayers registry key");
+        LogLine("Failed to create Vulkan ImplicitLayers registry key: " + GetRegistryKeyLocation(rootKey, VulkanImplicitLayersRegistryPath));
         return false;
     }
 
     const DWORD enabled = 0;
-    const std::wstring valueName = paths.runtimeLayerJson.wstring();
+    const std::wstring valueName = layerManifestPath.wstring();
     const LONG setResult = RegSetValueExW(key, valueName.c_str(), 0, REG_DWORD, reinterpret_cast<const BYTE*>(&enabled), sizeof(enabled));
     RegCloseKey(key);
 
     if (setResult != ERROR_SUCCESS) {
-        LogLine("Failed to register implicit Vulkan layer: " + Narrow(paths.runtimeLayerJson));
+        LogLine("Failed to register implicit Vulkan layer in " + GetRegistryKeyLocation(rootKey, VulkanImplicitLayersRegistryPath) + ": " + Narrow(layerManifestPath));
         return false;
     }
 
-    LogLine("Registered implicit Vulkan layer: " + Narrow(paths.runtimeLayerJson));
+    LogLine("Registered implicit Vulkan layer in " + GetRegistryKeyLocation(rootKey, VulkanImplicitLayersRegistryPath) + ": " + Narrow(layerManifestPath));
     return true;
 }
 
@@ -352,7 +425,49 @@ static std::vector<fs::path> CollectInstalledGraphicPackPaths(const LauncherPath
     return result;
 }
 
-static bool PatchLayerManifest(const LauncherPaths& paths) {
+static bool WritePatchedLayerManifest(const fs::path& outputPath, const std::string& templateContents, const std::string& escapedDllPath, const char* enableEnvironmentVariable) {
+    std::string contents = templateContents;
+    auto replaceToken = [&contents](std::string_view token, std::string_view value) {
+        bool replaced = false;
+        size_t position = 0;
+        while ((position = contents.find(token, position)) != std::string::npos) {
+            contents.replace(position, token.size(), value);
+            position += value.size();
+            replaced = true;
+        }
+        return replaced;
+    };
+
+    if (!replaceToken("${BETTERVR_LAYER_DLL_PATH}", escapedDllPath)) {
+        LogLine("Could not find BETTERVR_LAYER_DLL_PATH token in layer manifest template");
+        return false;
+    }
+    if (!replaceToken("${BETTERVR_LAYER_ENABLE_ENV}", enableEnvironmentVariable)) {
+        LogLine("Could not find BETTERVR_LAYER_ENABLE_ENV token in layer manifest template");
+        return false;
+    }
+    if (!replaceToken("${BETTERVR_LAYER_DISABLE_ENV}", "DISABLE_BETTERVR_MOD")) {
+        LogLine("Could not find BETTERVR_LAYER_DISABLE_ENV token in layer manifest template");
+        return false;
+    }
+
+    std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        LogLine("Failed to open layer manifest for writing: " + Narrow(outputPath));
+        return false;
+    }
+
+    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    if (!output.good()) {
+        LogLine("Failed to write patched layer manifest: " + Narrow(outputPath));
+        return false;
+    }
+
+    LogLine("Prepared Vulkan layer manifest: " + Narrow(outputPath) + " (enable env: " + std::string(enableEnvironmentVariable) + ")");
+    return true;
+}
+
+static bool PatchLayerManifests(const LauncherPaths& paths) {
     std::ifstream input(paths.runtimeLayerJson, std::ios::binary);
     if (!input.is_open()) {
         LogLine("Failed to open layer manifest for patching: " + Narrow(paths.runtimeLayerJson));
@@ -377,43 +492,28 @@ static bool PatchLayerManifest(const LauncherPaths& paths) {
         }
     }
 
-    const std::string oldValue = "\"library_path\": \"${BETTERVR_LAYER_DLL_PATH}\"";
-    const std::string newValue = "\"library_path\": \"" + escapedDllPath + "\"";
-    const size_t position = contents.find(oldValue);
-    if (position == std::string::npos) {
-        LogLine("Could not find library_path in layer manifest to patch");
+    if (!WritePatchedLayerManifest(paths.runtimeLayerJson, contents, escapedDllPath, "ENABLE_BETTERVR_MOD")) {
+        return false;
+    }
+    if (!WritePatchedLayerManifest(GetScopedLayerManifestPath(paths, LayerInstallScope::Machine), contents, escapedDllPath, "ENABLE_BETTERVR_MOD_ADMIN")) {
         return false;
     }
 
-    contents.replace(position, oldValue.size(), newValue);
-
-    std::ofstream output(paths.runtimeLayerJson, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        LogLine("Failed to open layer manifest for writing: " + Narrow(paths.runtimeLayerJson));
-        return false;
-    }
-
-    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-    if (!output.good()) {
-        LogLine("Failed to write patched layer manifest");
-        return false;
-    }
-
-    LogLine("Patched layer manifest library_path to: " + absoluteDllPath);
+    LogLine("Patched Vulkan layer manifests library_path to: " + absoluteDllPath);
     return true;
 }
 
-static bool PrepareInstalledAssets(const LauncherPaths& paths) {
+static bool PrepareInstalledAssets(const LauncherPaths& paths, LayerInstallScope scope) {
     if (!InstallGraphicPack(paths)) {
         return false;
     }
     if (!ExtractRuntimeFiles(paths)) {
         return false;
     }
-    if (!PatchLayerManifest(paths)) {
+    if (!PatchLayerManifests(paths)) {
         return false;
     }
-    if (!RegisterImplicitLayer(paths)) {
+    if (!RegisterImplicitLayer(paths, scope)) {
         return false;
     }
 
@@ -423,27 +523,35 @@ static bool PrepareInstalledAssets(const LauncherPaths& paths) {
 static bool RemoveInstalledAssets(const LauncherPaths& paths) {
     bool success = true;
     bool removedAnything = false;
-
-    for (const fs::path& packPath : CollectInstalledGraphicPackPaths(paths)) {
-        std::error_code ec;
-        const uintmax_t removedCount = fs::remove_all(packPath, ec);
-        if (ec) {
-            LogLine("Failed to remove BetterVR graphic pack: " + Narrow(packPath) + " (" + ec.message() + ")");
-            success = false;
-            continue;
-        }
-
-        if (removedCount > 0) {
-            LogLine("Removed BetterVR graphic pack: " + Narrow(packPath));
-            removedAnything = true;
-        }
-    }
-
-    if (!RemoveBetterVRLayerRegistryEntries()) {
+    const bool canModifyMachineWideEntries = IsProcessElevated();
+    if (!RemoveBetterVRLayerRegistryEntries(canModifyMachineWideEntries)) {
         success = false;
     }
 
-    if (!removedAnything) {
+    const bool machineWideEntriesRemain = !canModifyMachineWideEntries
+        && (RegistryKeyContainsBetterVREntries(HKEY_LOCAL_MACHINE, VulkanImplicitLayersRegistryPath)
+            || RegistryKeyContainsBetterVREntries(HKEY_LOCAL_MACHINE, VulkanExplicitLayersRegistryPath));
+    if (!machineWideEntriesRemain) {
+        for (const fs::path& packPath : CollectInstalledGraphicPackPaths(paths)) {
+            std::error_code ec;
+            const uintmax_t removedCount = fs::remove_all(packPath, ec);
+            if (ec) {
+                LogLine("Failed to remove BetterVR graphic pack: " + Narrow(packPath) + " (" + ec.message() + ")");
+                success = false;
+                continue;
+            }
+
+            if (removedCount > 0) {
+                LogLine("Removed BetterVR graphic pack: " + Narrow(packPath));
+                removedAnything = true;
+            }
+        }
+    }
+    else {
+        LogLine("Leaving BetterVR files installed because machine-wide Vulkan layer registrations still point at them");
+    }
+
+    if (!removedAnything && !machineWideEntriesRemain) {
         LogLine("No BetterVR installation files were found to remove");
     }
 
@@ -921,14 +1029,15 @@ static void EmbedCemuLog(const LauncherPaths& paths) {
     LogLine("========================================");
 }
 
-static void SetLaunchEnvironment() {
-    SetEnvironmentVariableW(L"ENABLE_BETTERVR_MOD", L"1");
+static void SetLaunchEnvironment(LayerInstallScope scope) {
+    SetEnvironmentVariableW(BetterVREnableEnvironmentVariable, scope == LayerInstallScope::CurrentUser ? L"1" : nullptr);
+    SetEnvironmentVariableW(BetterVRAdminEnableEnvironmentVariable, scope == LayerInstallScope::Machine ? L"1" : nullptr);
     SetEnvironmentVariableW(L"DISABLE_VULKAN_OBS_CAPTURE", L"1");
-    SetEnvironmentVariableW(L"VK_LOADER_DEBUG", L"error,warn");
+    SetEnvironmentVariableW(L"VK_LOADER_DEBUG", L"warn,error,layer");
 }
 
-static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::wstring>& forwardedArgs) {
-    SetLaunchEnvironment();
+static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::wstring>& forwardedArgs, LayerInstallScope scope) {
+    SetLaunchEnvironment(scope);
 
     std::wstring commandLine = L"\"" + paths.cemuExe.wstring() + L"\"";
     bool hasExplicitTitleId = false;
@@ -1005,9 +1114,14 @@ int wmain(int argc, wchar_t** argv) {
         TemporaryDownloadedGraphicsFiles downloadedGraphicsOverrideFiles;
         CleanupLegacyLaunchFiles(paths);
         CleanupDownloadedGraphicsOverrideFiles(paths);
+        const bool processElevated = IsProcessElevated();
+        const LayerInstallScope layerInstallScope = processElevated ? LayerInstallScope::Machine : LayerInstallScope::CurrentUser;
+        LogLine(std::string("Launcher elevation: ") + (processElevated ? "elevated" : "not elevated"));
+        LogLine(std::string("Using ") + (processElevated ? "machine-wide" : "current-user") + " Vulkan layer registration");
 
         bool uninstallRequested = false;
         bool keepInstalled = false;
+        bool installedAssetsPrepared = false;
         std::vector<std::wstring> forwardedArgs;
         forwardedArgs.reserve(static_cast<size_t>(std::max(argc - 1, 0)));
         for (int index = 1; index < argc; ++index) {
@@ -1031,8 +1145,41 @@ int wmain(int argc, wchar_t** argv) {
                 return 1;
             }
 
-            ShowInfoMessage("BetterVR was removed from the graphic pack folders, Vulkan layer registry, and local runtime cache.");
+            if (!processElevated
+                && (RegistryKeyContainsBetterVREntries(HKEY_LOCAL_MACHINE, VulkanImplicitLayersRegistryPath)
+                    || RegistryKeyContainsBetterVREntries(HKEY_LOCAL_MACHINE, VulkanExplicitLayersRegistryPath))) {
+                ShowInfoMessage("BetterVR removed its current-user registrations, but a machine-wide Vulkan layer registration still exists and BetterVR's files were left in place for it. Run the launcher as administrator with --uninstall to remove that leftover admin registration too.");
+            }
+            else {
+                ShowInfoMessage("BetterVR was removed from the graphic pack folders, Vulkan layer registry, and local runtime cache.");
+            }
             return 0;
+        }
+
+        if (!processElevated) {
+            const auto hasStaleMachineWideJsonEntry = [](const wchar_t* registryPath) {
+                HKEY key = nullptr;
+                const LONG openResult = RegOpenKeyExW(HKEY_LOCAL_MACHINE, registryPath, 0, KEY_READ, &key);
+                if (openResult != ERROR_SUCCESS) {
+                    return false;
+                }
+
+                bool found = false;
+                for (const std::wstring& valueName : CollectBetterVRRegistryValueNames(key)) {
+                    if (ToLower(Narrow(fs::path(valueName).filename())) == "bettervr_layer.json") {
+                        found = true;
+                        break;
+                    }
+                }
+
+                RegCloseKey(key);
+                return found;
+            };
+
+            if (hasStaleMachineWideJsonEntry(VulkanImplicitLayersRegistryPath) || hasStaleMachineWideJsonEntry(VulkanExplicitLayersRegistryPath)) {
+                ShowErrorMessage("BetterVR found a stale machine-wide Vulkan layer registration that still uses BetterVR_Layer.json. Run BetterVR_Launcher.exe once as administrator so it can remove that leftover registration, then launch normally again.");
+                return 1;
+            }
         }
 
         if (!std::filesystem::exists(paths.cemuExe)) {
@@ -1046,25 +1193,39 @@ int wmain(int argc, wchar_t** argv) {
             return 1;
         }
 
-        if (!PrepareInstalledAssets(paths)) {
+        if (!PrepareInstalledAssets(paths, layerInstallScope)) {
+            RemoveInstalledAssets(paths);
             ShowErrorMessage("BetterVR could not install its bundled runtime files. Check BetterVR_log.txt for details.");
             return 1;
         }
+        installedAssetsPrepared = true;
+
+        const auto cleanupInstalledAssetsAfterFailure = [&]() {
+            if (!installedAssetsPrepared || keepInstalled) {
+                return;
+            }
+
+            LogLine("Cleaning up installed assets after launch preparation failed");
+            RemoveInstalledAssets(paths);
+            installedAssetsPrepared = false;
+        };
 
         const OpenXRProbeResult probeResult = ProbeOpenXR();
         if (!probeResult.errorMessage.empty()) {
+            cleanupInstalledAssetsAfterFailure();
             ShowErrorMessage(probeResult.errorMessage + "\n\nCheck BetterVR_log.txt for more details.");
             return 1;
         }
 
         if (!InstallDownloadedGraphicsOverride(paths, probeResult, downloadedGraphicsOverrideFiles)) {
+            cleanupInstalledAssetsAfterFailure();
             ShowErrorMessage("BetterVR could not install its temporary BotW Graphics override. Check BetterVR_log.txt for details.");
             return 1;
         }
 
         LogVulkanDetails();
 
-        const int exitCode = LaunchCemuAndWait(paths, forwardedArgs);
+        const int exitCode = LaunchCemuAndWait(paths, forwardedArgs, layerInstallScope);
 
         EmbedCemuLog(paths);
         downloadedGraphicsOverrideFiles.DeleteAll();
@@ -1072,6 +1233,7 @@ int wmain(int argc, wchar_t** argv) {
         if (!keepInstalled) {
             LogLine("Cleaning up installed assets after Cemu exit...");
             RemoveInstalledAssets(paths);
+            installedAssetsPrepared = false;
         }
         else {
             LogLine("Skipping cleanup because --keep-installed was specified");

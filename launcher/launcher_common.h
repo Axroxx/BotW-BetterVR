@@ -10,7 +10,7 @@
 #include <string>
 
 #ifndef BETTERVR_LAUNCHER_VERSION
-#define BETTERVR_LAUNCHER_VERSION "0.9.14"
+#define BETTERVR_LAUNCHER_VERSION "0.9.16"
 #endif
 
 namespace fs = std::filesystem;
