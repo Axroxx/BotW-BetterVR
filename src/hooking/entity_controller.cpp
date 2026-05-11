@@ -44,7 +44,6 @@ static_assert(sizeof(RoomscaleRaycastScratch) == 0x40, "Roomscale scratch size m
 struct RoomscaleState {
     bool hasPreviousHeadPos = false;
     bool hasAppliedHeadPos = false;
-    bool hasAppliedBodyRotation = false;
     bool isResolving = false;
     bool isProbeOnly = false;
     bool isBlocked = false;
@@ -65,8 +64,6 @@ struct RoomscaleState {
     uint32_t currentStepSearchIteration = 0;
     uint32_t attemptIndex = 0;
     uint32_t maxAttempts = 0;
-    glm::fquat appliedBodyRotation = glm::identity<glm::fquat>();
-    glm::fquat targetBodyRotation = glm::identity<glm::fquat>();
     RoomscaleResolvePhase resolvePhase = RoomscaleResolvePhase_Sweep;
 };
 
@@ -97,7 +94,6 @@ constexpr float kRoomscaleDebugFallbackBodyHalfHeight = 0.9f;
 constexpr uint32_t kRoomscaleBinarySearchIterations = 4;
 constexpr uint32_t kMaxRoomscaleRaycastAttempts = 8;
 constexpr uint32_t kRoomscaleGroundHit = 15;
-constexpr float kRoomscaleBodyRotationEpsilonRadians = glm::radians(1.0f);
 
 struct RoomscaleDebugBody {
     glm::fvec3 centerOffset = glm::fvec3(0.0f, kRoomscaleDebugFallbackBodyHalfHeight, 0.0f);
@@ -377,13 +373,10 @@ static void ClearRoomscaleResolveState() {
 static void ResetRoomscaleState() {
     s_roomscaleState.hasPreviousHeadPos = false;
     s_roomscaleState.hasAppliedHeadPos = false;
-    s_roomscaleState.hasAppliedBodyRotation = false;
     s_roomscaleState.isBlocked = false;
     s_roomscaleState.previousHeadPos = glm::fvec3(0.0f);
     s_roomscaleState.appliedHeadPos = glm::fvec3(0.0f);
     s_roomscaleState.trackedHeadPos = glm::fvec3(0.0f);
-    s_roomscaleState.appliedBodyRotation = glm::identity<glm::fquat>();
-    s_roomscaleState.targetBodyRotation = glm::identity<glm::fquat>();
     ClearRoomscaleResolveState();
     s_roomscaleFadeAmount.store(0.0f, std::memory_order_relaxed);
 }
@@ -478,73 +471,6 @@ static void SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode mode) {
     Log::print<PPC>("Roomscale body drive mode switched: {}", GetRoomscaleBodyDriveModeName(mode));
 }
 
-static float GetRoomscaleBodyRotationDelta(const glm::fquat& a, const glm::fquat& b) {
-    float absDot = std::abs(glm::dot(glm::normalize(a), glm::normalize(b)));
-    absDot = glm::clamp(absDot, 0.0f, 1.0f);
-    return 2.0f * std::acos(absDot);
-}
-
-static std::optional<glm::fquat> TryGetCurrentRoomscaleBodyRotation() {
-    if (CemuHooks::s_playerMtxAddress == 0) {
-        return std::nullopt;
-    }
-
-    auto* renderer = VRManager::instance().XR->GetRenderer();
-    if (renderer == nullptr) {
-        return std::nullopt;
-    }
-
-    std::optional<glm::fmat4> headsetPose = renderer->GetMiddlePose();
-    if (!headsetPose.has_value()) {
-        return std::nullopt;
-    }
-
-    glm::fmat4 playerWorldMtx = glm::fmat4(CemuHooks::getMemory<BEMatrix34>(CemuHooks::s_playerMtxAddress).getLEMatrix());
-    glm::fmat4 headsetModel = glm::inverse(playerWorldMtx) * CemuHooks::s_lastCameraMtx * headsetPose.value();
-    headsetModel[3].x = 0.0f;
-    headsetModel[3].z = 0.0f;
-
-    glm::fquat headsetRot = glm::quat_cast(headsetModel);
-    float yProj = glm::dot(glm::fvec3(headsetRot.x, headsetRot.y, headsetRot.z), glm::fvec3(0.0f, 1.0f, 0.0f));
-    glm::fquat localYaw(headsetRot.w, 0.0f, yProj, 0.0f);
-    float lenSq = glm::dot(localYaw, localYaw);
-    if (lenSq <= 0.000001f) {
-        localYaw = glm::identity<glm::fquat>();
-    } else {
-        localYaw *= 1.0f / std::sqrt(lenSq);
-    }
-
-    localYaw *= glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
-    glm::fquat playerWorldRot = glm::quat_cast(playerWorldMtx);
-    return glm::normalize(playerWorldRot * localYaw);
-}
-
-static bool ShouldApplyRoomscaleBodyRotationUpdate() {
-    if (s_roomscaleBodyDriveMode != RoomscaleBodyDriveMode::Enabled || !s_roomscaleState.hasAppliedBodyRotation) {
-        return false;
-    }
-
-    if (GetSettings().ForcePhysicsModelToFollowHeadsetYaw()) {
-        return true;
-    }
-
-    return GetRoomscaleBodyRotationDelta(s_roomscaleState.appliedBodyRotation, s_roomscaleState.targetBodyRotation) > kRoomscaleBodyRotationEpsilonRadians;
-}
-
-static void PrimeRoomscaleBodyRotationBaseline() {
-    std::optional<glm::fquat> bodyRotation = TryGetCurrentRoomscaleBodyRotation();
-    if (!bodyRotation.has_value()) {
-        s_roomscaleState.hasAppliedBodyRotation = false;
-        s_roomscaleState.appliedBodyRotation = glm::identity<glm::fquat>();
-        s_roomscaleState.targetBodyRotation = glm::identity<glm::fquat>();
-        return;
-    }
-
-    s_roomscaleState.hasAppliedBodyRotation = true;
-    s_roomscaleState.appliedBodyRotation = bodyRotation.value();
-    s_roomscaleState.targetBodyRotation = bodyRotation.value();
-}
-
 static void PrimeRoomscaleBaseline(const glm::fvec3& headPos) {
     s_roomscaleState.previousHeadPos = headPos;
     s_roomscaleState.appliedHeadPos = headPos;
@@ -552,7 +478,6 @@ static void PrimeRoomscaleBaseline(const glm::fvec3& headPos) {
     s_roomscaleState.hasPreviousHeadPos = true;
     s_roomscaleState.hasAppliedHeadPos = true;
     s_roomscaleState.isBlocked = false;
-    PrimeRoomscaleBodyRotationBaseline();
     ClearRoomscaleResolveState();
     UpdateRoomscaleFade();
 }
@@ -632,15 +557,7 @@ static bool TryGetRoomscaleMoveDelta(uint32_t controller, glm::fvec3& currentHea
         return false;
     }
 
-    std::optional<glm::fquat> currentBodyRotation = TryGetCurrentRoomscaleBodyRotation();
-    if (!currentBodyRotation.has_value()) {
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
-    s_roomscaleState.targetBodyRotation = currentBodyRotation.value();
-
-    if (!s_roomscaleState.hasPreviousHeadPos || !s_roomscaleState.hasAppliedBodyRotation) {
+    if (!s_roomscaleState.hasPreviousHeadPos) {
         PrimeRoomscaleBaseline(currentHeadPos);
         return false;
     }
@@ -719,17 +636,6 @@ void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
         glm::fvec3 residualWorldDelta = glm::fmat3(CemuHooks::s_lastCameraMtx) * residual;
         residualWorldDelta.y = 0.0f;
         if (!s_roomscaleState.isBlocked || glm::dot(residualWorldDelta, residualWorldDelta) < kMinRoomscaleMoveDistanceSq) {
-            if (ShouldApplyRoomscaleBodyRotationUpdate()) {
-                s_roomscaleState.remainingRawDelta = glm::fvec3(0.0f);
-                s_roomscaleState.remainingWorldDelta = glm::fvec3(0.0f);
-                s_roomscaleState.attemptIndex = 0;
-                s_roomscaleState.maxAttempts = 0;
-                s_roomscaleState.isResolving = true;
-                s_roomscaleState.isProbeOnly = false;
-                hCPU->gpr[3] = RoomscaleHookResult_Cast;
-                return;
-            }
-
             UpdateRoomscaleFade();
             return;
         }
@@ -823,12 +729,12 @@ void CemuHooks::hook_BuildRoomscaleWarpTransform(PPCInterpreter_t* hCPU) {
     uint32_t transformPtr = hCPU->gpr[4];
 
     BEVec3 currentPos = {};
+    BEMatrix34 transform = {};
     readMemory(currentPosPtr, &currentPos);
+    readMemory(transformPtr, &transform);
 
-    BEMatrix34 transform(currentPos.getLE(), s_roomscaleState.targetBodyRotation);
+    transform.setPos(currentPos.getLE());
     writeMemory(transformPtr, &transform);
-    s_roomscaleState.appliedBodyRotation = s_roomscaleState.targetBodyRotation;
-    s_roomscaleState.hasAppliedBodyRotation = true;
 }
 
 void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {

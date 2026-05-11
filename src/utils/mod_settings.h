@@ -724,7 +724,6 @@ struct ModSettings {
     // advanced settings
     BoolSetting enableDebugOverlay = BoolSetting("EnableDebugOverlay", false);
     BoolSetting alwaysPreventFirstPersonCutsceneCameraMovement = BoolSetting("AlwaysPreventFirstPersonCutsceneCameraMovement", false);
-    BoolSetting forcePhysicsModelToFollowHeadsetYaw = BoolSetting("ForcePhysicsModelToFollowHeadsetYaw", false);
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
@@ -768,7 +767,6 @@ struct ModSettings {
             &hudSize,
             &enableDebugOverlay,
             &alwaysPreventFirstPersonCutsceneCameraMovement,
-            &forcePhysicsModelToFollowHeadsetYaw,
             &buggyAngularVelocity,
             &performanceOverlay,
             &performanceOverlayFrequency,
@@ -842,7 +840,6 @@ struct ModSettings {
 
     bool ShowDebugOverlay() const { return enableDebugOverlay; }
     bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
-    bool ForcePhysicsModelToFollowHeadsetYaw() const { return forcePhysicsModelToFollowHeadsetYaw; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
@@ -864,7 +861,6 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - GUI Follow Setting: {}\n", DoesUIFollowGaze() ? "Follow Looking Direction" : "Fixed");
         std::format_to(std::back_inserter(buffer), " - Player Height: {} meters\n", GetPlayerHeightOffset());
         std::format_to(std::back_inserter(buffer), " - Debug Overlay: {}\n", ShowDebugOverlay() ? "Enabled" : "Disabled");
-        std::format_to(std::back_inserter(buffer), " - Always Force Physics Model To Follow Headset Yaw: {}\n", ForcePhysicsModelToFollowHeadsetYaw() ? "Enabled" : "Disabled");
         std::format_to(std::back_inserter(buffer), " - Boot Directly Into BotW: {}\n", ShouldBootDirectlyIntoGame() ? "Enabled" : "Disabled");
         if (!bootDirectlyTitleId.Get().empty()) {
             std::format_to(std::back_inserter(buffer), " - Saved Direct Boot Title ID: {}\n", bootDirectlyTitleId.Get());

@@ -11,7 +11,8 @@ RoomscaleHit = RoomscaleScratch + 0x24
 RoomscaleGroundHit = RoomscaleScratch + 0x30
 RoomscaleQueryType = RoomscaleScratch + 0x34
 RoomscaleSweepRadius = RoomscaleScratch + 0x38
-RoomscaleOwnLayer = 0x60
+RoomscaleSavedCurrent = 0x60
+RoomscaleOwnLayer = 0x6C
 RoomscaleSavedLR = 0x70
 RoomscaleQuery = 0x80
 RoomscaleShapeVtable = RoomscaleQuery + 0x3C
@@ -135,14 +136,24 @@ beq ApplyRoomscaleAfterPlayerVelocity_Loop
 b ApplyRoomscaleAfterPlayerVelocity_Continue
 
 ApplyRoomscaleAfterPlayerVelocity_Warp:
-addi r3, r1, RoomscaleCurrent
-addi r4, r1, RoomscaleScratch
-bla import.coreinit.hook_BuildRoomscaleWarpTransform
-lwz r31, 0x18(r1)
+lfs f0, RoomscaleCurrent + 0x00(r1)
+stfs f0, RoomscaleSavedCurrent + 0x00(r1)
+lfs f0, RoomscaleCurrent + 0x04(r1)
+stfs f0, RoomscaleSavedCurrent + 0x04(r1)
+lfs f0, RoomscaleCurrent + 0x08(r1)
+stfs f0, RoomscaleSavedCurrent + 0x08(r1)
 
 lwz r11, 0xE8(r31)
 extrwi. r0, r11, 1, 15
 beq ApplyRoomscaleAfterPlayerVelocity_WarpMainBody
+
+lwz r3, 0x230(r31)
+addi r4, r1, RoomscaleScratch
+bl RigidBody_getTransform
+addi r3, r1, RoomscaleSavedCurrent
+addi r4, r1, RoomscaleScratch
+bla import.coreinit.hook_BuildRoomscaleWarpTransform
+lwz r31, 0x18(r1)
 
 lwz r3, 0x230(r31)
 addi r4, r1, RoomscaleScratch
@@ -162,6 +173,14 @@ mtlr r12
 b ApplyRoomscaleAfterPlayerVelocity_Continue
 
 ApplyRoomscaleAfterPlayerVelocity_WarpMainBody:
+lwz r3, 0x4(r31)
+addi r4, r1, RoomscaleScratch
+bl RigidBody_getTransform
+addi r3, r1, RoomscaleSavedCurrent
+addi r4, r1, RoomscaleScratch
+bla import.coreinit.hook_BuildRoomscaleWarpTransform
+lwz r31, 0x18(r1)
+
 lwz r3, 0x4(r31)
 addi r4, r1, RoomscaleScratch
 li r5, 1
@@ -198,6 +217,7 @@ bctr
 0x0344DCFC = ContinueAfterApplyRoomscaleAfterPlayerVelocity:
 0x0344B864 = SyncPhysicsFieldAfterSetPosition:
 0x0344C0B8 = RigidBody_getPosition:
+0x03488A30 = RigidBody_getTransform:
 0x03486D84 = OriginalSetRigidBodyPosition:
 0x03486CD8 = OriginalSetRigidBodyTransform:
 0x034D0170 = ShapeCast_setStartAndEnd:
