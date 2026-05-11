@@ -924,6 +924,7 @@ static void EmbedCemuLog(const LauncherPaths& paths) {
 static void SetLaunchEnvironment() {
     SetEnvironmentVariableW(L"ENABLE_BETTERVR_MOD", L"1");
     SetEnvironmentVariableW(L"DISABLE_VULKAN_OBS_CAPTURE", L"1");
+    SetEnvironmentVariableW(L"VK_LOADER_DEBUG", L"error,warn");
 }
 
 static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::wstring>& forwardedArgs) {
@@ -951,10 +952,32 @@ static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo{};
 
-    if (!CreateProcessW(paths.cemuExe.c_str(), commandLine.empty() ? nullptr : &commandLine[0], nullptr, nullptr, FALSE, 0, nullptr, paths.launcherDir.c_str(), &startupInfo, &processInfo)) {
+    SECURITY_ATTRIBUTES securityAttributes{};
+    securityAttributes.nLength = sizeof(securityAttributes);
+    securityAttributes.bInheritHandle = TRUE;
+
+    HANDLE stderrHandle = CreateFileW(paths.launcherLog.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &securityAttributes, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (stderrHandle == INVALID_HANDLE_VALUE) {
+        LogLine("Failed to open BetterVR_log.txt for Vulkan loader stderr capture: " + Narrow(paths.launcherLog));
+        return 1;
+    }
+
+    LogLine("========================================");
+    LogLine("Beginning Vulkan Loader errors");
+    LogLine("========================================");
+
+    startupInfo.dwFlags |= STARTF_USESTDHANDLES;
+    startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startupInfo.hStdError = stderrHandle;
+
+    if (!CreateProcessW(paths.cemuExe.c_str(), commandLine.empty() ? nullptr : &commandLine[0], nullptr, nullptr, TRUE, 0, nullptr, paths.launcherDir.c_str(), &startupInfo, &processInfo)) {
+        CloseHandle(stderrHandle);
         LogLine("CreateProcessW failed");
         return 1;
     }
+
+    CloseHandle(stderrHandle);
 
     LogLine("Closing launcher log to hand off to the VR layer");
     CloseLog();
@@ -968,6 +991,9 @@ static int LaunchCemuAndWait(const LauncherPaths& paths, const std::vector<std::
     CloseHandle(processInfo.hThread);
     CloseHandle(processInfo.hProcess);
 
+    LogLine("========================================");
+    LogLine("End of Vulkan Loader errors");
+    LogLine("========================================");
     LogLine("Cemu exited with code " + std::to_string(exitCode));
     return static_cast<int>(exitCode);
 }
