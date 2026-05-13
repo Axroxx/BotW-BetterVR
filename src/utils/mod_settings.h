@@ -722,7 +722,10 @@ struct ModSettings {
     FloatSetting<float> hudSize = FloatSetting<float>("HudSize", 0.85f, 0.4f, 1.75f);
 
     // advanced settings
-    BoolSetting enableDebugOverlay = BoolSetting("EnableDebugOverlay", false);
+    BoolSetting enableDebuggerTools = BoolSetting("EnableDebugOverlay", false);
+    BoolSetting debugShowEntityBoxesIn3DView = BoolSetting("DebugShowEntityBoxesIn3DView", false);
+    BoolSetting debugShowRoomscalePhysics = BoolSetting("DebugShowRoomscalePhysics", false);
+    BoolSetting debugShowRaycastLines = BoolSetting("DebugShowRaycastLines", false);
     BoolSetting alwaysPreventFirstPersonCutsceneCameraMovement = BoolSetting("AlwaysPreventFirstPersonCutsceneCameraMovement", false);
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR });
@@ -765,7 +768,10 @@ struct ModSettings {
             &uiFollowsGaze,
             &hudDistance,
             &hudSize,
-            &enableDebugOverlay,
+            &enableDebuggerTools,
+            &debugShowEntityBoxesIn3DView,
+            &debugShowRaycastLines,
+            &debugShowRoomscalePhysics,
             &alwaysPreventFirstPersonCutsceneCameraMovement,
             &buggyAngularVelocity,
             &performanceOverlay,
@@ -823,32 +829,24 @@ struct ModSettings {
     bool IsLeftHanded() const { return leftHanded; }
     float GetPlayerHeightOffset() const {
         // disable height offset in third-person mode
-        if (GetCameraMode() == CameraMode::THIRD_PERSON) {
-            return 0.0f;
-        }
-
-        return playerHeightOffset;
+        return GetCameraMode() == CameraMode::THIRD_PERSON ? 0.0f : playerHeightOffset;
     }
     EventMode GetCutsceneCameraMode() const {
         // if in third-person mode, always use third-person cutscene camera
-        if (GetCameraMode() == CameraMode::THIRD_PERSON) {
-            return EventMode::ALWAYS_THIRD_PERSON;
-        }
-        return cutsceneCameraMode;
+        return GetCameraMode() == CameraMode::THIRD_PERSON ? EventMode::ALWAYS_THIRD_PERSON : cutsceneCameraMode;
     }
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
-    bool ShowDebugOverlay() const { return enableDebugOverlay; }
     bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
-    float GetWeaponDamageOutputScale() const {
-        if (GetSwingSensitivity() != SwingSensitivity::SWING_CUSTOM) {
-            return 1.0f;
-        }
-        return customDamageOutputScale;
-    }
+    float GetWeaponDamageOutputScale() const { return GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM ? customDamageOutputScale : 1.0f; }
+
+    bool IsDebuggingToolsEnabled() const;
+    bool ShouldShowRoomPhysics() const { return IsDebuggingToolsEnabled() && debugShowRoomscalePhysics; }
+    bool ShouldShowEntityBoxesIn3DView() const { return IsDebuggingToolsEnabled() && debugShowEntityBoxesIn3DView; }
+    bool ShouldShowRaycastLines() const { return IsDebuggingToolsEnabled() && debugShowRaycastLines; }
 
     // By default BotW's camera uses 0.1f for near plane and 25000.0f for far plane, except maybe some indoor areas? But for simplicity, we'll use the default values everywhere.
     float GetZNear() const { return 0.1f; }
@@ -860,7 +858,6 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Left Handed: {}\n", IsLeftHanded() ? "Yes" : "No");
         std::format_to(std::back_inserter(buffer), " - GUI Follow Setting: {}\n", DoesUIFollowGaze() ? "Follow Looking Direction" : "Fixed");
         std::format_to(std::back_inserter(buffer), " - Player Height: {} meters\n", GetPlayerHeightOffset());
-        std::format_to(std::back_inserter(buffer), " - Debug Overlay: {}\n", ShowDebugOverlay() ? "Enabled" : "Disabled");
         std::format_to(std::back_inserter(buffer), " - Boot Directly Into BotW: {}\n", ShouldBootDirectlyIntoGame() ? "Enabled" : "Disabled");
         if (!bootDirectlyTitleId.Get().empty()) {
             std::format_to(std::back_inserter(buffer), " - Saved Direct Boot Title ID: {}\n", bootDirectlyTitleId.Get());

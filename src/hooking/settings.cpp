@@ -8,6 +8,10 @@
 
 ModSettings g_settings = {};
 
+bool ModSettings::IsDebuggingToolsEnabled() const {
+    return VRManager::instance().XR->GetRenderer() != nullptr && VRManager::instance().Hooks->m_entityDebugger && GetSettings().enableDebuggerTools;
+}
+
 ModSettings& GetSettings() {
     return g_settings;
 }
@@ -142,7 +146,7 @@ void CemuHooks::hook_UpdateSettings(PPCInterpreter_t* hCPU) {
 
     uint32_t ppc_tableOfCutsceneEventSettings = hCPU->gpr[6];
     
-    if (GetSettings().ShowDebugOverlay() && VRManager::instance().Hooks->m_entityDebugger) {
+    if (GetSettings().IsDebuggingToolsEnabled()) {
         VRManager::instance().Hooks->m_entityDebugger->UpdateEntityMemory();
     }
 

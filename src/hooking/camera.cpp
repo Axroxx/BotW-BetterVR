@@ -548,11 +548,7 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    if (UseBlackBarsDuringEvents()) {
-        return;
-    }
-
-    if (UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
+    if (UseBlackBarsDuringEvents() || UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
         return;
     }
 
@@ -902,11 +898,7 @@ void CemuHooks::hook_FixLadder(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (VRManager::instance().XR->GetRenderer() == nullptr || !GetSettings().ShowDebugOverlay()) {
-        return;
-    }
-
-    if (!VRManager::instance().Hooks->m_entityDebugger || !VRManager::instance().Hooks->m_entityDebugger->ShouldDrawRaycastLines()) {
+    if (!GetSettings().ShouldShowRaycastLines()) {
         return;
     }
 

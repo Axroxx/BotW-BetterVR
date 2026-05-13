@@ -197,6 +197,13 @@ public:
         int GetHelpImagePagesCount() const { return m_helpImages.size(); };
 
     private:
+        void DrawSettingsTab(const ImVec2& windowWidth, bool* changed);
+        void DrawDebugTab(bool* changed);
+        void DrawHelpGuideTab();
+        void DrawFPSOverlayTab(const ImVec2& windowWidth, bool* changed);
+        void DrawCreditsTab();
+        void DrawCustomAttackSensitivityTab(const ImVec2& windowWidth, bool* changed);
+
         VkDescriptorPool m_descriptorPool;
         VkRenderPass m_renderPass;
         struct HelpImage {

@@ -62,7 +62,7 @@ struct WeaponProfile {
 };
 
 struct WeaponDebugSnapshot {
-    WeaponType weaponType = LargeSword;
+    WeaponType weaponType = WeaponType::LargeSword;
     AttackType lockedAttackType = AttackType::None;
     XrTime sampleTime = 0;
     bool attackActive = false;
@@ -123,7 +123,7 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
     p.slashTravelAngle = glm::pi<float>() / 6.0f; // 30 deg
 
     p.maxBadDuration = 0.033f;
-    p.goodSampleGracePeriod = XrTime(80e6); // 80 ms
+    p.goodSampleGracePeriod = (XrTime)80e6; // 80 ms
     p.minGoodSwingDuration = 0.025f;
     p.minGoodStabDuration = 0.025f;
     p.smoothingTimeConstant = 0.030f;
@@ -145,7 +145,7 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             p.slashSpeedThreshold = 1.5f;
             p.slashTravelAngle = glm::pi<float>() / 5.0f; // 36 deg
             p.maxBadDuration = 0.022f;
-            p.goodSampleGracePeriod = XrTime(40e6); // 40 ms
+            p.goodSampleGracePeriod = (XrTime)40e6; // 40 ms
             p.minGoodSwingDuration = 0.040f;
             p.minGoodStabDuration = 0.030f;
             p.smoothingTimeConstant = 0.020f;
@@ -166,7 +166,7 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             p.slashTravelAngle = glm::radians(float(settings.customSlashTravelAngle));
 
             p.maxBadDuration = settings.customMaxBadDuration;
-            p.goodSampleGracePeriod = XrTime(std::llround(double(settings.customGoodSampleGracePeriod) * 1e6));
+            p.goodSampleGracePeriod = (XrTime)std::llround((double)(settings.customGoodSampleGracePeriod) * 1e6);
             p.minGoodSwingDuration = settings.customMinGoodSwingDuration;
             p.minGoodStabDuration = settings.customMinGoodStabDuration;
             p.smoothingTimeConstant = settings.customSmoothingTimeConstant;
@@ -270,7 +270,7 @@ private:
     float m_calibratedArmLength = 0.55f;
 
     // ---- Weapon type ----
-    WeaponType m_weaponType = LargeSword;
+    WeaponType m_weaponType = WeaponType::LargeSword;
 
     // ---- Reference velocities for swing power normalization ----
     static constexpr float REFERENCE_SLASH_VELOCITY = 10.0f;  // rad/s for a strong slash

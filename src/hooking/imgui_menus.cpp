@@ -3,10 +3,86 @@
 #include "imgui_menus.h"
 
 #include "cemu_hooks.h"
+#include "entity_debugger.h"
+#include "instance.h"
+#include "rendering/renderer.h"
 #include "rendering/openxr.h"
+#include "utils/mod_settings.h"
 #include "weapon.h"
 
-namespace {
+template <typename DrawWidget>
+static void DrawSettingRow(const ImVec2& windowWidth, const char* label, DrawWidget&& drawWidget) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine();
+
+    float startPos = windowWidth.x * 0.5f;
+    if (ImGui::GetCursorPosX() < startPos) {
+        ImGui::SetCursorPosX(startPos);
+    }
+
+    ImGui::PushItemWidth(windowWidth.x * 0.45f);
+    drawWidget();
+    ImGui::PopItemWidth();
+}
+
+template <typename FormatDistanceFn>
+static void DrawLayerSettingsRow(const ImVec2& windowWidth, const char* label, bool* changed, FloatSetting<float>& distanceSetting, FloatSetting<float>& scaleSetting, FormatDistanceFn&& formatDistance) {
+    DrawSettingRow(windowWidth, label, [&]() {
+        auto applyValues = [&](float distance, float scale) {
+            distanceSetting = distance;
+            scaleSetting = scale;
+        };
+
+        float distance = distanceSetting;
+        float scale = scaleSetting;
+        std::string distanceIdStr = std::format("##{}_Distance", label);
+        std::string scaleIdStr = std::format("##{}_Scale", label);
+
+        float totalWidth = ImGui::GetContentRegionAvail().x;
+        float resetWidth = 45.0f;
+        float itemSpacing = ImGui::GetStyle().ItemSpacing.x;
+        float sliderWidth = (totalWidth - resetWidth - itemSpacing * 2.0f) * 0.5f;
+
+        ImGui::PushItemWidth(sliderWidth);
+        if (ImGui::SliderFloat(distanceIdStr.c_str(), &distance, distanceSetting.min, distanceSetting.max, formatDistance(distance).c_str())) {
+            applyValues(std::clamp(distance, distanceSetting.min, distanceSetting.max), scaleSetting);
+            *changed = true;
+        }
+        ImGui::PopItemWidth();
+        ImGui::SameLine();
+
+        ImGui::PushItemWidth(sliderWidth);
+        if (ImGui::SliderFloat(scaleIdStr.c_str(), &scale, scaleSetting.min, scaleSetting.max, "%.2fx scale")) {
+            applyValues(distanceSetting, std::clamp(scale, scaleSetting.min, scaleSetting.max));
+            *changed = true;
+        }
+        ImGui::PopItemWidth();
+        ImGui::SameLine();
+
+        std::string resetIdStr = std::format("Reset##{}", label);
+        if (ImGui::Button(resetIdStr.c_str())) {
+            distanceSetting.Reset();
+            scaleSetting.Reset();
+            *changed = true;
+        }
+    });
+}
+
+static bool BeginStyledTab(const char* label, uint32_t selectedTab, uint32_t tabIdx, bool setTab, ImGuiTabItemFlags extraFlags = ImGuiTabItemFlags_None) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().FramePadding + ImVec2(0, 2.0f));
+    bool tabBar = ImGui::BeginTabItem(label, nullptr, ((setTab && selectedTab == tabIdx) ? ImGuiTabItemFlags_SetSelected : 0) | extraFlags);
+    ImGui::PopStyleVar();
+    return tabBar;
+}
+
+static void DrawSectionHeader(const char* label) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+    ImGui::Text(label);
+    ImGui::PopStyleColor();
+}
+
+namespace WeaponAttackDebugger {
     struct WeaponLiveDebugState {
         bool hasWeapon = false;
         uint32_t weaponPtr = 0;
@@ -41,6 +117,7 @@ namespace {
     constexpr ImVec4 kPassColor = ImVec4(0.35f, 0.95f, 0.45f, 1.0f);
     constexpr ImVec4 kFailColor = ImVec4(0.95f, 0.35f, 0.35f, 1.0f);
     constexpr ImVec4 kNeutralColor = ImVec4(0.90f, 0.85f, 0.45f, 1.0f);
+    constexpr uint32_t kMotionPlotSampleCount = 30;
     std::array<AttackPeriodTracker, 2> s_attackPeriodTrackers = {};
     std::array<bool, 2> s_showWeaponSensitivityOverlay = { false, false };
 
@@ -73,8 +150,10 @@ namespace {
     }
 
     const char* ToString(OpenXR::EyeSide side) {
-        return side == OpenXR::EyeSide::LEFT ? "Left Hand" : "Right Hand";
+        return side == EyeSide::LEFT ? "Left Hand" : "Right Hand";
     }
+
+    void DrawMotionPlots(OpenXR::EyeSide side, const WeaponMotionAnalyser& analyser);
 
     void DrawStatusValue(const char* label, float value, float threshold, const char* unit, bool passed, bool higherIsBetter = true) {
         ImGui::AlignTextToFramePadding();
@@ -204,7 +283,8 @@ namespace {
             ToString(tracker.currentAttackType),
             tracker.currentDamageIntegral,
             tracker.currentDuration,
-            tracker.currentPeakDamage);
+            tracker.currentPeakDamage
+        );
 
         if (tracker.historyCount == 0) {
             ImGui::TextDisabled("Last 3 periods: none yet");
@@ -218,7 +298,8 @@ namespace {
                 ToString(entry.attackType),
                 entry.damageIntegral,
                 entry.duration,
-                entry.peakDamage);
+                entry.peakDamage
+            );
         }
     }
 
@@ -227,23 +308,26 @@ namespace {
         const WeaponLiveDebugState liveState = ReadWeaponLiveDebugState(CemuHooks::m_heldWeapons[side]);
         UpdateAttackPeriodTracker(side, snapshot, liveState);
 
-        ImGui::PushID(static_cast<int>(side));
+        ImGui::PushID((int)side);
         DrawStatusText("Held weapon", liveState.hasWeapon ? liveState.actorName.c_str() : "None", liveState.hasWeapon ? kPassColor : kNeutralColor);
         ImGui::Text("Weapon type: %s | Attack: %s | Active: %s | Hitbox: %s",
             ToString(snapshot.weaponType),
             ToString(snapshot.lockedAttackType),
             snapshot.attackActive ? "Yes" : "No",
-            snapshot.hitboxEnabled ? "Yes" : "No");
+            snapshot.hitboxEnabled ? "Yes" : "No"
+        );
         ImGui::Text("Current damage: %.1f | Damage scale: %.2fx | Multiplier: %.2f | Estimated output: %.1f",
             liveState.baseDamage,
             liveState.damageScale,
             liveState.multiplier,
-            liveState.estimatedDamage);
+            liveState.estimatedDamage
+        );
         ImGui::Text("Bad samples: %.3f / %.3f s | Swing power: %.2f | Arm calibration: %.3f m",
             snapshot.badSampleAccumTime,
             snapshot.maxBadDuration,
             snapshot.swingPower,
-            snapshot.calibratedArmLength);
+            snapshot.calibratedArmLength
+        );
 
         if (ImGui::CollapsingHeader("Stab", ImGuiTreeNodeFlags_DefaultOpen)) {
             DrawStatusValue("Stab speed", snapshot.forwardStabSpeed, snapshot.stabSpeedThreshold, "m/s", snapshot.stabSpeedOk);
@@ -273,6 +357,11 @@ namespace {
 
         ImGui::SeparatorText("Attack Periods");
         DrawAttackPeriodSummary(side);
+
+        if (ImGui::CollapsingHeader("Motion Graphs")) {
+            DrawMotionPlots(side, analyser);
+        }
+
         ImGui::PopID();
     }
 
@@ -280,20 +369,21 @@ namespace {
         const WeaponDebugSnapshot snapshot = analyser.GetDebugSnapshot();
         const auto& samples = analyser.GetSamples();
         const uint32_t lastSampleIdx = analyser.GetLastSampleIndex();
-        const auto oldestIdx = [&](uint32_t j) { return (lastSampleIdx + j) % WeaponMotionAnalyser::MAX_SAMPLES; };
+        const auto oldestIdx = [&](uint32_t j) { return (lastSampleIdx + 1 + WeaponMotionAnalyser::MAX_SAMPLES - kMotionPlotSampleCount + j) % WeaponMotionAnalyser::MAX_SAMPLES; };
 
-        ImGui::PushID(static_cast<int>(side));
+        ImGui::PushID((int)side);
         ImGui::Text("%s", ToString(side));
-        ImGui::Text("Weapon: %s | Sample %u / %d", ToString(snapshot.weaponType), lastSampleIdx, WeaponMotionAnalyser::MAX_SAMPLES);
+        ImGui::Text("Weapon: %s | Showing last %u samples", ToString(snapshot.weaponType), kMotionPlotSampleCount);
         ImGui::Text("Attack: %s | Active: %s | Bad: %.3f s | Power: %.2f",
             ToString(snapshot.lockedAttackType),
             snapshot.attackActive ? "Yes" : "No",
             snapshot.badSampleAccumTime,
-            snapshot.swingPower);
+            snapshot.swingPower
+        );
 
         {
-            std::array<float, WeaponMotionAnalyser::MAX_SAMPLES> t{}, avX{}, avY{}, avZ{}, maskSlash{}, maskStab{};
-            for (uint32_t j = 0; j < WeaponMotionAnalyser::MAX_SAMPLES; ++j) {
+            std::array<float, kMotionPlotSampleCount> t{}, avX{}, avY{}, avZ{}, maskSlash{}, maskStab{};
+            for (uint32_t j = 0; j < kMotionPlotSampleCount; ++j) {
                 const auto& s = samples[oldestIdx(j)];
                 t[j] = static_cast<float>(j);
                 avX[j] = s.localAngularVelocity.x;
@@ -303,27 +393,27 @@ namespace {
                 maskStab[j] = (s.attackType == AttackType::Stab) ? 100.0f : -100.0f;
             }
 
-            if (ImPlot::BeginPlot("Weapon Steadiness", ImVec2(-1.0f, 220.0f), ImPlotFlags_NoTitle)) {
+            if (ImPlot::BeginPlot("Weapon Steadiness", ImVec2(-1.0f, 120.0f), ImPlotFlags_NoTitle)) {
                 ImPlot::SetupAxes("Sample", "Angular Velocity", ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock);
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0, WeaponMotionAnalyser::MAX_SAMPLES - 1, ImPlotCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_X1, 0, kMotionPlotSampleCount - 1, ImPlotCond_Always);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, -15, 15, ImPlotCond_Always);
 
                 ImPlot::SetNextLineStyle(ImVec4(0, 1, 0, 0.3f), 3);
-                ImPlot::PlotShaded("Slash", t.data(), maskSlash.data(), WeaponMotionAnalyser::MAX_SAMPLES, -100.0f);
+                ImPlot::PlotShaded("Slash", t.data(), maskSlash.data(), kMotionPlotSampleCount, -100.0f);
                 ImPlot::SetNextLineStyle(ImVec4(1, 0.5f, 0, 0.3f), 3);
-                ImPlot::PlotShaded("Stab", t.data(), maskStab.data(), WeaponMotionAnalyser::MAX_SAMPLES, -100.0f);
+                ImPlot::PlotShaded("Stab", t.data(), maskStab.data(), kMotionPlotSampleCount, -100.0f);
 
                 ImPlot::SetNextLineStyle(ImVec4(0, 1, 0.5f, 0.5f), 2);
-                ImPlot::PlotLine("X", t.data(), avX.data(), WeaponMotionAnalyser::MAX_SAMPLES);
-                ImPlot::PlotLine("Y", t.data(), avY.data(), WeaponMotionAnalyser::MAX_SAMPLES);
-                ImPlot::PlotLine("Z", t.data(), avZ.data(), WeaponMotionAnalyser::MAX_SAMPLES);
+                ImPlot::PlotLine("X", t.data(), avX.data(), kMotionPlotSampleCount);
+                ImPlot::PlotLine("Y", t.data(), avY.data(), kMotionPlotSampleCount);
+                ImPlot::PlotLine("Z", t.data(), avZ.data(), kMotionPlotSampleCount);
                 ImPlot::EndPlot();
             }
         }
 
         {
-            std::array<float, WeaponMotionAnalyser::MAX_SAMPLES> t{}, lvX{}, lvY{}, lvZ{}, accZ{}, maskSlash{}, maskStab{};
-            for (uint32_t j = 0; j < WeaponMotionAnalyser::MAX_SAMPLES; ++j) {
+            std::array<float, kMotionPlotSampleCount> t{}, lvX{}, lvY{}, lvZ{}, accZ{}, maskSlash{}, maskStab{};
+            for (uint32_t j = 0; j < kMotionPlotSampleCount; ++j) {
                 const auto& s = samples[oldestIdx(j)];
                 t[j] = static_cast<float>(j);
                 lvX[j] = s.localLinearVelocity.x;
@@ -334,26 +424,26 @@ namespace {
                 maskStab[j] = (s.attackType == AttackType::Stab) ? 100.0f : -100.0f;
             }
 
-            if (ImPlot::BeginPlot("Controller Linear Velocity", ImVec2(-1.0f, 220.0f), ImPlotFlags_NoTitle)) {
+            if (ImPlot::BeginPlot("Controller Linear Velocity", ImVec2(-1.0f, 120.0f), ImPlotFlags_NoTitle)) {
                 ImPlot::SetupAxes("Sample", "Linear Velocity", ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock);
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0, WeaponMotionAnalyser::MAX_SAMPLES - 1, ImPlotCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_X1, 0, kMotionPlotSampleCount - 1, ImPlotCond_Always);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, -6, 6, ImPlotCond_Always);
 
                 ImPlot::SetNextLineStyle(ImVec4(0, 1, 0, 0.01f), 3);
-                ImPlot::PlotShaded("Slash", t.data(), maskSlash.data(), WeaponMotionAnalyser::MAX_SAMPLES, -100.0f);
+                ImPlot::PlotShaded("Slash", t.data(), maskSlash.data(), kMotionPlotSampleCount, -100.0f);
                 ImPlot::SetNextLineStyle(ImVec4(1, 0.5f, 0, 0.01f), 3);
-                ImPlot::PlotShaded("Stab", t.data(), maskStab.data(), WeaponMotionAnalyser::MAX_SAMPLES, -100.0f);
+                ImPlot::PlotShaded("Stab", t.data(), maskStab.data(), kMotionPlotSampleCount, -100.0f);
 
                 ImPlot::SetNextLineStyle(ImVec4(0, 1, 0.5f, 0.5f), 2);
-                ImPlot::PlotLine("X", t.data(), lvX.data(), WeaponMotionAnalyser::MAX_SAMPLES);
-                ImPlot::PlotLine("Y", t.data(), lvY.data(), WeaponMotionAnalyser::MAX_SAMPLES);
-                ImPlot::PlotLine("Z", t.data(), lvZ.data(), WeaponMotionAnalyser::MAX_SAMPLES);
-                ImPlot::PlotLine("Acc Z (smoothed)", t.data(), accZ.data(), WeaponMotionAnalyser::MAX_SAMPLES);
+                ImPlot::PlotLine("X", t.data(), lvX.data(), kMotionPlotSampleCount);
+                ImPlot::PlotLine("Y", t.data(), lvY.data(), kMotionPlotSampleCount);
+                ImPlot::PlotLine("Z", t.data(), lvZ.data(), kMotionPlotSampleCount);
+                ImPlot::PlotLine("Acc Z (smoothed)", t.data(), accZ.data(), kMotionPlotSampleCount);
                 ImPlot::EndPlot();
             }
         }
 
-        if (side == OpenXR::EyeSide::LEFT) {
+        if (side == EyeSide::LEFT) {
             ImGui::Separator();
         }
         ImGui::PopID();
@@ -362,37 +452,583 @@ namespace {
 
 namespace ImGuiMenus {
     void DrawWeaponSensitivityOverlays() {
-        for (uint8_t sideIdx = 0; sideIdx < s_showWeaponSensitivityOverlay.size(); ++sideIdx) {
-            if (!s_showWeaponSensitivityOverlay[sideIdx]) {
+        for (uint8_t sideIdx = 0; sideIdx < WeaponAttackDebugger::s_showWeaponSensitivityOverlay.size(); ++sideIdx) {
+            if (!WeaponAttackDebugger::s_showWeaponSensitivityOverlay[sideIdx]) {
                 continue;
             }
 
-            const OpenXR::EyeSide side = static_cast<OpenXR::EyeSide>(sideIdx);
-            std::string windowName = std::format("Weapon Sensitivity Debug - {}", ToString(side));
-            if (ImGui::Begin(windowName.c_str(), &s_showWeaponSensitivityOverlay[sideIdx])) {
-                DrawSensitivityPanel(side, CemuHooks::m_motionAnalyzers[side]);
+            OpenXR::EyeSide side = (OpenXR::EyeSide)sideIdx;
+            std::string windowName = std::format("Attack Debugger - {}", WeaponAttackDebugger::ToString(side));
+            if (ImGui::Begin(windowName.c_str(), &WeaponAttackDebugger::s_showWeaponSensitivityOverlay[sideIdx])) {
+                WeaponAttackDebugger::DrawSensitivityPanel(side, CemuHooks::m_motionAnalyzers[side]);
             }
             ImGui::End();
         }
     }
 
-    void DrawDebugOverlays() {
-        if (ImGui::Begin("Weapon Motion Debugger")) {
-            DrawMotionPlots(OpenXR::EyeSide::LEFT, CemuHooks::m_motionAnalyzers[OpenXR::EyeSide::LEFT]);
-            DrawMotionPlots(OpenXR::EyeSide::RIGHT, CemuHooks::m_motionAnalyzers[OpenXR::EyeSide::RIGHT]);
-        }
-        ImGui::End();
+    bool IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide side) {
+        return WeaponAttackDebugger::s_showWeaponSensitivityOverlay[side];
     }
 
-    bool IsWeaponSensitivityOverlayVisible(::OpenXR::EyeSide side) {
-        return s_showWeaponSensitivityOverlay[side];
-    }
-
-    void SetWeaponSensitivityOverlayVisible(::OpenXR::EyeSide side, bool visible) {
-        s_showWeaponSensitivityOverlay[side] = visible;
+    void SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide side, bool visible) {
+        WeaponAttackDebugger::s_showWeaponSensitivityOverlay[side] = visible;
     }
 }
 
-void CemuHooks::DrawDebugOverlays() {
-    ImGuiMenus::DrawDebugOverlays();
+void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool* changed) {
+    auto& settings = GetSettings();
+    CameraMode cameraMode = settings.cameraMode;
+
+    DrawSettingRow(windowWidth, "Boot Directly Into BotW", [&]() {
+        settings.bootDirectlyIntoGame.AddToGUI(changed);
+    });
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    DrawSettingRow(windowWidth, "Camera Mode", [&]() {
+        settings.cameraMode.AddRadioToGUI(changed, ModSettings::toDisplayString);
+    });
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    DrawSectionHeader("Camera / Player Options");
+    if (cameraMode == CameraMode::THIRD_PERSON) {
+        DrawSettingRow(windowWidth, "Camera Distance", [&]() {
+            settings.thirdPlayerDistance.AddSliderToGUI(changed, 0.5f, 0.65f);
+        });
+    }
+    else {
+        DrawSettingRow(windowWidth, "Height Offset", [&]() {
+            auto formatHeight = [&](float height) {
+                if (height < -.01f) {
+                    float heightInches = height * -39.3700787f;
+                    int32_t heightFeet = std::floor(heightInches / 12.0f);
+                    heightInches -= heightFeet * 12.0f;
+                    return std::format("-{0:.02f}m / {1}\'{2:.02f}\"", -height, heightFeet, heightInches);
+                }
+                if (height > .01f) {
+                    float heightInches = height * 39.3700787f;
+                    int32_t heightFeet = std::floor(heightInches / 12.0f);
+                    heightInches -= heightFeet * 12.0f;
+                    return std::format("+{0:.02f}m / {1}\'{2:.02f}\"", height, heightFeet, heightInches);
+                }
+                return std::string("0.0");
+            };
+            settings.playerHeightOffset.AddToGUI(changed, windowWidth.x, -0.5f, 1.0f, formatHeight);
+        });
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    DrawSectionHeader("Cutscenes");
+
+    if (cameraMode != CameraMode::THIRD_PERSON) {
+        DrawSettingRow(windowWidth, "Camera In Cutscenes", [&]() {
+            settings.cutsceneCameraMode.AddComboToGUI(changed, ModSettings::toDisplayString);
+        });
+    }
+
+    DrawSettingRow(windowWidth, "Black Bars in Third-Person Cutscenes", [&]() {
+        settings.useBlackBarsForCutscenes.AddToGUI(changed);
+    });
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    DrawSectionHeader("UI");
+    DrawSettingRow(windowWidth, "UI Follows Where You Look", [&]() {
+        settings.uiFollowsGaze.AddToGUI(changed);
+    });
+
+    ImGui::Spacing();
+    DrawLayerSettingsRow(windowWidth, "Menu/HUD Distance & Size", changed, settings.hudDistance, settings.hudSize, FormatDistance);
+
+    ImGui::Spacing();
+    if (cameraMode == CameraMode::FIRST_PERSON) {
+        ImGui::Separator();
+        DrawSectionHeader("Input");
+        if (settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM) {
+            DrawSettingRow(windowWidth, "Attack Sensitivity", [&]() {
+                ImGui::TextUnformatted("Configured in the Custom Attack Sensitivity tab");
+            });
+        }
+        else {
+            DrawSettingRow(windowWidth, "Attack Sensitivity", [&]() {
+                int sensitivity = settings.GetSwingSensitivity() == SwingSensitivity::SWING_EASY ? 0 : 1;
+                if (ImGui::RadioButton("Relaxed##SwingSensitivity", &sensitivity, 0)) {
+                    settings.swingSensitivity = SwingSensitivity::SWING_EASY;
+                    *changed = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Normal##SwingSensitivity", &sensitivity, 1)) {
+                    settings.swingSensitivity = SwingSensitivity::SWING_NORMAL;
+                    *changed = true;
+                }
+            });
+        }
+
+        DrawSettingRow(windowWidth, "Thumbstick Deadzone", [&]() {
+            settings.stickDeadzone.AddToGUI(changed, windowWidth.x, 0.0f, 0.5f);
+        });
+
+        DrawSettingRow(windowWidth, "Stick Direction Threshold", [&]() {
+            settings.axisThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 0.9f);
+        });
+    }
+    else {
+        ImGui::Text("");
+    }
+
+    ImGui::NewLine();
+    if (ImGui::CollapsingHeader("Advanced Settings")) {
+        DrawSettingRow(windowWidth, "Use Custom Attack Sensitivity", [&]() {
+            bool useCustomAttackSensitivity = settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
+            if (ImGui::Checkbox("##UseCustomAttackSensitivity", &useCustomAttackSensitivity)) {
+                settings.swingSensitivity = useCustomAttackSensitivity ? SwingSensitivity::SWING_CUSTOM : SwingSensitivity::SWING_NORMAL;
+                if (!useCustomAttackSensitivity && VRManager::instance().XR->m_currMenuTab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) {
+                    VRManager::instance().XR->m_currMenuTab = ImGuiMenus::SETTINGS_TAB;
+                    VRManager::instance().XR->m_forceTabChange = true;
+                }
+                *changed = true;
+            }
+        });
+
+        if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
+            DrawSettingRow(windowWidth, "Angular Velocity Fixer", [&]() {
+                settings.buggyAngularVelocity.AddComboToGUI(changed, ModSettings::toDisplayString);
+            });
+        }
+        else {
+            settings.buggyAngularVelocity = AngularVelocityFixerMode::AUTO;
+        }
+
+        DrawSettingRow(windowWidth, "No Camera Movement In First-Person Cutscenes", [&]() {
+            settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(changed);
+        });
+
+        DrawSettingRow(windowWidth, "Enable Debugger Tools (Reduces Performance)", [&]() {
+            bool enableDebuggerTools = settings.enableDebuggerTools;
+            if (ImGui::Checkbox("##EnableDebuggerTools", &enableDebuggerTools)) {
+                settings.enableDebuggerTools = enableDebuggerTools;
+                *changed = true;
+            }
+        });
+    }
+
+    ImGui::NewLine();
+    DrawSettingRow(windowWidth, "", [&]() {
+        if (ImGui::Button("Reset All Settings")) {
+            auto options = settings.GetOptions();
+            for (int i = 0; i < options.size(); ++i) {
+                options[i]->Reset();
+            }
+            *changed = true;
+        }
+    });
+
+    if (settings.bootDirectlyIntoGame) {
+        CemuHooks* hooks = VRManager::instance().Hooks.get();
+        if (hooks != nullptr) {
+            const uint64_t currentTitleId = hooks->GetCurrentTitleId();
+            if (currentTitleId != 0) {
+                const std::string formattedTitleId = std::format("{:016X}", currentTitleId);
+                if (settings.bootDirectlyTitleId.Get() != formattedTitleId) {
+                    settings.bootDirectlyTitleId.Set(formattedTitleId);
+                    *changed = true;
+                }
+            }
+        }
+    }
+
+    ImGui::EndTabItem();
+}
+
+void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
+    if (auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get(); entityDebugger != nullptr) {
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::SeparatorText("World-Space Overlay");
+        entityDebugger->DrawWorldSpaceOverlaySettings(changed);
+
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::SeparatorText("Entity Debugger");
+        entityDebugger->DrawEntityInspectorContent();
+    }
+
+    ImGui::EndTabItem();
+}
+
+void RND_Renderer::ImGuiOverlay::DrawHelpGuideTab() {
+    if (m_helpImages.empty()) {
+        return ImGui::EndTabItem();
+    }
+
+    auto moveHelpImage = [&](int direction) {
+        const int helpImageCount = (int)m_helpImages.size();
+        m_currentHelpImage = (uint32_t)((m_currentHelpImage + helpImageCount + direction) % helpImageCount);
+    };
+
+    const bool hasMultipleHelpImages = m_helpImages.size() > 1;
+    m_currentHelpImage = std::min<uint32_t>(m_currentHelpImage, (uint32_t)m_helpImages.size() - 1);
+    const auto& image = m_helpImages[m_currentHelpImage];
+
+    std::string slideText = std::format("{} ({}/{})", image.m_title, m_currentHelpImage + 1, m_helpImages.size());
+    float availableWidth = ImGui::GetContentRegionAvail().x;
+    float sideWidth = availableWidth * 0.4f;
+    float centerWidth = availableWidth * 0.2f;
+    float rowStartX = ImGui::GetCursorPosX();
+    float buttonWidth = ImGui::CalcTextSize(ICON_KI_ARROW_RIGHT).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    float leftButtonX = rowStartX + std::max((sideWidth - buttonWidth) * 0.5f, 0.0f);
+    float textWidth = ImGui::CalcTextSize(slideText.c_str()).x;
+    float textX = rowStartX + sideWidth + std::max((centerWidth - textWidth) * 0.5f, 0.0f);
+    float rightButtonX = rowStartX + sideWidth + centerWidth + std::max((sideWidth - buttonWidth) * 0.5f, 0.0f);
+
+    ImGui::SetCursorPosX(leftButtonX);
+    if (!hasMultipleHelpImages) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(ICON_KI_ARROW_LEFT "##PrevHelpImage")) {
+        moveHelpImage(-1);
+    }
+    if (!hasMultipleHelpImages) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine(textX);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(slideText.c_str());
+
+    ImGui::SameLine(rightButtonX);
+    if (!hasMultipleHelpImages) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(ICON_KI_ARROW_RIGHT "##NextHelpImage")) {
+        moveHelpImage(1);
+    }
+    if (!hasMultipleHelpImages) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::BeginChild("HelpImageCarousel", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground)) {
+        ImVec2 availableSize = ImGui::GetContentRegionAvail();
+        float widthScale = availableSize.x / (float)image.m_image->GetWidth();
+        float heightScale = availableSize.y / (float)image.m_image->GetHeight();
+        float imageScale = std::min(std::min(widthScale, heightScale), 1.0f);
+        ImVec2 imageSize = ImVec2((float)image.m_image->GetWidth() * imageScale, (float)image.m_image->GetHeight() * imageScale);
+
+        ImVec2 cursorPos = ImGui::GetCursorPos();
+        if (availableSize.x > imageSize.x) {
+            cursorPos.x += (availableSize.x - imageSize.x) * 0.5f;
+        }
+        if (availableSize.y > imageSize.y) {
+            cursorPos.y += (availableSize.y - imageSize.y) * 0.5f;
+        }
+        ImGui::SetCursorPos(cursorPos);
+        ImGui::Image((ImTextureID)image.m_imageDS, imageSize);
+    }
+    ImGui::EndChild();
+
+    ImGui::EndTabItem();
+}
+
+void RND_Renderer::ImGuiOverlay::DrawFPSOverlayTab(const ImVec2& windowWidth, bool* changed) {
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
+    auto& settings = GetSettings();
+
+    DrawSettingRow(windowWidth, "Show FPS Overlay", [&]() {
+        settings.performanceOverlay.AddComboToGUI(changed, ModSettings::toDisplayString);
+    });
+
+    if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
+        static const uint32_t freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
+        uint32_t currentFreq = settings.performanceOverlayFrequency;
+        int freqIdx = 5;
+        for (int i = 0; i < std::size(freqOptions); i++) {
+            if (freqOptions[i] == currentFreq) {
+                freqIdx = i;
+                break;
+            }
+        }
+
+        DrawSettingRow(windowWidth, "Refresh Rate of VR Headset for Graph", [&]() {
+            if (ImGui::SliderInt("##RefreshRate", &freqIdx, 0, (int)std::size(freqOptions) - 1, std::format("{} Hz", freqOptions[freqIdx]).c_str())) {
+                settings.performanceOverlayFrequency = freqOptions[freqIdx];
+                *changed = true;
+            }
+        });
+
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        EntityDebugger::DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true);
+    }
+
+    ImGui::EndTabItem();
+}
+
+void RND_Renderer::ImGuiOverlay::DrawCreditsTab() {
+    ImGui::SeparatorText("Project Links");
+    ImGui::TextLinkOpenURL(ICON_KI_GITHUB " https://github.com/Crementif/BotW-BetterVR");
+    ImGui::Text("");
+
+    ImGui::SeparatorText("Donate to Support Development");
+    ImGui::TextWrapped("Hey there!");
+    ImGui::Text("");
+    ImGui::TextWrapped("This mod is free and open-source, but it took a lot of late nights to create.");
+    ImGui::TextWrapped("If you're enjoying the mod and want to vote on new features, you can donate here. Thanks!");
+    ImGui::TextLinkOpenURL("https://github.com/sponsors/Crementif/");
+    ImGui::Text("");
+    ImGui::Text("- Crementif");
+
+    ImGui::SeparatorText("Credits");
+    ImGui::Text("Crementif: Main Developer");
+    ImGui::Text("Holydh: Inputs and Gestures");
+    ImGui::Text("Acudofy: Sword and Stab Analysis System");
+    ImGui::Text("leoetlino: Made the BotW Decomp project, which was useful while reverse engineering");
+    ImGui::Text("Exzap: Technical support and optimization help");
+    ImGui::Text("Mako Marci: Made Logo, Controller Guide and Trailer");
+    ImGui::Text("Tim, Mako Marci, Solarwolf07, Elliott Tate and Derra: Helped with QA testing, recording, feedback and support");
+    ImGui::Text("");
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::EndTabItem();
+}
+
+void RND_Renderer::ImGuiOverlay::DrawCustomAttackSensitivityTab(const ImVec2& windowWidth, bool* changed) {
+    auto& settings = GetSettings();
+
+    DrawSectionHeader("Custom Stab Sensitivity");
+
+    DrawSettingRow(windowWidth, "Attack Debugger Windows", [&]() {
+        bool showLeftOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(EyeSide::LEFT);
+        if (ImGui::Checkbox("Left Hand", &showLeftOverlay)) {
+            ImGuiMenus::SetWeaponSensitivityOverlayVisible(EyeSide::LEFT, showLeftOverlay);
+        }
+        ImGui::SameLine();
+        bool showRightOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(EyeSide::RIGHT);
+        if (ImGui::Checkbox("Right Hand", &showRightOverlay)) {
+            ImGuiMenus::SetWeaponSensitivityOverlayVisible(EyeSide::RIGHT, showRightOverlay);
+        }
+    });
+
+    DrawSettingRow(windowWidth, "Stab Speed Threshold", [&]() {
+        settings.customStabSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.01f, 0.50f, [](float) { return "%.2f m/s"; });
+    });
+    DrawSettingRow(windowWidth, "Stab Accel Threshold", [&]() {
+        settings.customStabAccThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f m/s^2"; });
+    });
+    DrawSettingRow(windowWidth, "Stab Aim Cone", [&]() {
+        settings.customStabSteadinessCone.AddToGUI(changed, windowWidth.x, 15.0f, 85.0f, [](float) { return "%.0f deg"; });
+    });
+    DrawSettingRow(windowWidth, "Stab Twist Limit", [&]() {
+        settings.customStabAngularSteadiness.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
+    });
+    DrawSettingRow(windowWidth, "Stab Travel Distance", [&]() {
+        settings.customStabTravelDistance.AddToGUI(changed, windowWidth.x, 0.05f, 0.50f, [](float) { return "%.2f m"; });
+    });
+    DrawSettingRow(windowWidth, "Stab Lock Time", [&]() {
+        settings.customMinGoodStabDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+    });
+
+    ImGui::Spacing();
+    DrawSectionHeader("Custom Swing Sensitivity");
+
+    DrawSettingRow(windowWidth, "Swing Speed Threshold", [&]() {
+        settings.customSlashSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 5.0f, [](float) { return "%.1f rad/s"; });
+    });
+    DrawSettingRow(windowWidth, "Swing Accel Threshold", [&]() {
+        settings.customSlashAccThreshold.AddToGUI(changed, windowWidth.x, 3.0f, 40.0f, [](float) { return "%.1f rad/s^2"; });
+    });
+    DrawSettingRow(windowWidth, "Swing Velocity Threshold", [&]() {
+        settings.customSlashVelocityThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
+    });
+    DrawSettingRow(windowWidth, "Swing Drift Limit", [&]() {
+        settings.customSlashAccDriftThreshold.AddToGUI(changed, windowWidth.x, 2.0f, 30.0f, [](float) { return "%.1f rad/s^2"; });
+    });
+    DrawSettingRow(windowWidth, "Swing Travel Angle", [&]() {
+        settings.customSlashTravelAngle.AddToGUI(changed, windowWidth.x, 10.0f, 90.0f, [](float) { return "%.0f deg"; });
+    });
+    DrawSettingRow(windowWidth, "Swing Lock Time", [&]() {
+        settings.customMinGoodSwingDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+    });
+
+    ImGui::Spacing();
+    DrawSectionHeader("Shared Tuning");
+
+    DrawSettingRow(windowWidth, "Bad Sample Timeout", [&]() {
+        settings.customMaxBadDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+    });
+    DrawSettingRow(windowWidth, "Grace Period", [&]() {
+        settings.customGoodSampleGracePeriod.AddToGUI(changed, windowWidth.x, 10.0f, 200.0f, [](float) { return "%.0f ms"; });
+    });
+    DrawSettingRow(windowWidth, "Input Smoothing", [&]() {
+        settings.customSmoothingTimeConstant.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+    });
+    DrawSettingRow(windowWidth, "Drift Min Velocity", [&]() {
+        settings.customAngularDriftMinVelocity.AddToGUI(changed, windowWidth.x, 0.1f, 3.0f, [](float) { return "%.1f rad/s"; });
+    });
+    DrawSettingRow(windowWidth, "Damage Output Scale", [&]() {
+        settings.customDamageOutputScale.AddToGUI(changed, windowWidth.x, 0.10f, 2.00f, [](float) { return "%.2fx"; });
+    });
+    DrawSettingRow(windowWidth, "", [&]() {
+        if (ImGui::Button("Reset Custom Weapon Sensitivity")) {
+            settings.ResetCustomWeaponSensitivity();
+            *changed = true;
+        }
+    });
+
+    ImGui::EndTabItem();
+}
+
+static void DrawTutorialPromptAndControllerVerification(bool isMenuOpen) {
+    auto& settings = GetSettings();
+
+    float alphaForNotify = settings.tutorialPromptShown ? 0.9f : 0.98f;
+    float timeLimit = settings.tutorialPromptShown ? 14.0f : 60.0f;
+
+    if (!settings.tutorialPromptShown) {
+        if (isMenuOpen || ImGui::GetTime() > timeLimit) {
+            settings.tutorialPromptShown = true;
+            ImGui::SaveIniSettingsToDisk("BetterVR_settings.ini");
+        }
+    }
+
+    if (isMenuOpen || ImGui::GetTime() >= timeLimit) {
+        return;
+    }
+
+    ImVec2 fullWindowWidth = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+    ImGui::SetNextWindowBgAlpha(alphaForNotify);
+    ImGui::SetNextWindowPos(fullWindowWidth * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (ImGui::Begin("HelpNotify", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs)) {
+        if (!settings.tutorialPromptShown) {
+            ImGui::Text("First-Time Setup:");
+            ImGui::Separator();
+            ImGui::Text("To get started, open the BetterVR menu to configure various settings and to see the controller guide.");
+            ImGui::Text("This is where you can adjust the camera mode, player height, and other options to suit your preferences.");
+            ImGui::Spacing();
+            ImGui::Text("You can always access this menu by holding the " ICON_KI_BUTTON_X " for 1 second.");
+            ImGui::Text("(Alternatively, for Valve Index Controllers, hold " ICON_KI_BUTTON_A ". For regular game controllers, hold " ICON_KI_BUTTON_START " instead)");
+            ImGui::Text("");
+            ImGui::Text("TO CONTINUE: Try holding the button and open the menu");
+        }
+        else {
+            ImGui::Text("Hold " ICON_KI_BUTTON_X " (or " ICON_KI_BUTTON_A " for Valve Index Controllers or " ICON_KI_BUTTON_START " for Xbox/PlayStation and similar controllers) to open mod settings");
+        }
+    }
+    ImGui::End();
+}
+
+void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
+    auto& isMenuOpen = VRManager::instance().XR->m_isMenuOpen;
+    auto& settings = GetSettings();
+
+    DrawTutorialPromptAndControllerVerification(isMenuOpen);
+
+    static bool wasMenuPrevOpened = false;
+    static bool shouldLogSavedSettingsOnClose = false;
+
+    if (!isMenuOpen && wasMenuPrevOpened) {
+        wasMenuPrevOpened = false;
+        if (shouldLogSavedSettingsOnClose) {
+            Settings_LogSavedSettings();
+            shouldLogSavedSettingsOnClose = false;
+        }
+    }
+
+    if (!isMenuOpen) {
+        return;
+    }
+
+    if (isMenuOpen && !wasMenuPrevOpened) {
+        ImGui::SetNextWindowFocus();
+        wasMenuPrevOpened = true;
+        shouldLogSavedSettingsOnClose = false;
+    }
+
+    ImVec2 fullWindowWidth = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+    ImVec2 windowWidth = fullWindowWidth * ImVec2(0.925f, 1.0f);
+
+    const bool hasCustomAttackSensitivityTab = settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
+    const bool hasDebugTab = settings.IsDebuggingToolsEnabled();
+    auto& selectedTab = VRManager::instance().XR->m_currMenuTab;
+    if (!hasDebugTab && selectedTab == ImGuiMenus::DEBUG_TAB) {
+        selectedTab = ImGuiMenus::SETTINGS_TAB;
+        VRManager::instance().XR->m_forceTabChange = true;
+    }
+    if (!hasCustomAttackSensitivityTab && selectedTab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) {
+        selectedTab = ImGuiMenus::SETTINGS_TAB;
+        VRManager::instance().XR->m_forceTabChange = true;
+    }
+
+    bool setTab = VRManager::instance().XR->m_forceTabChange;
+    bool shouldStayOpen = true;
+
+    ImGui::SetNextWindowPos(fullWindowWidth * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(windowWidth, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+    if (ImGui::Begin("BetterVR Settings & Help##Settings", &shouldStayOpen, ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+        bool changed = false;
+
+        ImGui::Indent(10.0f);
+        ImGui::Dummy(ImVec2(10.0f, 0.0f));
+
+        float footerHeight = ImGui::GetFrameHeight() * 1.5f;
+        if (ImGui::BeginChild("Content", ImVec2(0, -footerHeight), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().FramePadding + ImVec2(0, 2.0f));
+            if (ImGui::BeginTabBar("HelpMenuTabs")) {
+                ImGui::PopStyleVar();
+
+                if (BeginStyledTab(ICON_KI_COG "Settings", selectedTab, ImGuiMenus::SETTINGS_TAB, setTab)) {
+                    DrawSettingsTab(windowWidth, &changed);
+                }
+                if (hasDebugTab && BeginStyledTab("Debug", selectedTab, ImGuiMenus::DEBUG_TAB, setTab)) {
+                    DrawDebugTab(&changed);
+                }
+                if (BeginStyledTab(ICON_KI_INFO_CIRCLE " Help & Controller Guide", selectedTab, ImGuiMenus::HELP_TAB, setTab)) {
+                    DrawHelpGuideTab();
+                }
+                if (BeginStyledTab(ICON_KI_PODIUM " FPS Overlay", selectedTab, ImGuiMenus::FPS_OVERLAY_TAB, setTab)) {
+                    DrawFPSOverlayTab(windowWidth, &changed);
+                }
+                if (BeginStyledTab(ICON_KI_HEART " Credits", selectedTab, ImGuiMenus::CREDITS_TAB, setTab)) {
+                    DrawCreditsTab();
+                }
+                if (hasCustomAttackSensitivityTab && BeginStyledTab("Custom Attack Sensitivity", selectedTab, ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB, setTab)) {
+                    DrawCustomAttackSensitivityTab(windowWidth, &changed);
+                }
+
+                ImGui::EndTabBar();
+            }
+            else {
+                ImGui::PopStyleVar();
+            }
+            ImGui::EndChild();
+
+            if (changed) {
+                shouldLogSavedSettingsOnClose = true;
+                ImGui::SaveIniSettingsToDisk("BetterVR_settings.ini");
+            }
+        }
+
+        ImGui::Unindent(10.0f);
+        ImGui::Separator();
+        ImGui::Spacing();
+        const char* navText = ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_L " " ICON_KI_BUTTON_R " Tabs";
+        float textWidth = ImGui::CalcTextSize(navText).x;
+        float availW = ImGui::GetContentRegionAvail().x;
+        if (availW > textWidth) {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availW - textWidth) * 0.5f);
+        }
+        ImGui::TextUnformatted(navText);
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+
+    if (!shouldStayOpen) {
+        isMenuOpen = false;
+    }
 }

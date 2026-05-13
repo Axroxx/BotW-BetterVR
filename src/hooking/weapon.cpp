@@ -168,7 +168,7 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
             readMemory(targetActorPtr, &targetActor);
 
             if (strcmp(boneName, "Weapon_L") == 0) {
-                const bool isBow = targetActor.type.getLE() == Bow;
+                const bool isBow = targetActor.type.getLE() == WeaponType::Bow;
                 const bool isSlateRune = targetActor.name.getLE() == "Item_Conductor";
                 RND_Renderer::Layer2D::SetBowAimingActive(isBow || isSlateRune);
             }

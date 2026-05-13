@@ -22,9 +22,8 @@ public:
     void UpdateEntityMemory();
 
     void UpdateKeyboardControls();
-    void DrawEntityInspector();
-    bool ShouldDrawRaycastLines() const { return m_showRaycastLines; }
-    bool ShouldDrawRoomscalePhysics() const { return m_showRoomscalePhysics; }
+    void DrawWorldSpaceOverlaySettings(bool* changed);
+    void DrawEntityInspectorContent();
     static void DrawFPSOverlay(class RND_Renderer* renderer);
     static void DrawFPSOverlayContent(class RND_Renderer* renderer, bool renderText);
 
@@ -53,9 +52,6 @@ public:
 private:
     std::string m_filter = std::string(256, '\0');
     bool m_showWorldLabels = false;
-    bool m_showWorldAABBs = false;
     float m_worldAABBMinDistance = 1.0f;
     float m_worldAABBMaxDistance = 100.0f;
-    bool m_showRaycastLines = false;
-    bool m_showRoomscalePhysics = false;
 };

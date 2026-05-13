@@ -2,6 +2,7 @@
 #include "entity_debugger.h"
 #include "instance.h"
 #include "rendering/vulkan.h"
+#include "utils/mod_settings.h"
 
 #include <imgui_memory_editor.h>
 
@@ -200,7 +201,7 @@ void EntityDebugger::UpdateEntityMemory() {
         glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
         bool matchesFilter = m_filter.empty() || actorName.find(m_filter) != std::string::npos;
 
-        if (m_showWorldAABBs && matchesFilter && distance >= m_worldAABBMinDistance && distance <= m_worldAABBMaxDistance) {
+        if (GetSettings().ShouldShowEntityBoxesIn3DView() && matchesFilter && distance >= m_worldAABBMinDistance && distance <= m_worldAABBMaxDistance) {
             if (glm::all(glm::greaterThan(halfExtents, glm::vec3(0.0f)))) {
                 glm::fvec3 worldCenter = pos + glm::mat3_cast(rot) * localCenter;
                 DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 1), 1.0f);
@@ -276,26 +277,40 @@ void EntityDebugger::UpdateEntityMemory() {
         }
     }
 }
-void EntityDebugger::DrawEntityInspector() {
-    ImGui::Begin("BetterVR Debugger");
 
+void EntityDebugger::DrawWorldSpaceOverlaySettings(bool* changed) {
+    auto& settings = GetSettings();
+
+    bool showEntityBoxes = settings.debugShowEntityBoxesIn3DView;
+    if (ImGui::Checkbox("Show Entity Boxes In 3D View", &showEntityBoxes)) {
+        settings.debugShowEntityBoxesIn3DView = showEntityBoxes;
+        *changed = true;
+    }
+
+    if (showEntityBoxes) {
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::DragFloat("Min 3D Box Distance", &m_worldAABBMinDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::DragFloat("Max 3D Box Distance", &m_worldAABBMaxDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
+    }
+
+    bool showRaycastLines = settings.debugShowRaycastLines;
+    if (ImGui::Checkbox("Show Raycast Lines", &showRaycastLines)) {
+        settings.debugShowRaycastLines = showRaycastLines;
+        *changed = true;
+    }
+
+    bool showRoomscalePhysics = settings.debugShowRoomscalePhysics;
+    if (ImGui::Checkbox("Show Roomscale Physics", &showRoomscalePhysics)) {
+        settings.debugShowRoomscalePhysics = showRoomscalePhysics;
+        *changed = true;
+    }
+}
+
+void EntityDebugger::DrawEntityInspectorContent() {
     static char buf[256];
     ImGui::InputText("Entity Filter", buf, std::size(buf));
     m_filter = buf;
-
-    ImGui::BeginChild("ScrollArea", ImVec2(0, 0));
-
-    if (ImGui::CollapsingHeader("World Space Overlay", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Checkbox("Show Entity Boxes In 3D View", &m_showWorldAABBs);
-        if (m_showWorldAABBs) {
-            ImGui::SetNextItemWidth(160.0f);
-            ImGui::DragFloat("Min 3D Box Distance", &m_worldAABBMinDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
-            ImGui::SetNextItemWidth(160.0f);
-            ImGui::DragFloat("Max 3D Box Distance", &m_worldAABBMaxDistance, 1.0f, 0.0f, 10000.0f, "%.0f");
-        }
-        ImGui::Checkbox("Show Raycast Lines", &m_showRaycastLines);
-        ImGui::Checkbox("Show Roomscale Physics", &m_showRoomscalePhysics);
-    }
 
     // display entities
     if (ImGui::CollapsingHeader("Entity List")) {
@@ -400,11 +415,10 @@ void EntityDebugger::DrawEntityInspector() {
                             auto& mem_edit = std::get<MemoryRange>(value.value).editor;
                             uint32_t data = std::get<MemoryRange>(value.value).start;
                             uint32_t size = std::get<MemoryRange>(value.value).end - std::get<MemoryRange>(value.value).start;
-                            std::string windowName = std::format("{} at {:08X} with size of {:08X}", value.value_name, value.value_address, size);
-                            mem_edit->DrawWindow(windowName.c_str(), (ImU8*)CemuHooks::s_memoryBaseAddress + (size_t)data, size, 0x0);
-                            if (mem_edit->Open == false) {
-                                value.expanded = false;
+                            if (ImGui::BeginChild("MemoryEditorInline", ImVec2(0.0f, 300.0f), true)) {
+                                mem_edit->DrawContents((ImU8*)CemuHooks::s_memoryBaseAddress + (size_t)data, size, 0x0);
                             }
+                            ImGui::EndChild();
                         }
                     }
                     else if constexpr (std::is_same_v<T, std::string>) {
@@ -421,8 +435,6 @@ void EntityDebugger::DrawEntityInspector() {
             ImGui::PopID();
         }
     }
-    ImGui::EndChild();
-    ImGui::End();
 }
 
 void EntityDebugger::AddOrUpdateEntity(uint32_t actorId, const std::string& entityName, const std::string& valueName, uint32_t address, ValueVariant&& value, bool isEntity) {

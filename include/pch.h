@@ -81,6 +81,9 @@ using Microsoft::WRL::ComPtr;
 #include <algorithm>
 #include <cctype>
 
+#include "font_kenney.h"
+
+
 inline glm::fvec2 ToGLM(const XrVector2f& vec) {
     return glm::make_vec2(&vec.x);
 }

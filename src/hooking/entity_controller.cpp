@@ -163,10 +163,6 @@ static RoomscaleDebugPalette GetRoomscaleDebugPalette(bool isGroundProbe, bool i
     };
 }
 
-static bool ShouldDrawRoomscalePhysics() {
-    return GetSettings().ShowDebugOverlay() && VRManager::instance().XR->GetRenderer() != nullptr && VRManager::instance().Hooks->m_entityDebugger && VRManager::instance().Hooks->m_entityDebugger->ShouldDrawRoomscalePhysics();
-}
-
 static RoomscaleDebugBody GetRoomscaleDebugBody() {
     RoomscaleDebugBody body = {};
 
@@ -237,7 +233,7 @@ static bool IsRoomscaleGroundProbe(const RoomscaleRaycastScratch& scratch) {
 }
 
 static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool isProbeOnly) {
-    if (!ShouldDrawRoomscalePhysics()) {
+    if (!GetSettings().ShouldShowRoomPhysics()) {
         return;
     }
 
@@ -262,7 +258,7 @@ static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool 
 }
 
 static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch, bool isProbeOnly, bool hadHit) {
-    if (!ShouldDrawRoomscalePhysics()) {
+    if (!GetSettings().ShouldShowRoomPhysics()) {
         return;
     }
 
@@ -334,14 +330,15 @@ static void BeginRoomscaleActiveStep(uint32_t remainingSteps) {
 }
 
 static bool IsRoomscaleGroundProbeValid(const glm::fvec3& candidateWorldPos, const glm::fvec3& hitPos) {
-    return std::isfinite(hitPos.x) && std::isfinite(hitPos.y) && std::isfinite(hitPos.z) && (hitPos.y - candidateWorldPos.y) <= kRoomscaleGroundProbeMaxRise;
+    return glm::any(glm::isfinite(hitPos)) && (hitPos.y - candidateWorldPos.y) <= kRoomscaleGroundProbeMaxRise;
 }
 
 static bool QueueNextRoomscaleBinarySearchProbe(bool candidateWasSafe) {
     if (candidateWasSafe) {
         s_roomscaleState.currentStepLastSafeScale = s_roomscaleState.currentStepProbeScale;
         s_roomscaleState.currentStepLowScale = s_roomscaleState.currentStepProbeScale;
-    } else {
+    }
+    else {
         s_roomscaleState.currentStepHighScale = s_roomscaleState.currentStepProbeScale;
         s_roomscaleState.isBinarySearchingStep = true;
     }
@@ -432,7 +429,7 @@ static std::optional<glm::fvec3> TryGetCurrentHeadPos() {
     }
 
     glm::fvec3 headPos = glm::fvec3(middlePose.value()[3]);
-    if (!std::isfinite(headPos.x) || !std::isfinite(headPos.y) || !std::isfinite(headPos.z)) {
+    if (!glm::all(glm::isfinite(headPos))) {
         return std::nullopt;
     }
 
@@ -441,22 +438,22 @@ static std::optional<glm::fvec3> TryGetCurrentHeadPos() {
 
 static const char* GetRoomscaleBodyDriveModeName(RoomscaleBodyDriveMode mode) {
     switch (mode) {
-    case RoomscaleBodyDriveMode::DisabledNotFirstPerson:
-        return "disabled (not first-person)";
-    case RoomscaleBodyDriveMode::DisabledNotInGame:
-        return "disabled (not in game)";
-    case RoomscaleBodyDriveMode::DisabledNotStanding:
-        return "disabled (play mode is not standing)";
-    case RoomscaleBodyDriveMode::DisabledNoRenderer:
-        return "disabled (renderer unavailable)";
-    case RoomscaleBodyDriveMode::DisabledNoPositional:
-        return "disabled (no positional tracking)";
-    case RoomscaleBodyDriveMode::DisabledNoPlayer:
-        return "disabled (player unavailable)";
-    case RoomscaleBodyDriveMode::DisabledSpecialMovement:
-        return "disabled (special movement state)";
-    case RoomscaleBodyDriveMode::Enabled:
-        return "enabled";
+        case RoomscaleBodyDriveMode::DisabledNotFirstPerson:
+            return "disabled (not first-person)";
+        case RoomscaleBodyDriveMode::DisabledNotInGame:
+            return "disabled (not in game)";
+        case RoomscaleBodyDriveMode::DisabledNotStanding:
+            return "disabled (play mode is not standing)";
+        case RoomscaleBodyDriveMode::DisabledNoRenderer:
+            return "disabled (renderer unavailable)";
+        case RoomscaleBodyDriveMode::DisabledNoPositional:
+            return "disabled (no positional tracking)";
+        case RoomscaleBodyDriveMode::DisabledNoPlayer:
+            return "disabled (player unavailable)";
+        case RoomscaleBodyDriveMode::DisabledSpecialMovement:
+            return "disabled (special movement state)";
+        case RoomscaleBodyDriveMode::Enabled:
+            return "enabled";
     }
 
     return "disabled (unknown)";

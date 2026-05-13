@@ -402,7 +402,7 @@ struct AttackSensorOtherArg {
 };
 static_assert(sizeof(AttackSensorOtherArg) == 0x24, "AttackSensorOtherArg size mismatch");
 
-enum WeaponType : uint32_t {
+enum class WeaponType : uint32_t {
     SmallSword = 0x0,
     LargeSword = 0x1,
     Spear = 0x2,

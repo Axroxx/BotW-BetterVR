@@ -151,8 +151,6 @@ public:
     static glm::fvec3 GetAppliedRoomscaleHeadPosition();
     static float GetRoomscaleFadeAmount();
 
-    static void DrawDebugOverlays();
-
     uint64_t GetCurrentTitleId() const {
         if (gameMeta_getTitleId == nullptr) {
             return 0;

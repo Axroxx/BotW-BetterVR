@@ -213,6 +213,13 @@ struct std::formatter<D3D_FEATURE_LEVEL> : std::formatter<string> {
     }
 };
 
+static std::string FormatDistance(float distance) {
+    float distanceInches = distance * 39.3700787f;
+    int32_t distanceFeet = std::floor(distanceInches / 12.0f);
+    distanceInches -= distanceFeet * 12.0f;
+    return std::format("{:.02f}m / {}\' {:.02f}\"", distance, distanceFeet, distanceInches);
+}
+
 enum class LogType {
     // verbose logging types
     RENDERING,
