@@ -24,8 +24,8 @@ void SetupImGuiStyle() {
     style.CellPadding = ImVec2(4.0f, 2.0f);
     style.IndentSpacing = 21.0f;
     style.ColumnsMinSpacing = 6.0f;
-    style.ScrollbarSize = 14.0f;
-    style.ScrollbarRounding = 9.0f;
+    style.ScrollbarSize = 18.0f;
+    style.ScrollbarRounding = 6.0f;
     style.GrabMinSize = 10.0f;
     style.GrabRounding = 4.0f;
     style.TabRounding = 4.0f;
@@ -49,10 +49,10 @@ void SetupImGuiStyle() {
     style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.078431375f, 0.09803922f, 0.11764706f, 1.0f);
     style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.0f, 0.0f, 0.0f, 0.51f);
     style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.14901961f, 0.1764706f, 0.21960784f, 1.0f);
-    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.019607844f, 0.019607844f, 0.019607844f, 0.39f);
-    style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.2f, 0.24705882f, 0.28627452f, 1.0f);
-    style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.1764706f, 0.21960784f, 0.24705882f, 1.0f);
-    style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.08627451f, 0.20784314f, 0.30980393f, 1.0f);
+    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.05882353f, 0.08627451f, 0.11372549f, 1.0f);
+    style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.25882354f, 0.5882353f, 0.9764706f, 0.75f);
+    style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.36862746f, 0.60784316f, 1.0f, 0.9f);
+    style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.47843137f, 0.6784314f, 1.0f, 1.0f);
     style.Colors[ImGuiCol_CheckMark] = ImVec4(0.2784314f, 0.5568628f, 1.0f, 1.0f);
     style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.2784314f, 0.5568628f, 1.0f, 1.0f);
     style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.36862746f, 0.60784316f, 1.0f, 1.0f);
