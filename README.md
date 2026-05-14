@@ -147,12 +147,11 @@ There's enough that was skipped over or left out in this explanation.
 
 5. Use Visual Studio (Recommended) or Clion to open the CMake project. Make sure that it's compiling a x64 build.
 
-6. To quickly debug the C++ code, you'll want to set your IDE to install the `BetterVR_Launcher.exe` CMake target (which has the `BetterVR_Layer.dll` file embedded) so that its next to the right `Cemu.exe`, and launch it.
-   For Visual Studio, this basically means you'll want to go to `Debug`->`Debug And Launch Settings for...` and change that settings file to be something like [`launch.vs.json`](resources/launch.vs.json).
-   The launcher is required to set the right registry values and fill in the BetterVR_Layer.json so the BetterVR Vulkan layer is loaded into `Cemu.exe`.
+6. For direct Visual Studio debugging, its recommended that instead of launching the BetterVR_Launcher, you set-up a launch.vs.json that launches Cemu.exe with the .dll loaded.
+   Once the CMake project is open in VS (make sure its not ran as admin), go to `Debug`->`Debug and Launch Settings for BetterVR_Layer`.
+   With that open, copy the configuration from [`launch.vs.json`](resources/launch.vs.json) and replace the placeholder paths.
 
-7. Make sure that your debugger is attached to the `Cemu.exe` process, and not *just* the `BetterVR_Launcher.exe`.
-   Although you can just manually attach to Cemu.exe each time you start the launcher, its better to install the official [Microsoft Child Process Debugging Power Tool](https://marketplace.visualstudio.com/items?itemName=vsdbgplat.MicrosoftChildProcessDebuggingPowerTool2022) extension to just automatically attach to all processes. This workflow might be improved in the future to also be automatable when using CLion.
+7. If step 6 doesn't work, you can also just launch the BetterVR_Project by debugging the `BetterVR_Launcher` target (make sure to pick the Install option). You might have to manually attach or install a multi-process debugging extension.
 
 
 ### Credits

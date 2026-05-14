@@ -3,11 +3,23 @@
   "defaults": {},
   "configurations": [
     {
-      "type": "default",
+      "type": "dll",
+      "exe": "C:/Path/To/Cemu/Cemu.exe",
       "project": "CMakeLists.txt",
-      "projectTarget": "BetterVR_Launcher.exe (Install)",
-      "name": "Run BetterVR With Meta XR Simulator Runtime",
+      "projectTarget": "BetterVR_Layer.dll (bin\\BetterVR_Layer.dll)",
+      "name": "Debug BetterVR With Meta XR Simulator",
+      "args": [
+        "--title-id 00050000101c9500"
+      ],
       "environment": [
+        {
+          "name": "VK_ADD_LAYER_PATH",
+          "value": "C:/Path/To/Your/Build/bin;"
+        },
+        {
+          "name": "VK_INSTANCE_LAYERS",
+          "value": "VK_LAYER_CREMENTIF_bettervr"
+        },
         {
           "name": "XR_RUNTIME_JSON",
           "value": "${env.META_XR_SIMULATOR_PATH}/meta_openxr_simulator.json"
@@ -19,25 +31,28 @@
       ]
     },
     {
-      "type": "default",
+      "type": "dll",
+      "exe": "C:/Path/To/Cemu/Cemu.exe",
       "project": "CMakeLists.txt",
-      "projectTarget": "BetterVR_Launcher.exe (Install)",
-      "name": "Run BetterVR With Meta XR Simulator Runtime (interpreter)",
+      "projectTarget": "BetterVR_Layer.dll (bin\\BetterVR_Layer.dll)",
+      "name": "Debug BetterVR With Default OpenXR Runtime",
       "args": [
-        "--force-multicore-interpreter"
+        "--title-id 00050000101c9500"
       ],
       "environment": [
         {
-          "name": "XR_RUNTIME_JSON",
-          "value": "${env.META_XR_SIMULATOR_PATH}/meta_openxr_simulator.json"
+          "name": "VK_ADD_LAYER_PATH",
+          "value": "C:/Path/To/Your/Build/bin;"
+        },
+        {
+          "name": "VK_INSTANCE_LAYERS",
+          "value": "VK_LAYER_CREMENTIF_bettervr"
+        },
+        {
+          "name": "VK_LOADER_DEBUG",
+          "value": "all"
         }
       ]
-    },
-    {
-      "type": "default",
-      "project": "CMakeLists.txt",
-      "projectTarget": "BetterVR_Launcher.exe (Install)",
-      "name": "Run BetterVR Using Default OpenXR Runtime"
     }
   ]
 }

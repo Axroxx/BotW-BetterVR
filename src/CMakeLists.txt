@@ -1,12 +1,7 @@
 add_library(BetterVR_Layer SHARED)
 
 file(GENERATE OUTPUT "$<TARGET_FILE_DIR:BetterVR_Layer>/BetterVR_Layer.json" INPUT "${CMAKE_SOURCE_DIR}/resources/BetterVR_Layer.json")
-
-set_target_properties(BetterVR_Layer PROPERTIES
-    VS_DEBUGGER_COMMAND "${CMAKE_INSTALL_PREFIX}/Cemu.exe"
-    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_INSTALL_PREFIX}"
-    VS_DEBUGGER_ENVIRONMENT "ENABLE_BETTERVR_MOD=1"
-)
+file(GENERATE OUTPUT "$<TARGET_FILE_DIR:BetterVR_Layer>/BetterVR_Layer.direct.json" INPUT "${CMAKE_SOURCE_DIR}/resources/BetterVR_Layer.direct.json")
 
 target_link_options(BetterVR_Layer PRIVATE "$<$<CONFIG:Debug>:/INCREMENTAL>")
 target_precompile_headers(BetterVR_Layer PRIVATE ${CMAKE_SOURCE_DIR}/include/pch.h)
@@ -80,3 +75,28 @@ target_link_libraries(BetterVR_Layer PRIVATE implot::implot)
 target_compile_definitions(BetterVR_Layer PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
 target_sources(BetterVR_Layer PRIVATE ${CMAKE_SOURCE_DIR}/dependencies/imgui_impl_vulkan.cpp)
 target_include_directories(BetterVR_Layer PRIVATE ${CMAKE_SOURCE_DIR}/dependencies)
+
+# Install/Debugger related stuff. This is really only used for direct calls
+set(BETTERVR_GRAPHIC_PACK_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/graphicPacks/BreathOfTheWild_BetterVR")
+
+install(TARGETS BetterVR_Layer
+    RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+)
+install(FILES "$<TARGET_FILE_DIR:BetterVR_Layer>/BetterVR_Layer.direct.json" DESTINATION "${CMAKE_INSTALL_PREFIX}")
+install(FILES $<TARGET_PDB_FILE:BetterVR_Layer> DESTINATION "${CMAKE_INSTALL_PREFIX}" CONFIGURATIONS Debug RelWithDebInfo OPTIONAL)
+
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR/"
+    DESTINATION "${BETTERVR_GRAPHIC_PACK_INSTALL_DIR}"
+    CONFIGURATIONS Debug
+)
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR/"
+    DESTINATION "${BETTERVR_GRAPHIC_PACK_INSTALL_DIR}"
+    CONFIGURATIONS Release RelWithDebInfo MinSizeRel
+    PATTERN "patch_debug_*.asm" EXCLUDE
+)
+
+set_target_properties(BetterVR_Layer PROPERTIES
+    VS_DEBUGGER_COMMAND "${CMAKE_INSTALL_PREFIX}/Cemu.exe"
+    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_INSTALL_PREFIX}"
+    VS_DEBUGGER_ENVIRONMENT "ENABLE_BETTERVR_MOD=1"
+)
