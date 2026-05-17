@@ -329,7 +329,8 @@ inline void WeaponMotionAnalyser::updateArmCalibration(float handToHeadDist) {
     // who occasionally extend further.
     if (handToHeadDist > m_calibratedArmLength) {
         m_calibratedArmLength = std::lerp(m_calibratedArmLength, handToHeadDist, 0.05f);
-    } else {
+    }
+    else {
         m_calibratedArmLength = std::lerp(m_calibratedArmLength, handToHeadDist, 0.002f);
     }
 }
@@ -344,7 +345,8 @@ inline void WeaponMotionAnalyser::detectAttackType(const glm::fvec3& position, c
     // ---- Stab detection ----
     if (glm::length2(m_localLinVel) < 1e-8f) {
         // Near-zero velocity: skip stab checks to avoid NaN from normalize
-    } else {
+    }
+    else {
         const glm::fvec3 stabDir = glm::normalize(m_localLinVel);
         const bool stabDirectionOk = std::abs(stabDir.z) > m_profile.stabLinearSteadinessThreshold;
         const bool stabAngularOk = std::abs(m_localAngVel.x) < m_profile.stabAngularSteadinessThreshold
@@ -360,7 +362,8 @@ inline void WeaponMotionAnalyser::detectAttackType(const glm::fvec3& position, c
                 m_lockedAttackType = AttackType::Stab;
                 m_peakAttackVelocity = 0.0f;
             }
-        } else if ((inputTime - m_lastGoodStabTime) > m_profile.goodSampleGracePeriod) {
+        }
+        else if ((inputTime - m_lastGoodStabTime) > m_profile.goodSampleGracePeriod) {
             m_goodStabAccumTime = 0.0f;
         }
     }
@@ -380,7 +383,8 @@ inline void WeaponMotionAnalyser::detectAttackType(const glm::fvec3& position, c
             m_lockedAttackType = AttackType::Slash;
             m_peakAttackVelocity = 0.0f;
         }
-    } else if ((inputTime - m_lastGoodSwingTime) > m_profile.goodSampleGracePeriod) {
+    }
+    else if ((inputTime - m_lastGoodSwingTime) > m_profile.goodSampleGracePeriod) {
         m_goodSwingAccumTime = 0.0f;
     }
 }
@@ -395,7 +399,8 @@ inline void WeaponMotionAnalyser::checkAttackSteadiness(float dt) {
         case AttackType::Stab: {
             if (glm::length2(m_localLinVel) < 1e-8f) {
                 isBadSample = true;
-            } else {
+            }
+            else {
                 const glm::fvec3 stabDir = glm::normalize(m_localLinVel);
                 const float angXY = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
 
@@ -412,7 +417,8 @@ inline void WeaponMotionAnalyser::checkAttackSteadiness(float dt) {
             if (m_smoothedAngDrift > m_profile.slashAccDriftThreshold) {
                 Log::print<CONTROLS>("[FAIL]: Drift: {}/{}", m_smoothedAngDrift, m_profile.slashAccDriftThreshold);
                 isBadSample = true;
-            } else if (flatAngVelMag < m_profile.slashSpeedThreshold) {
+            }
+            else if (flatAngVelMag < m_profile.slashSpeedThreshold) {
                 Log::print<CONTROLS>("[FAIL]: Angular velocity: {}/{}", flatAngVelMag, m_profile.slashSpeedThreshold);
                 isBadSample = true;
             }
@@ -423,7 +429,8 @@ inline void WeaponMotionAnalyser::checkAttackSteadiness(float dt) {
     // Decrement model: good frames heal, bad frames accumulate
     if (isBadSample) {
         m_badSampleAccumTime += dt;
-    } else {
+    }
+    else {
         m_badSampleAccumTime = std::max(0.0f, m_badSampleAccumTime - dt);
     }
 

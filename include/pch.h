@@ -13,9 +13,15 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <cstring>
+#include <thread>
+#include <chrono>
+#include <algorithm>
+#include <cctype>
 
 #include <Windows.h>
 #include <winrt/base.h>
+#include <shellapi.h>
 
 
 // These macros mess with some of Vulkan's functions
@@ -74,12 +80,6 @@ using Microsoft::WRL::ComPtr;
 #undef GLM_ENABLE_EXPERIMENTAL
 
 #define ENABLE_VK_ROBUSTNESS 0
-
-#include <shellapi.h>
-#include <thread>
-#include <chrono>
-#include <algorithm>
-#include <cctype>
 
 #include "font_kenney.h"
 

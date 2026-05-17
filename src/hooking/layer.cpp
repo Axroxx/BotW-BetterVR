@@ -1,358 +1,111 @@
+#include "pch.h"
 #include "layer.h"
 #include "instance.h"
-#include <cstdlib>
 #include <cstring>
-#include <filesystem>
 
-namespace {
-    // Simple helpers to keep diagnostics opt-in
-    bool isEnvEnabled(const char* name) {
-        if (const char* value = std::getenv(name)) {
-            return value[0] != '\0' && value[0] != '0';
-        }
-        return false;
+#ifdef _DEBUG
+static VkInstance s_debugMessengerInstance = VK_NULL_HANDLE;
+static VkDebugUtilsMessengerEXT s_debugMessenger = VK_NULL_HANDLE;
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugUtilsMessengerCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+    VkDebugUtilsMessageTypeFlagsEXT /*messageTypes*/,
+    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void* /*pUserData*/) {
+
+    const char* messageIdName = pCallbackData && pCallbackData->pMessageIdName ? pCallbackData->pMessageIdName : "unknown";
+    const char* message = pCallbackData && pCallbackData->pMessage ? pCallbackData->pMessage : "";
+    const int32_t messageIdNumber = pCallbackData ? pCallbackData->messageIdNumber : 0;
+
+    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        Log::print<ERROR>("[Vulkan Debug] {} (id {}): {}", messageIdName, messageIdNumber, message);
+    }
+    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        Log::print<WARNING>("[Vulkan Debug] {} (id {}): {}", messageIdName, messageIdNumber, message);
+    }
+    else {
+        Log::print<VERBOSE>("[Vulkan Debug] {} (id {}): {}", messageIdName, messageIdNumber, message);
     }
 
-    // Helper to query functions from the Vulkan loader without adding a new link dependency
-    template <typename TFunc>
-    TFunc getLoaderFunction(const char* name) {
-        static HMODULE vulkanModule = GetModuleHandleA("vulkan-1.dll");
-        if (!vulkanModule) {
-            vulkanModule = LoadLibraryA("vulkan-1.dll");
-        }
-        if (!vulkanModule) {
-            return nullptr;
-        }
-        return reinterpret_cast<TFunc>(GetProcAddress(vulkanModule, name));
-    }
-
-    // Debug messenger for validation output (created only when explicitly enabled)
-    VkDebugUtilsMessengerEXT g_debugMessenger = VK_NULL_HANDLE;
-    PFN_vkDestroyDebugUtilsMessengerEXT g_destroyDebugUtilsMessenger = nullptr;
-
-    struct DiagnosticSupport {
-        bool validationLayer = false;
-        bool debugUtilsExt = false;
-        bool validationFeaturesExt = false;
-        std::vector<std::string> layerNames;
-        std::string sdkPath;
-        bool sdkExists = false;
-        bool validationJsonExists = false;
-        bool validationDllExists = false;
-    };
-
-    DiagnosticSupport queryDiagnosticSupport() {
-        DiagnosticSupport support{};
-
-        try {
-            auto enumerateLayers = getLoaderFunction<PFN_vkEnumerateInstanceLayerProperties>("vkEnumerateInstanceLayerProperties");
-            if (enumerateLayers) {
-                uint32_t layerCount = 0;
-                if (enumerateLayers(&layerCount, nullptr) == VK_SUCCESS && layerCount > 0) {
-                    std::vector<VkLayerProperties> layers(layerCount);
-                    if (enumerateLayers(&layerCount, layers.data()) == VK_SUCCESS) {
-                        support.layerNames.reserve(layerCount);
-                        for (const auto& layer : layers) {
-                            support.layerNames.emplace_back(layer.layerName);
-                            if (std::strcmp(layer.layerName, "VK_LAYER_KHRONOS_validation") == 0) {
-                                support.validationLayer = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (...) {
-            // Ignore errors during layer enumeration
-        }
-
-        try {
-            auto enumerateExtensions = getLoaderFunction<PFN_vkEnumerateInstanceExtensionProperties>("vkEnumerateInstanceExtensionProperties");
-            if (enumerateExtensions) {
-                uint32_t extCount = 0;
-                if (enumerateExtensions(nullptr, &extCount, nullptr) == VK_SUCCESS && extCount > 0) {
-                    std::vector<VkExtensionProperties> extensions(extCount);
-                    if (enumerateExtensions(nullptr, &extCount, extensions.data()) == VK_SUCCESS) {
-                        auto hasExt = [&extensions](const char* name) {
-                            return std::find_if(extensions.begin(), extensions.end(), [name](const VkExtensionProperties& ext) {
-                                return std::strcmp(ext.extensionName, name) == 0;
-                            }) != extensions.end();
-                        };
-                        support.debugUtilsExt = hasExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-                        support.validationFeaturesExt = hasExt(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
-                    }
-                }
-            }
-        } catch (...) {
-            // Ignore errors during extension enumeration
-        }
-
-        try {
-            if (const char* sdk = std::getenv("VULKAN_SDK")) {
-                support.sdkPath = sdk;
-                std::filesystem::path sdkPath(sdk);
-                support.sdkExists = std::filesystem::exists(sdkPath);
-                support.validationJsonExists = std::filesystem::exists(sdkPath / "Bin" / "config" / "VkLayer_khronos_validation.json");
-                support.validationDllExists = std::filesystem::exists(sdkPath / "Bin" / "VkLayer_khronos_validation.dll");
-            }
-        } catch (...) {
-            // Ignore filesystem errors
-        }
-
-        return support;
-    }
-
-    // Vulkan validation callback -> forward into our logger
-    VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsMessengerCallback(
-        VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-        VkDebugUtilsMessageTypeFlagsEXT /*messageTypes*/,
-        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-        void* /*pUserData*/) {
-
-        const char* severity = "INFO";
-        if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-            severity = "ERROR";
-        } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-            severity = "WARN";
-        } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-            severity = "INFO";
-        } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
-            severity = "VERBOSE";
-        }
-
-        // Route validation output into the normal log stream so it lands in user logs
-        if (messageSeverity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) {
-            Log::print<WARNING>("[Vulkan {}] {} (id {}): {}", severity,
-                pCallbackData->pMessageIdName ? pCallbackData->pMessageIdName : "unknown",
-                pCallbackData->messageIdNumber,
-                pCallbackData->pMessage ? pCallbackData->pMessage : "");
-        } else {
-            Log::print<INFO>("[Vulkan {}] {} (id {}): {}", severity,
-                pCallbackData->pMessageIdName ? pCallbackData->pMessageIdName : "unknown",
-                pCallbackData->messageIdNumber,
-                pCallbackData->pMessage ? pCallbackData->pMessage : "");
-        }
-        return VK_FALSE;
-    }
+    return VK_FALSE;
 }
+#endif
 
 VkResult VRLayer::VkInstanceOverrides::CreateInstance(PFN_vkCreateInstance createInstanceFunc, const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkInstance* pInstance) {
-    // Early safety checks - if anything is null, just call the original function
     if (!createInstanceFunc || !pCreateInfo || !pInstance) {
-        if (createInstanceFunc && pCreateInfo && pInstance) {
-            return createInstanceFunc(pCreateInfo, pAllocator, pInstance);
-        }
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
-    // Check if we should skip all diagnostic/validation code (for compatibility)
-    const bool skipDiagnostics = isEnvEnabled("BETTERVR_SKIP_DIAGNOSTICS");
-    if (skipDiagnostics) {
-        Log::print<INFO>("Skipping diagnostics due to BETTERVR_SKIP_DIAGNOSTICS");
-        return createInstanceFunc(pCreateInfo, pAllocator, pInstance);
+    VkInstanceCreateInfo modifiedCreateInfo = *pCreateInfo;
+    std::vector<const char*> modifiedExtensions;
+    modifiedExtensions.reserve(pCreateInfo->enabledExtensionCount + 1);
+    if (pCreateInfo->ppEnabledExtensionNames) {
+        for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
+            modifiedExtensions.push_back(pCreateInfo->ppEnabledExtensionNames[i]);
+        }
     }
 
-    // If the application already requested validation, avoid modifying the instance create info.
-    bool appRequestedValidation = false;
-    for (uint32_t i = 0; i < pCreateInfo->enabledLayerCount; ++i) {
-        if (pCreateInfo->ppEnabledLayerNames &&
-            std::strcmp(pCreateInfo->ppEnabledLayerNames[i], "VK_LAYER_KHRONOS_validation") == 0) {
-            appRequestedValidation = true;
+#ifdef _DEBUG
+    bool debugUtilsEnabled = false;
+    bool addedDebugUtilsExtension = false;
+    VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
+    for (const char* extensionName : modifiedExtensions) {
+        if (extensionName && std::strcmp(extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+            debugUtilsEnabled = true;
             break;
         }
     }
-    if (appRequestedValidation) {
-        Log::print<INFO>("CreateInstance: app requested validation; skipping BetterVR validation/env tweaks for compatibility");
-        return createInstanceFunc(pCreateInfo, pAllocator, pInstance);
+
+    if (!debugUtilsEnabled) {
+        modifiedExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        debugUtilsEnabled = true;
+        addedDebugUtilsExtension = true;
     }
 
-    Log::print<INFO>("CreateInstance called - createInstanceFunc={}, pCreateInfo={}, pInstance={}",
-        (void*)createInstanceFunc, (void*)pCreateInfo, (void*)pInstance);       
-
-    // Skip diagnostic query for now - it may be causing crashes with certain drivers/hooks
-    // TODO: Re-enable once the crash is fixed
-    DiagnosticSupport diagSupport{};
-    // diagSupport = queryDiagnosticSupport();  // DISABLED - causing crashes
-
-    const bool validationEnv = isEnvEnabled("BETTERVR_ENABLE_VK_VALIDATION");
-    const bool enableValidationRequest = validationEnv;
-
-    // Proactively set loader env so users don't have to: point VK_LAYER_PATH at the SDK
-    // and disable the OBS layer to prevent it from intercepting our hooks.
-    auto getEnvStr = [](const char* name) -> std::string {
-        if (const char* v = std::getenv(name)) {
-            return v;
-        }
-        return {};
-    };
-
-    // Skip SDK path setup for now - diagSupport is disabled
-    // if (diagSupport.sdkExists) { ... }
-
-    {
-        const std::string currDisable = getEnvStr("VK_LOADER_LAYERS_DISABLE");
-        const std::string obsLayer = "VK_LAYER_OBS_HOOK";
-        if (currDisable.find(obsLayer) == std::string::npos) {
-            std::string newDisable = currDisable;
-            if (!newDisable.empty() && newDisable.back() != ';' && newDisable.back() != ',') {
-                newDisable += ",";
-            }
-            newDisable += obsLayer;
-            SetEnvironmentVariableA("VK_LOADER_LAYERS_DISABLE", newDisable.c_str());
-            Log::print<INFO>("Disabling OBS Vulkan layer via VK_LOADER_LAYERS_DISABLE='{}'", newDisable);
-        } else {
-            Log::print<INFO>("VK_LOADER_LAYERS_DISABLE already includes '{}'", obsLayer);
-        }
+    if (debugUtilsEnabled) {
+        debugCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        debugCreateInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        debugCreateInfo.pfnUserCallback = VulkanDebugUtilsMessengerCallback;
+        debugCreateInfo.pNext = const_cast<void*>(modifiedCreateInfo.pNext);
+        modifiedCreateInfo.pNext = &debugCreateInfo;
     }
+#endif
 
-    // Log key loader env vars for diagnostics
-    Log::print<INFO>("VK env - VULKAN_SDK='{}', VK_LAYER_PATH='{}', VK_ADD_LAYER_PATH='{}', VK_INSTANCE_LAYERS='{}', VK_LOADER_LAYERS_DISABLE='{}'",
-        getEnvStr("VULKAN_SDK").empty() ? "<unset>" : getEnvStr("VULKAN_SDK"),
-        getEnvStr("VK_LAYER_PATH").empty() ? "<unset>" : getEnvStr("VK_LAYER_PATH"),
-        getEnvStr("VK_ADD_LAYER_PATH").empty() ? "<unset>" : getEnvStr("VK_ADD_LAYER_PATH"),
-        getEnvStr("VK_INSTANCE_LAYERS").empty() ? "<unset>" : getEnvStr("VK_INSTANCE_LAYERS"),
-        getEnvStr("VK_LOADER_LAYERS_DISABLE").empty() ? "<unset>" : getEnvStr("VK_LOADER_LAYERS_DISABLE"));
-
-    if (isEnvEnabled("BETTERVR_ENABLE_VK_LOADER_DEBUG")) {
-        SetEnvironmentVariableA("VK_LOADER_DEBUG", "all");
-    }
-
-    // Modify VkInstance with needed extensions/layers
-    VkInstanceCreateInfo modifiedCreateInfo = *pCreateInfo;
-
-    std::vector<const char*> modifiedExtensions;
-    modifiedExtensions.reserve(pCreateInfo->enabledExtensionCount + 4);
-    if (pCreateInfo->ppEnabledExtensionNames) {
-        for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
-            if (pCreateInfo->ppEnabledExtensionNames[i]) {
-                modifiedExtensions.push_back(pCreateInfo->ppEnabledExtensionNames[i]);
-            }
-        }
-    }
-    // Use const char* directly since we're passing string literals which have static storage
-    auto tryAddExt = [&modifiedExtensions](const char* ext) {
-        if (!ext) return;  // Safety check
-        bool found = false;
-        for (const char* e : modifiedExtensions) {
-            if (e && std::strcmp(e, ext) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            modifiedExtensions.push_back(ext);
-        }
-    };
-
-    std::vector<const char*> modifiedLayers;
-    modifiedLayers.reserve(pCreateInfo->enabledLayerCount + 1);
-    if (pCreateInfo->ppEnabledLayerNames) {
-        for (uint32_t i = 0; i < pCreateInfo->enabledLayerCount; i++) {
-            if (pCreateInfo->ppEnabledLayerNames[i]) {
-                modifiedLayers.push_back(pCreateInfo->ppEnabledLayerNames[i]);
-            }
-        }
-    }
-    const bool hasValidationLayer = std::find_if(modifiedLayers.begin(), modifiedLayers.end(),
-        [](const char* layer) { return layer && std::strcmp(layer, "VK_LAYER_KHRONOS_validation") == 0; }) != modifiedLayers.end();
-    const bool validationLayerAvailable = hasValidationLayer || diagSupport.validationLayer;
-    const bool validationEnabled = enableValidationRequest && validationLayerAvailable;
-
-    const bool enableDebugUtils = validationEnabled && diagSupport.debugUtilsExt;
-    const bool enableValidationFeatures = validationEnabled && diagSupport.validationFeaturesExt;
-    if (enableDebugUtils) {
-        tryAddExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
-    if (enableValidationFeatures) {
-        tryAddExt(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
-    }
     modifiedCreateInfo.enabledExtensionCount = (uint32_t)modifiedExtensions.size();
-    modifiedCreateInfo.ppEnabledExtensionNames = modifiedExtensions.data();
-
-    Log::print<INFO>("Vulkan diagnostics support - validation layer present: {}, debug utils ext present: {}, validation features ext present: {}",
-        diagSupport.validationLayer ? "yes" : "no",
-        diagSupport.debugUtilsExt ? "yes" : "no",
-        diagSupport.validationFeaturesExt ? "yes" : "no");
-    if (!diagSupport.layerNames.empty()) {
-        std::string allLayers;
-        for (size_t i = 0; i < diagSupport.layerNames.size(); ++i) {
-            allLayers += diagSupport.layerNames[i];
-            if (i + 1 < diagSupport.layerNames.size()) {
-                allLayers += ", ";
-            }
-        }
-        Log::print<INFO>("Vulkan layers detected: {}", allLayers);
-    } else {
-        Log::print<INFO>("Vulkan layers detected: none");
-    }
-    if (!diagSupport.sdkPath.empty()) {
-        Log::print<INFO>("VULKAN_SDK='{}' (exists: {}, validation json: {}, validation dll: {})",
-            diagSupport.sdkPath.empty() ? "<not set>" : diagSupport.sdkPath,
-            diagSupport.sdkExists ? "yes" : "no",
-            diagSupport.validationJsonExists ? "yes" : "no",
-            diagSupport.validationDllExists ? "yes" : "no");
-    }
-    if (enableValidationRequest && !validationLayerAvailable) {
-        Log::print<WARNING>("Requested Vulkan validation but VK_LAYER_KHRONOS_validation is not available on this system; continuing without validation.");
-    }
-    if (validationEnabled && !hasValidationLayer) {
-        modifiedLayers.push_back("VK_LAYER_KHRONOS_validation");
-    }
-    modifiedCreateInfo.enabledLayerCount = (uint32_t)modifiedLayers.size();
-    modifiedCreateInfo.ppEnabledLayerNames = modifiedLayers.data();
-
-    // Enable a couple of validation features when requested
-    VkValidationFeaturesEXT validationFeatures = { VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT };
-    std::vector<VkValidationFeatureEnableEXT> validationEnables;
-    if (enableValidationFeatures) {
-        validationEnables = {
-            VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
-            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
-        };
-        validationFeatures.enabledValidationFeatureCount = (uint32_t)validationEnables.size();
-        validationFeatures.pEnabledValidationFeatures = validationEnables.data();
-        validationFeatures.pNext = const_cast<void*>(modifiedCreateInfo.pNext);
-        modifiedCreateInfo.pNext = &validationFeatures;
-
-        Log::print<INFO>("Enabling Vulkan validation (auto-available: {}, env: {}) | debug utils ext: {} | validation features ext: {}",
-            diagSupport.validationLayer ? "yes" : "no",
-            validationEnv ? "yes" : "no",
-            enableDebugUtils ? "yes" : "no",
-            enableValidationFeatures ? "yes" : "no");
-    }
+    modifiedCreateInfo.ppEnabledExtensionNames = modifiedExtensions.empty() ? nullptr : modifiedExtensions.data();
 
     VkResult result = createInstanceFunc(&modifiedCreateInfo, pAllocator, pInstance);
-    if (validationEnabled && (result == VK_ERROR_LAYER_NOT_PRESENT || result == VK_ERROR_EXTENSION_NOT_PRESENT)) {
-        Log::print<WARNING>("Validation/debug extensions were requested but not available; retrying without them.");
+#ifdef _DEBUG
+    if (result == VK_ERROR_EXTENSION_NOT_PRESENT && addedDebugUtilsExtension) {
+        debugUtilsEnabled = false;
         result = createInstanceFunc(pCreateInfo, pAllocator, pInstance);
     }
+#endif
+    if (result != VK_SUCCESS) {
+        return result;
+    }
 
-    if (result == VK_SUCCESS && validationEnabled && enableDebugUtils) {
-        auto getInstanceProcAddr = getLoaderFunction<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
-        if (getInstanceProcAddr) {
-            auto createDebugUtilsMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(getInstanceProcAddr(*pInstance, "vkCreateDebugUtilsMessengerEXT"));
-            g_destroyDebugUtilsMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(getInstanceProcAddr(*pInstance, "vkDestroyDebugUtilsMessengerEXT"));
+#ifdef _DEBUG
+    if (debugUtilsEnabled) {
+        s_debugMessengerInstance = VK_NULL_HANDLE;
+        s_debugMessenger = VK_NULL_HANDLE;
 
-            if (createDebugUtilsMessenger && g_destroyDebugUtilsMessenger) {
-                VkDebugUtilsMessengerCreateInfoEXT dbgCreateInfo = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
-                dbgCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
-                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
-                dbgCreateInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                    VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                    VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-                dbgCreateInfo.pfnUserCallback = DebugUtilsMessengerCallback;
-
-                if (createDebugUtilsMessenger(*pInstance, &dbgCreateInfo, pAllocator, &g_debugMessenger) != VK_SUCCESS) {
-                    Log::print<WARNING>("Failed to create Vulkan debug utils messenger; validation messages may not appear in logs.");
-                }
-            } else {
-                Log::print<WARNING>("Could not resolve debug utils functions; validation layer output may not be visible.");
+        const vkroots::VkInstanceDispatch* instanceDispatch = vkroots::LookupDispatch(*pInstance);
+        if (instanceDispatch) {
+            if (instanceDispatch->CreateDebugUtilsMessengerEXT(*pInstance, &debugCreateInfo, pAllocator, &s_debugMessenger) == VK_SUCCESS) {
+                s_debugMessengerInstance = *pInstance;
             }
-        } else {
-            Log::print<WARNING>("vkGetInstanceProcAddr could not be resolved; skipping debug utils messenger.");
+            else {
+                Log::print<WARNING>("Failed to create Vulkan debug messenger.");
+            }
         }
     }
+#endif
 
     VRManager::instance().vkVersion = modifiedCreateInfo.pApplicationInfo->apiVersion;
 
@@ -503,7 +256,8 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
         if (std::find(modifiedExtensions.begin(), modifiedExtensions.end(), extension) == modifiedExtensions.end()) {
             if (isExtensionSupported(extension)) {
                 modifiedExtensions.push_back(extension.c_str());
-            } else {
+            }
+            else {
                 Log::print<WARNING>("Device extension {} is not supported, skipping", extension);
             }
         }
@@ -578,7 +332,8 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
     if (!timelineSemaphoresEnabled && supportedTimelineSemaphoreFeatures.timelineSemaphore) {
         createSemaphoreFeatures.pNext = nextChain;
         nextChain = &createSemaphoreFeatures;
-    } else if (!timelineSemaphoresEnabled) {
+    }
+    else if (!timelineSemaphoresEnabled) {
         Log::print<ERROR>("Timeline semaphores are not supported by this GPU! VR functionality may not work.");
     }
 
@@ -631,10 +386,14 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
 }
 
 void VRLayer::VkInstanceOverrides::DestroyInstance(const vkroots::VkInstanceDispatch& pDispatch, VkInstance instance, const VkAllocationCallbacks* pAllocator) {
-    if (g_debugMessenger != VK_NULL_HANDLE && g_destroyDebugUtilsMessenger) {
-        g_destroyDebugUtilsMessenger(instance, g_debugMessenger, pAllocator);
-        g_debugMessenger = VK_NULL_HANDLE;
+#ifdef _DEBUG
+    if (instance == s_debugMessengerInstance && s_debugMessenger != VK_NULL_HANDLE) {
+        pDispatch.DestroyDebugUtilsMessengerEXT(instance, s_debugMessenger, pAllocator);
+        s_debugMessengerInstance = VK_NULL_HANDLE;
+        s_debugMessenger = VK_NULL_HANDLE;
     }
+#endif
+
     PFN_vkDestroyInstance ptr_vkDestroyInstance = (PFN_vkDestroyInstance)pDispatch.GetInstanceProcAddr(instance, "vkDestroyInstance");
     vkroots::tables::DestroyDispatchTable(instance);
     ptr_vkDestroyInstance(instance, pAllocator);

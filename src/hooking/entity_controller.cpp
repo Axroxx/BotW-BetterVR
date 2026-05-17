@@ -707,7 +707,8 @@ void CemuHooks::hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         scratch.castDelta = s_roomscaleState.currentStepWorldDelta * probeScale;
         scratch.hitPos = currentWorldPos + scratch.castDelta.getLE();
         s_roomscaleState.currentStepCandidateWorldPos = scratch.hitPos.getLE();
-    } else {
+    }
+    else {
         scratch.queryType = RoomscaleQueryType_GroundProbe;
         scratch.castFrom = glm::fvec3(s_roomscaleState.currentStepCandidateWorldPos.x, s_roomscaleState.currentStepCandidateWorldPos.y + body.groundProbeUp, s_roomscaleState.currentStepCandidateWorldPos.z);
         scratch.castDelta = glm::fvec3(0.0f, -(body.groundProbeUp + body.groundProbeDown), 0.0f);
