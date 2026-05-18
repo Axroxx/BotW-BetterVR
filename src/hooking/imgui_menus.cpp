@@ -493,6 +493,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
     ImGui::Separator();
     DrawSectionHeader("Camera / Player Options");
     if (cameraMode == CameraMode::THIRD_PERSON) {
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.45f, 1.0f), "Use a regular controller and set up input in Cemu!");
         DrawSettingRow(windowWidth, "Camera Distance", [&]() {
             settings.thirdPlayerDistance.AddSliderToGUI(changed, 0.5f, 0.65f);
         });
