@@ -16,6 +16,7 @@ RoomscaleOwnLayer = 0x6C
 RoomscaleSavedLR = 0x70
 RoomscaleQuery = 0x80
 RoomscaleShapeVtable = RoomscaleQuery + 0x3C
+RoomscaleIterator = 0xC8
 
 ApplyRoomscaleAfterPlayerVelocity:
 stwu r1, -0x130(r1)
@@ -66,13 +67,9 @@ lfs f1, RoomscaleSweepRadius(r1)
 bl RoomscaleSphereCast_ctor
 
 lwz r12, RoomscaleQuery + 0x04(r1)
-lwz r0, 0x0C(r12)
-ori r0, r0, 0x0005
-stw r0, 0x0C(r12)
-lwz r0, 0x14(r12)
-li r6, 0x0005
-andc r0, r0, r6
-stw r0, 0x14(r12)
+addi r3, r1, RoomscaleQuery
+addi r4, r31, 0x208
+bl ShapeCast_copyLayers
 
 addi r3, r1, RoomscaleQuery
 addi r4, r1, RoomscaleCastFrom
@@ -86,6 +83,36 @@ li r4, 1
 addi r3, r1, RoomscaleQuery
 bctrl
 mr r30, r3
+
+cmpwi r30, 0
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+
+lwz r6, RoomscaleQuery + 0x04(r1)
+cmpwi r6, 0
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+
+lwz r5, 0x08(r6)
+cmpwi r5, 0
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+
+addi r3, r1, RoomscaleIterator
+addi r4, r6, 0x34
+bl ContactPointInfoIterator_ctor
+lis r0, ContactPointInfoIterator_HitPosVtable@ha
+addi r0, r0, ContactPointInfoIterator_HitPosVtable@l
+stw r0, RoomscaleIterator + 0x10(r1)
+
+lwz r0, RoomscaleIterator + 0x00(r1)
+lwz r5, RoomscaleIterator + 0x08(r1)
+cmpw r0, r5
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+
+addi r3, r1, RoomscaleIterator
+addi r4, r1, RoomscaleHit
+addi r5, r1, RoomscaleQuery
+bl ShapeCastContactPointToHitPos
+
+ApplyRoomscaleAfterPlayerVelocity_SweepCleanup:
 
 addi r3, r1, RoomscaleQuery
 li r4, 2
@@ -227,7 +254,11 @@ bctr
 0x034CC1F8 = RayCastBodyQuery_ctor:
 0x034CC2CC = RayCastBodyQuery_worldRayCast:
 0x034CC278 = RayCastBodyQuery_dtor:
+0x034CEFAC = ContactPointInfoIterator_ctor:
+0x034C991C = ShapeCastContactPointToHitPos:
+0x034D09D4 = ShapeCast_copyLayers:
 0x034D1B60 = RoomscaleSphereCast_ctor:
 0x034D1DD0 = RoomscaleSphereCast_dtor:
+0x102CCD20 = ContactPointInfoIterator_HitPosVtable:
 0x10549DD0 = nullPosition:
 0x10549FEC = emptyString:

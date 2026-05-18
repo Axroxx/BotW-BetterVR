@@ -47,8 +47,10 @@ struct RoomscaleState {
     bool isResolving = false;
     bool isProbeOnly = false;
     bool isBlocked = false;
+    bool isBlockedByCollision = false;
     bool hasActiveStep = false;
     bool isBinarySearchingStep = false;
+    bool currentStepBlockedByCollision = false;
     glm::fvec3 previousHeadPos = {};
     glm::fvec3 appliedHeadPos = {};
     glm::fvec3 trackedHeadPos = {};
@@ -84,8 +86,9 @@ static RoomscaleBodyDriveMode s_roomscaleBodyDriveMode = RoomscaleBodyDriveMode:
 
 constexpr float kMaxRoomscaleJumpDistanceSq = 0.25f;
 constexpr float kMinRoomscaleMoveDistanceSq = 0.000001f;
-constexpr float kRoomscaleFadeStartDistance = 0.10f;
-constexpr float kRoomscaleFadeFullDistance = 0.25f;
+constexpr float kRoomscaleFadeStartDistance = 0.0f;
+constexpr float kRoomscaleFadeFullDistance = 0.15f;
+constexpr float kRoomscaleHeadCollisionRadius = 0.10f;
 constexpr float kRoomscaleStepDistance = 0.0625f;
 constexpr float kRoomscaleGroundProbeMaxRise = 0.075f;
 constexpr float kRoomscaleBinarySearchScaleResolution = 1.0f / 16.0f;
@@ -190,42 +193,8 @@ static RoomscaleDebugBody GetRoomscaleDebugBody() {
     return body;
 }
 
-static glm::fvec3 GetRoomscaleDebugFootPos(const RoomscaleDebugBody& body, const glm::fvec3& worldPos) {
-    return worldPos + glm::fvec3(body.centerOffset.x, body.centerOffset.y - body.halfHeight, body.centerOffset.z);
-}
-
-static void DrawRoomscaleDebugBody(const RoomscaleDebugBody& body, const glm::fvec3& worldPos, uint32_t color, bool xray = false) {
-    DebugDraw::instance().PhysicsBody(worldPos + body.centerOffset, body.radius, body.halfHeight, color, 1.0f, 0, xray);
-}
-
-static void DrawRoomscaleDebugFloorMarker(const RoomscaleDebugBody& body, const glm::fvec3& worldPos, uint32_t color, bool xray = false) {
-    const glm::fvec3 footPos = GetRoomscaleDebugFootPos(body, worldPos);
-    const float outerRadius = std::max(body.sweepRadius, body.radius);
-    DebugDraw::instance().Circle(footPos, outerRadius, color, 1.0f, 0, xray);
-    DebugDraw::instance().Circle(footPos, std::max(body.radius * 0.55f, 0.05f), ScaleRoomscaleDebugColor(color, 0.9f, 0.75f), 1.0f, 0, xray);
-}
-
 static void DrawRoomscaleDebugPositionMarker(const glm::fvec3& pos, float radius, uint32_t color, bool xray = false) {
-    DebugDraw::instance().Sphere(pos, radius, color, 0, xray);
-}
-
-static void DrawRoomscaleDebugSweepCorridor(const RoomscaleDebugBody& body, const glm::fvec3& castFrom, const glm::fvec3& castTo, uint32_t primaryColor, uint32_t secondaryColor, bool xray = false) {
-    glm::fvec3 delta = castTo - castFrom;
-    delta.y = 0.0f;
-    if (glm::dot(delta, delta) < kMinRoomscaleMoveDistanceSq) {
-        return;
-    }
-
-    glm::fvec3 horizontalDir = glm::normalize(delta);
-    glm::fvec3 lateral = glm::fvec3(-horizontalDir.z, 0.0f, horizontalDir.x) * body.sweepRadius;
-    glm::fvec3 startFoot = GetRoomscaleDebugFootPos(body, glm::fvec3(castFrom.x, castFrom.y, castFrom.z));
-    glm::fvec3 endFoot = GetRoomscaleDebugFootPos(body, glm::fvec3(castTo.x, castTo.y, castTo.z));
-
-    DebugDraw::instance().Line(castFrom, castTo, primaryColor, 1.0f, xray);
-    DebugDraw::instance().Line(startFoot + lateral, endFoot + lateral, secondaryColor, 1.0f, xray);
-    DebugDraw::instance().Line(startFoot - lateral, endFoot - lateral, secondaryColor, 1.0f, xray);
-    DebugDraw::instance().Line(startFoot + lateral, startFoot - lateral, ScaleRoomscaleDebugColor(secondaryColor, 0.9f, 0.8f), 1.0f, xray);
-    DebugDraw::instance().Line(endFoot + lateral, endFoot - lateral, ScaleRoomscaleDebugColor(secondaryColor, 0.9f, 0.8f), 1.0f, xray);
+    DebugDraw::instance().Dot(pos, radius, color, xray);
 }
 
 static bool IsRoomscaleGroundProbe(const RoomscaleRaycastScratch& scratch) {
@@ -233,28 +202,23 @@ static bool IsRoomscaleGroundProbe(const RoomscaleRaycastScratch& scratch) {
 }
 
 static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool isProbeOnly) {
-    if (!GetSettings().ShouldShowRoomPhysics()) {
+    if (!GetSettings().ShouldShowRoomPhysics() || IsRoomscaleGroundProbe(scratch)) {
         return;
     }
 
     const RoomscaleDebugBody body = GetRoomscaleDebugBody();
-    const bool isGroundProbe = IsRoomscaleGroundProbe(scratch);
-    const RoomscaleDebugPalette palette = GetRoomscaleDebugPalette(isGroundProbe, isProbeOnly);
+    const RoomscaleDebugPalette palette = GetRoomscaleDebugPalette(false, isProbeOnly);
     const glm::fvec3 castFrom = scratch.castFrom.getLE();
     const glm::fvec3 castTo = castFrom + scratch.castDelta.getLE();
-    const glm::fvec3 bodyWorldPos = isGroundProbe ? glm::fvec3(castFrom.x, castFrom.y - body.groundProbeUp, castFrom.z) : scratch.currentPos.getLE();
+    const float sweepRadius = std::max(scratch.sweepRadius.getLE(), 0.01f);
 
-    DrawRoomscaleDebugBody(body, bodyWorldPos, palette.bodyColor);
-    DrawRoomscaleDebugFloorMarker(body, bodyWorldPos, palette.floorColor);
-    DrawRoomscaleDebugPositionMarker(castFrom, isGroundProbe ? 0.05f : 0.06f, palette.markerColor);
-    if (isGroundProbe) {
-        DebugDraw::instance().Line(castFrom, castTo, palette.pathColor);
-        DebugDraw::instance().Line(castTo, castTo + glm::fvec3(0.0f, 0.08f, 0.0f), palette.pathSecondaryColor);
-    }
-    else {
-        DrawRoomscaleDebugSweepCorridor(body, castFrom, castTo, palette.pathColor, palette.pathSecondaryColor);
-        DrawRoomscaleDebugFloorMarker(body, castTo, ScaleRoomscaleDebugColor(palette.floorColor, 0.85f, 0.65f));
-    }
+    DebugDraw::instance().Line(castFrom, castTo, palette.pathColor, 1.0f, true);
+    DebugDraw::instance().PhysicsBody(castFrom, body.radius, body.halfHeight, ScaleRoomscaleDebugColor(palette.bodyColor, 0.85f, 0.28f), 1.0f, 0, true);
+    DebugDraw::instance().PhysicsBody(castTo, body.radius, body.halfHeight, ScaleRoomscaleDebugColor(palette.bodyColor, 0.75f, 0.22f), 1.0f, 0, true);
+    DebugDraw::instance().Sphere(castFrom, sweepRadius, palette.pathColor, 0, true);
+    DebugDraw::instance().Sphere(castTo, sweepRadius, palette.pathSecondaryColor, 0, true);
+    DrawRoomscaleDebugPositionMarker(castFrom, 0.05f, palette.markerColor, true);
+    DrawRoomscaleDebugPositionMarker(castTo, 0.05f, palette.pathSecondaryColor, true);
 }
 
 static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch, bool isProbeOnly, bool hadHit) {
@@ -262,48 +226,28 @@ static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch,
         return;
     }
 
-    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
     const bool isGroundProbe = IsRoomscaleGroundProbe(scratch);
     const RoomscaleDebugPalette palette = GetRoomscaleDebugPalette(isGroundProbe, isProbeOnly);
     const glm::fvec3 castFrom = scratch.castFrom.getLE();
     const glm::fvec3 castTo = castFrom + scratch.castDelta.getLE();
-    const glm::fvec3 candidateWorldPos = isGroundProbe ? glm::fvec3(castFrom.x, castFrom.y - body.groundProbeUp, castFrom.z) : castTo;
-    if (isGroundProbe) {
-        if (hadHit) {
-            const glm::fvec3 hitPos = scratch.hitPos.getLE();
-            DebugDraw::instance().Line(castFrom, hitPos, palette.successColor);
-            DebugDraw::instance().Line(hitPos, castTo, ScaleRoomscaleDebugColor(palette.successColor, 0.45f, 0.35f));
-            DrawRoomscaleDebugPositionMarker(hitPos, 0.09f, palette.successColor);
-            DrawRoomscaleDebugBody(body, candidateWorldPos, ScaleRoomscaleDebugColor(palette.successColor, 0.92f, 0.68f));
-            DrawRoomscaleDebugFloorMarker(body, candidateWorldPos, ScaleRoomscaleDebugColor(palette.successColor, 0.9f, 0.7f));
-            DrawRoomscaleDebugFloorMarker(body, glm::fvec3(hitPos.x, candidateWorldPos.y, hitPos.z), ScaleRoomscaleDebugColor(palette.successColor, 0.85f, 0.55f));
-            return;
-        }
-
-        DrawRoomscaleDebugBody(body, candidateWorldPos, palette.xrayBlockedColor, true);
-        DrawRoomscaleDebugFloorMarker(body, candidateWorldPos, palette.xrayBlockedColor, true);
-        DebugDraw::instance().Line(castFrom, castTo, palette.blockedColor);
-        DrawRoomscaleDebugPositionMarker(castTo, 0.08f, palette.blockedColor, true);
+    if (!hadHit || isGroundProbe) {
         return;
     }
 
-    if (hadHit) {
-        DrawRoomscaleDebugSweepCorridor(body, castFrom, castTo, palette.blockedColor, ScaleRoomscaleDebugColor(palette.blockedColor, 0.7f, 0.65f));
-        DrawRoomscaleDebugBody(body, candidateWorldPos, palette.xrayBlockedColor, true);
-        DrawRoomscaleDebugFloorMarker(body, candidateWorldPos, palette.xrayBlockedColor, true);
-        DrawRoomscaleDebugPositionMarker(castTo, 0.09f, palette.blockedColor, true);
-        return;
+    const glm::fvec3 hitPos = scratch.hitPos.getLE();
+    const float sweepRadius = std::max(scratch.sweepRadius.getLE(), 0.01f);
+    DebugDraw::instance().Line(castFrom, hitPos, palette.blockedColor, 1.0f, true);
+    if (glm::dot(hitPos - castTo, hitPos - castTo) > 0.000001f) {
+        DebugDraw::instance().Line(hitPos, castTo, ScaleRoomscaleDebugColor(palette.blockedColor, 0.45f, 0.35f), 1.0f, true);
     }
-
-    DrawRoomscaleDebugSweepCorridor(body, castFrom, castTo, palette.successColor, ScaleRoomscaleDebugColor(palette.successColor, 0.78f, 0.72f));
-    DrawRoomscaleDebugPositionMarker(castTo, 0.07f, palette.successColor);
-    DrawRoomscaleDebugBody(body, candidateWorldPos, ScaleRoomscaleDebugColor(palette.successColor, 0.92f, 0.68f));
-    DrawRoomscaleDebugFloorMarker(body, candidateWorldPos, ScaleRoomscaleDebugColor(palette.successColor, 0.9f, 0.7f));
+    DebugDraw::instance().Sphere(hitPos, sweepRadius, ScaleRoomscaleDebugColor(palette.blockedColor, 0.85f, 0.28f), 0, true);
+    DrawRoomscaleDebugPositionMarker(hitPos, 0.08f, palette.blockedColor, true);
 }
 
 static void ResetRoomscaleActiveStep() {
     s_roomscaleState.hasActiveStep = false;
     s_roomscaleState.isBinarySearchingStep = false;
+    s_roomscaleState.currentStepBlockedByCollision = false;
     s_roomscaleState.currentStepRawDelta = glm::fvec3(0.0f);
     s_roomscaleState.currentStepWorldDelta = glm::fvec3(0.0f);
     s_roomscaleState.currentStepCandidateWorldPos = glm::fvec3(0.0f);
@@ -318,6 +262,7 @@ static void ResetRoomscaleActiveStep() {
 static void BeginRoomscaleActiveStep(uint32_t remainingSteps) {
     s_roomscaleState.hasActiveStep = true;
     s_roomscaleState.isBinarySearchingStep = false;
+    s_roomscaleState.currentStepBlockedByCollision = false;
     s_roomscaleState.currentStepRawDelta = s_roomscaleState.remainingRawDelta / (float)remainingSteps;
     s_roomscaleState.currentStepWorldDelta = s_roomscaleState.remainingWorldDelta / (float)remainingSteps;
     s_roomscaleState.currentStepCandidateWorldPos = glm::fvec3(0.0f);
@@ -371,6 +316,7 @@ static void ResetRoomscaleState() {
     s_roomscaleState.hasPreviousHeadPos = false;
     s_roomscaleState.hasAppliedHeadPos = false;
     s_roomscaleState.isBlocked = false;
+    s_roomscaleState.isBlockedByCollision = false;
     s_roomscaleState.previousHeadPos = glm::fvec3(0.0f);
     s_roomscaleState.appliedHeadPos = glm::fvec3(0.0f);
     s_roomscaleState.trackedHeadPos = glm::fvec3(0.0f);
@@ -379,14 +325,16 @@ static void ResetRoomscaleState() {
 }
 
 static void UpdateRoomscaleFade() {
-    if (!s_roomscaleState.hasAppliedHeadPos || !s_roomscaleState.isBlocked) {
+    if (!s_roomscaleState.hasAppliedHeadPos || !s_roomscaleState.isBlockedByCollision) {
         s_roomscaleFadeAmount.store(0.0f, std::memory_order_relaxed);
         return;
     }
 
+    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
     glm::fvec2 residual = glm::fvec2(s_roomscaleState.trackedHeadPos.x - s_roomscaleState.appliedHeadPos.x, s_roomscaleState.trackedHeadPos.z - s_roomscaleState.appliedHeadPos.z);
     float residualDistance = glm::length(residual);
-    float fadeAmount = glm::smoothstep(kRoomscaleFadeStartDistance, kRoomscaleFadeFullDistance, residualDistance);
+    float headPenetrationDistance = residualDistance - std::max(body.sweepRadius - kRoomscaleHeadCollisionRadius, 0.0f);
+    float fadeAmount = glm::smoothstep(kRoomscaleFadeStartDistance, kRoomscaleFadeFullDistance, headPenetrationDistance);
     s_roomscaleFadeAmount.store(glm::clamp(fadeAmount, 0.0f, 1.0f), std::memory_order_relaxed);
 }
 
@@ -475,6 +423,7 @@ static void PrimeRoomscaleBaseline(const glm::fvec3& headPos) {
     s_roomscaleState.hasPreviousHeadPos = true;
     s_roomscaleState.hasAppliedHeadPos = true;
     s_roomscaleState.isBlocked = false;
+    s_roomscaleState.isBlockedByCollision = false;
     ClearRoomscaleResolveState();
     UpdateRoomscaleFade();
 }
@@ -702,11 +651,14 @@ void CemuHooks::hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU) {
     scratch.groundHit = kRoomscaleGroundHit;
     scratch.sweepRadius = body.sweepRadius;
     if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_Sweep) {
+        const glm::fvec3 sweepDelta = s_roomscaleState.currentStepWorldDelta * probeScale;
+
         scratch.queryType = RoomscaleQueryType_Sweep;
-        scratch.castFrom = currentWorldPos;
-        scratch.castDelta = s_roomscaleState.currentStepWorldDelta * probeScale;
-        scratch.hitPos = currentWorldPos + scratch.castDelta.getLE();
-        s_roomscaleState.currentStepCandidateWorldPos = scratch.hitPos.getLE();
+        // currentPos tracks the controller/body origin, so center the sphere sweep on the body.
+        scratch.castFrom = currentWorldPos + body.centerOffset;
+        scratch.castDelta = sweepDelta;
+        scratch.hitPos = scratch.castFrom.getLE() + sweepDelta;
+        s_roomscaleState.currentStepCandidateWorldPos = currentWorldPos + sweepDelta;
     }
     else {
         scratch.queryType = RoomscaleQueryType_GroundProbe;
@@ -760,6 +712,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         if (s_roomscaleState.isProbeOnly && hadHit) {
             DrawRoomscaleDebugCastResult(scratch, true, true);
             s_roomscaleState.isBlocked = true;
+            s_roomscaleState.isBlockedByCollision = true;
             UpdateRoomscaleFade();
             ClearRoomscaleResolveState();
             return;
@@ -767,6 +720,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
 
         DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit);
         if (hadHit) {
+            s_roomscaleState.currentStepBlockedByCollision = true;
             if (QueueNextRoomscaleBinarySearchProbe(false)) {
                 hCPU->gpr[3] = RoomscaleHookResult_Cast;
                 return;
@@ -780,6 +734,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
             }
 
             s_roomscaleState.isBlocked = true;
+            s_roomscaleState.isBlockedByCollision = true;
             UpdateRoomscaleFade();
             ClearRoomscaleResolveState();
             hCPU->gpr[3] = RoomscaleHookResult_Warp;
@@ -796,6 +751,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
 
     if (s_roomscaleState.isProbeOnly) {
         s_roomscaleState.isBlocked = !groundValid;
+        s_roomscaleState.isBlockedByCollision = false;
         UpdateRoomscaleFade();
         ClearRoomscaleResolveState();
         return;
@@ -815,6 +771,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         }
 
         s_roomscaleState.isBlocked = true;
+        s_roomscaleState.isBlockedByCollision = false;
         UpdateRoomscaleFade();
         ClearRoomscaleResolveState();
         hCPU->gpr[3] = RoomscaleHookResult_Warp;
@@ -835,6 +792,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         }
 
         s_roomscaleState.isBlocked = true;
+        s_roomscaleState.isBlockedByCollision = s_roomscaleState.currentStepBlockedByCollision;
         UpdateRoomscaleFade();
         ClearRoomscaleResolveState();
         hCPU->gpr[3] = RoomscaleHookResult_Warp;
@@ -852,6 +810,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
 
     if (s_roomscaleState.attemptIndex >= s_roomscaleState.maxAttempts || glm::dot(s_roomscaleState.remainingWorldDelta, s_roomscaleState.remainingWorldDelta) < kMinRoomscaleMoveDistanceSq) {
         s_roomscaleState.isBlocked = false;
+        s_roomscaleState.isBlockedByCollision = false;
         UpdateRoomscaleFade();
         ClearRoomscaleResolveState();
         hCPU->gpr[3] = RoomscaleHookResult_Warp;
