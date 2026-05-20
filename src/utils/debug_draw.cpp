@@ -126,6 +126,26 @@ static void AddPlanarCircle(DebugDrawRenderData& renderData, const glm::vec3& ce
     }
 }
 
+static void AddArcLines(DebugDrawRenderData& renderData, const glm::vec3& center, const glm::vec3& axisA, const glm::vec3& axisB, float startAngle, float endAngle, uint32_t color, int segments, bool xray = false) {
+    if (segments < 1) {
+        return;
+    }
+
+    glm::vec3 previousPoint = center + (axisA * std::cos(startAngle)) + (axisB * std::sin(startAngle));
+    for (int i = 1; i <= segments; ++i) {
+        const float t = (float)i / (float)segments;
+        const float angle = startAngle + ((endAngle - startAngle) * t);
+        const glm::vec3 point = center + (axisA * std::cos(angle)) + (axisB * std::sin(angle));
+        if (xray) {
+            AddRenderXRayLine(renderData, previousPoint, point, color);
+        }
+        else {
+            AddRenderLine(renderData, previousPoint, point, color);
+        }
+        previousPoint = point;
+    }
+}
+
 static void AddTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, uint32_t color) {
     renderData.triangleVertices.push_back({ a, color });
     renderData.triangleVertices.push_back({ b, color });
@@ -236,6 +256,17 @@ void DebugDraw::Sphere(const glm::vec3& position, float radius, uint32_t color, 
     DebugPrimitive primitive = { PrimitiveType::SPHERE, color, 1.0f };
     primitive.a = position;
     primitive.radius = radius;
+    primitive.segments = segments;
+    primitive.xray = xray;
+    m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Capsule(const glm::vec3& center, float radius, float halfHeight, uint32_t color, float thickness, int segments, bool xray) {
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::CAPSULE, color, thickness };
+    primitive.a = center;
+    primitive.radius = radius;
+    primitive.duration = halfHeight;
     primitive.segments = segments;
     primitive.xray = xray;
     m_primitives.push_back(primitive);
@@ -404,6 +435,46 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 AddPlanarCircle(renderData, prim.a, glm::vec3(prim.radius, 0.0f, 0.0f), glm::vec3(0.0f, prim.radius, 0.0f), prim.color, segments, prim.xray);
                 AddPlanarCircle(renderData, prim.a, glm::vec3(prim.radius, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, prim.radius), prim.color, segments, prim.xray);
                 AddPlanarCircle(renderData, prim.a, glm::vec3(0.0f, prim.radius, 0.0f), glm::vec3(0.0f, 0.0f, prim.radius), prim.color, segments, prim.xray);
+                break;
+            }
+
+            case PrimitiveType::CAPSULE: {
+                const float radius = prim.radius;
+                const float halfHeight = std::max(prim.duration, radius);
+                const int segments = ResolveCircleSegments(radius, prim.segments);
+                if (radius <= 0.0f || segments < 4) {
+                    break;
+                }
+
+                const float cylinderHalfHeight = std::max(halfHeight - radius, 0.0f);
+                const glm::vec3 cylinderOffset = glm::vec3(0.0f, cylinderHalfHeight, 0.0f);
+                const glm::vec3 topHemisphereCenter = prim.a + cylinderOffset;
+                const glm::vec3 bottomHemisphereCenter = prim.a - cylinderOffset;
+                const glm::vec3 radiusX = glm::vec3(radius, 0.0f, 0.0f);
+                const glm::vec3 radiusY = glm::vec3(0.0f, radius, 0.0f);
+                const glm::vec3 radiusZ = glm::vec3(0.0f, 0.0f, radius);
+                const uint32_t seamColor = ScaleColor(prim.color, 0.82f, 0.72f);
+                const int arcSegments = std::max(segments / 2, 2);
+
+                AddPlanarCircle(renderData, topHemisphereCenter, radiusX, radiusZ, seamColor, segments, prim.xray);
+                if (cylinderHalfHeight > 0.0f) {
+                    AddPlanarCircle(renderData, bottomHemisphereCenter, radiusX, radiusZ, seamColor, segments, prim.xray);
+                }
+
+                AddArcLines(renderData, topHemisphereCenter, radiusY, radiusZ, glm::half_pi<float>(), 0.0f, prim.color, arcSegments, prim.xray);
+                AddArcLines(renderData, topHemisphereCenter, radiusY, radiusZ, 0.0f, -glm::half_pi<float>(), prim.color, arcSegments, prim.xray);
+                AddArcLines(renderData, topHemisphereCenter, radiusY, radiusX, glm::half_pi<float>(), 0.0f, prim.color, arcSegments, prim.xray);
+                AddArcLines(renderData, topHemisphereCenter, radiusY, radiusX, 0.0f, -glm::half_pi<float>(), prim.color, arcSegments, prim.xray);
+
+                AddArcLines(renderData, bottomHemisphereCenter, radiusY, radiusZ, glm::half_pi<float>(), glm::pi<float>(), prim.color, arcSegments, prim.xray);
+                AddArcLines(renderData, bottomHemisphereCenter, radiusY, radiusZ, glm::pi<float>(), glm::pi<float>() + glm::half_pi<float>(), prim.color, arcSegments, prim.xray);
+                AddArcLines(renderData, bottomHemisphereCenter, radiusY, radiusX, glm::half_pi<float>(), glm::pi<float>(), prim.color, arcSegments, prim.xray);
+                AddArcLines(renderData, bottomHemisphereCenter, radiusY, radiusX, glm::pi<float>(), glm::pi<float>() + glm::half_pi<float>(), prim.color, arcSegments, prim.xray);
+
+                AddLine(renderData, topHemisphereCenter + radiusX, bottomHemisphereCenter + radiusX, prim.color, prim.xray);
+                AddLine(renderData, topHemisphereCenter - radiusX, bottomHemisphereCenter - radiusX, prim.color, prim.xray);
+                AddLine(renderData, topHemisphereCenter + radiusZ, bottomHemisphereCenter + radiusZ, prim.color, prim.xray);
+                AddLine(renderData, topHemisphereCenter - radiusZ, bottomHemisphereCenter - radiusZ, prim.color, prim.xray);
                 break;
             }
 

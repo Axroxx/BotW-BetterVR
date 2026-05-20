@@ -41,6 +41,8 @@ public:
     void Line(const glm::vec3& a, const glm::vec3& b, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, bool xray = false);
     void Dot(const glm::vec3& position, float radius = 0.15f, uint32_t color = DebugDrawColor(0, 255, 0), bool xray = false);
     void Sphere(const glm::vec3& position, float radius = 0.15f, uint32_t color = DebugDrawColor(0, 255, 0), int segments = 0, bool xray = false);
+    // Y-up wire capsule. halfHeight is the half-height of the full capsule, including the rounded caps.
+    void Capsule(const glm::vec3& center, float radius, float halfHeight, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0, bool xray = false);
     void PhysicsBody(const glm::vec3& center, float radius, float halfHeight, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0, bool xray = false);
     // World-space ring on the XZ plane using the game's Y-up convention.
     void Circle(const glm::vec3& position, float radius = 1.0f, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0, bool xray = false);
@@ -64,6 +66,7 @@ private:
         LINE,
         DOT,
         SPHERE,
+        CAPSULE,
         PHYSICS_BODY,
         CIRCLE,
         ARC,
@@ -81,6 +84,7 @@ private:
         // LINE: a, b
         // DOT: a = center, radius used
         // SPHERE: a = center, radius/segments used
+        // CAPSULE: a = center, radius used, duration = halfHeight, segments used
         // PHYSICS_BODY: a = center, radius used, duration = halfHeight, segments used
         // CIRCLE: a = center, radius/segments used
         // ARC: a = start, b = initial velocity, c = acceleration, duration/segments used
