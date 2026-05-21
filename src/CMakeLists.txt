@@ -79,6 +79,12 @@ target_include_directories(BetterVR_Layer PRIVATE ${CMAKE_SOURCE_DIR}/dependenci
 # Install/Debugger related stuff. This is really only used for direct calls
 set(BETTERVR_GRAPHIC_PACK_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/graphicPacks/BreathOfTheWild_BetterVR")
 
+if(CMAKE_INSTALL_PREFIX STREQUAL "${CMAKE_SOURCE_DIR}/Cemu")
+    install(CODE [[
+        file(REMOVE_RECURSE "${CMAKE_INSTALL_PREFIX}/graphicPacks/BreathOfTheWild_BetterVR")
+    ]])
+endif()
+
 install(TARGETS BetterVR_Layer
     RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
 )

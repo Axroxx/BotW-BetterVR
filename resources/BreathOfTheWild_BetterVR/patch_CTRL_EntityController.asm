@@ -11,17 +11,20 @@ RoomscaleHit = RoomscaleScratch + 0x24
 RoomscaleGroundHit = RoomscaleScratch + 0x30
 RoomscaleQueryType = RoomscaleScratch + 0x34
 RoomscaleSweepRadius = RoomscaleScratch + 0x38
-RoomscaleSavedCurrent = 0x60
-RoomscaleOwnLayer = 0x6C
-RoomscaleSavedLR = 0x70
-RoomscaleQuery = 0x80
+RoomscaleHitNormal = RoomscaleScratch + 0x3C
+RoomscaleSavedCurrent = 0x68
+RoomscaleOwnLayer = 0x74
+RoomscaleSavedLR = 0x78
+RoomscaleQuery = 0x88
 RoomscaleShapeVtable = RoomscaleQuery + 0x3C
-RoomscaleIterator = 0xC8
+RoomscaleIterator = 0xD0
+RoomscaleCapsuleQuery = 0x118
+RoomscaleCapsuleShapeVtable = RoomscaleCapsuleQuery + 0x3C
 
 ApplyRoomscaleAfterPlayerVelocity:
-stwu r1, -0x130(r1)
+stwu r1, -0x180(r1)
 mflr r0
-stw r0, 0x134(r1)
+stw r0, 0x184(r1)
 stw r30, 0x14(r1)
 stw r31, 0x18(r1)
 
@@ -48,6 +51,8 @@ bne ApplyRoomscaleAfterPlayerVelocity_Continue
 
 lwz r0, RoomscaleQueryType(r1)
 cmpwi r0, 1
+beq ApplyRoomscaleAfterPlayerVelocity_GroundProbe
+cmpwi r0, 2
 beq ApplyRoomscaleAfterPlayerVelocity_GroundProbe
 
 li r0, 3
@@ -76,24 +81,51 @@ addi r4, r1, RoomscaleCastFrom
 addi r5, r1, RoomscaleHit
 bl ShapeCast_setStartAndEnd
 
-lwz r12, RoomscaleShapeVtable(r1)
+lwz r5, RoomscaleQuery + 0x04(r1)
+cmpwi r5, 0
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+
+lwz r11, 0xE8(r31)
+extrwi. r0, r11, 1, 15
+beq ApplyRoomscaleAfterPlayerVelocity_SweepUseMainBody
+lwz r4, 0x230(r31)
+b ApplyRoomscaleAfterPlayerVelocity_SweepBuildCast
+
+ApplyRoomscaleAfterPlayerVelocity_SweepUseMainBody:
+lwz r4, 0x4(r31)
+
+ApplyRoomscaleAfterPlayerVelocity_SweepBuildCast:
+addi r3, r1, RoomscaleCapsuleQuery
+li r6, 0
+bl ShapeCastWithInfo_ctor
+
+addi r3, r1, RoomscaleCapsuleQuery
+addi r4, r31, 0x208
+bl ShapeCast_copyLayers
+
+addi r3, r1, RoomscaleCapsuleQuery
+addi r4, r1, RoomscaleCastFrom
+addi r5, r1, RoomscaleHit
+bl ShapeCast_setStartAndEnd
+
+lwz r12, RoomscaleCapsuleShapeVtable(r1)
 lwz r0, 0x1C(r12)
 mtctr r0
 li r4, 1
-addi r3, r1, RoomscaleQuery
+addi r3, r1, RoomscaleCapsuleQuery
 bctrl
 mr r30, r3
 
 cmpwi r30, 0
-beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanupCapsule
 
-lwz r6, RoomscaleQuery + 0x04(r1)
+lwz r6, RoomscaleCapsuleQuery + 0x04(r1)
 cmpwi r6, 0
-beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanupCapsule
 
 lwz r5, 0x08(r6)
 cmpwi r5, 0
-beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanupCapsule
 
 addi r3, r1, RoomscaleIterator
 addi r4, r6, 0x34
@@ -105,12 +137,25 @@ stw r0, RoomscaleIterator + 0x10(r1)
 lwz r0, RoomscaleIterator + 0x00(r1)
 lwz r5, RoomscaleIterator + 0x08(r1)
 cmpw r0, r5
-beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanup
+beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanupCapsule
 
 addi r3, r1, RoomscaleIterator
 addi r4, r1, RoomscaleHit
-addi r5, r1, RoomscaleQuery
+addi r5, r1, RoomscaleCapsuleQuery
 bl ShapeCastContactPointToHitPos
+lwz r6, RoomscaleIterator + 0x00(r1)
+lwz r6, 0(r6)
+lfs f0, 0x14(r6)
+stfs f0, RoomscaleHitNormal + 0x00(r1)
+lfs f0, 0x18(r6)
+stfs f0, RoomscaleHitNormal + 0x04(r1)
+lfs f0, 0x1C(r6)
+stfs f0, RoomscaleHitNormal + 0x08(r1)
+
+ApplyRoomscaleAfterPlayerVelocity_SweepCleanupCapsule:
+addi r3, r1, RoomscaleCapsuleQuery
+li r4, 2
+bl ShapeCastWithInfo_dtor
 
 ApplyRoomscaleAfterPlayerVelocity_SweepCleanup:
 
@@ -229,8 +274,8 @@ bl SyncPhysicsFieldAfterSetPosition
 ApplyRoomscaleAfterPlayerVelocity_Continue:
 lwz r31, 0x18(r1)
 lwz r30, 0x14(r1)
-lwz r0, 0x134(r1)
-addi r1, r1, 0x130
+lwz r0, 0x184(r1)
+addi r1, r1, 0x180
 mtlr r0
 lwz r3, 0x4(r31)
 lis r12, ContinueAfterApplyRoomscaleAfterPlayerVelocity@ha
@@ -257,6 +302,8 @@ bctr
 0x034CEFAC = ContactPointInfoIterator_ctor:
 0x034C991C = ShapeCastContactPointToHitPos:
 0x034D09D4 = ShapeCast_copyLayers:
+0x034D1614 = ShapeCastWithInfo_ctor:
+0x034D16A0 = ShapeCastWithInfo_dtor:
 0x034D1B60 = RoomscaleSphereCast_ctor:
 0x034D1DD0 = RoomscaleSphereCast_dtor:
 0x102CCD20 = ContactPointInfoIterator_HitPosVtable:

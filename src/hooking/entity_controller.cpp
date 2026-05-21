@@ -14,12 +14,15 @@ enum RoomscaleHookResult : uint32_t {
 enum RoomscaleQueryType : uint32_t {
     RoomscaleQueryType_Sweep = 0,
     RoomscaleQueryType_GroundProbe = 1,
+    RoomscaleQueryType_SupportProbe = 2,
 };
 
 enum RoomscaleResolvePhase : uint32_t {
     RoomscaleResolvePhase_ForwardSweep = 0,
-    RoomscaleResolvePhase_StepUpSweep = 1,
-    RoomscaleResolvePhase_GroundProbe = 2,
+    RoomscaleResolvePhase_DownSupportProbe = 1,
+    RoomscaleResolvePhase_StepUpSweep = 2,
+    RoomscaleResolvePhase_StepForwardSweep = 3,
+    RoomscaleResolvePhase_StepDownSupportProbe = 4,
 };
 
 struct RoomscaleRaycastScratch {
@@ -30,7 +33,7 @@ struct RoomscaleRaycastScratch {
     BEType<uint32_t> groundHit = 0;
     BEType<uint32_t> queryType = RoomscaleQueryType_Sweep;
     BEType<float> sweepRadius = 0.35f;
-    BEType<uint32_t> reserved = 0;
+    BEVec3 hitNormal = {};
 };
 
 static_assert(offsetof(RoomscaleRaycastScratch, currentPos) == 0x00, "Roomscale scratch current position offset mismatch");
@@ -40,7 +43,15 @@ static_assert(offsetof(RoomscaleRaycastScratch, hitPos) == 0x24, "Roomscale scra
 static_assert(offsetof(RoomscaleRaycastScratch, groundHit) == 0x30, "Roomscale scratch ground-hit offset mismatch");
 static_assert(offsetof(RoomscaleRaycastScratch, queryType) == 0x34, "Roomscale scratch query-type offset mismatch");
 static_assert(offsetof(RoomscaleRaycastScratch, sweepRadius) == 0x38, "Roomscale scratch sweep-radius offset mismatch");
-static_assert(sizeof(RoomscaleRaycastScratch) == 0x40, "Roomscale scratch size mismatch");
+static_assert(offsetof(RoomscaleRaycastScratch, hitNormal) == 0x3C, "Roomscale scratch hit-normal offset mismatch");
+static_assert(sizeof(RoomscaleRaycastScratch) == 0x48, "Roomscale scratch size mismatch");
+
+struct RoomscaleSupportState {
+    bool valid = false;
+    glm::fvec3 point = {};
+    glm::fvec3 normal = {};
+    glm::fvec3 bodyPos = {};
+};
 
 struct RoomscaleState {
     bool hasPreviousHeadPos = false;
@@ -50,9 +61,7 @@ struct RoomscaleState {
     bool isBlocked = false;
     bool isBlockedByCollision = false;
     bool hasActiveStep = false;
-    bool isBinarySearchingStep = false;
     bool currentStepBlockedByCollision = false;
-    bool currentStepTriedStepUp = false;
     glm::fvec3 previousHeadPos = {};
     glm::fvec3 appliedHeadPos = {};
     glm::fvec3 trackedHeadPos = {};
@@ -60,13 +69,10 @@ struct RoomscaleState {
     glm::fvec3 remainingWorldDelta = {};
     glm::fvec3 currentStepRawDelta = {};
     glm::fvec3 currentStepWorldDelta = {};
+    glm::fvec3 currentStepResolvedWorldDelta = {};
     glm::fvec3 currentStepCandidateWorldPos = {};
-    glm::fvec3 currentStepLastSafeWorldPos = {};
-    float currentStepLowScale = 0.0f;
-    float currentStepHighScale = 1.0f;
-    float currentStepProbeScale = 1.0f;
-    float currentStepLastSafeScale = 0.0f;
-    uint32_t currentStepSearchIteration = 0;
+    RoomscaleSupportState support = {};
+    RoomscaleSupportState currentStepSupport = {};
     uint32_t attemptIndex = 0;
     uint32_t maxAttempts = 0;
     RoomscaleResolvePhase resolvePhase = RoomscaleResolvePhase_ForwardSweep;
@@ -89,16 +95,15 @@ static RoomscaleBodyDriveMode s_roomscaleBodyDriveMode = RoomscaleBodyDriveMode:
 
 constexpr float kMaxRoomscaleJumpDistanceSq = 0.25f;
 constexpr float kMinRoomscaleMoveDistanceSq = 0.000001f;
-constexpr float kRoomscaleFadeStartDistance = 0.0f;
-constexpr float kRoomscaleFadeFullDistance = 0.15f;
-constexpr float kRoomscaleHeadCollisionRadius = 0.10f;
 constexpr float kRoomscaleStepDistance = 0.0625f;
 constexpr float kRoomscaleGroundSnapMaxRise = 0.10f;
+constexpr float kRoomscaleGroundSnapJitterTolerance = 0.01f;
+constexpr float kRoomscaleSupportRetainNormalDot = 0.98f;
 constexpr float kRoomscaleStepUpHeight = 0.30f;
-constexpr float kRoomscaleBinarySearchScaleResolution = 1.0f / 16.0f;
+constexpr float kRoomscaleStandableSweepNormalY = 0.55f;
+constexpr float kRoomscaleBlockedReturnTangentialAllowance = 0.5f;
 constexpr float kRoomscaleDebugFallbackBodyRadius = 0.35f;
 constexpr float kRoomscaleDebugFallbackBodyHalfHeight = 0.9f;
-constexpr uint32_t kRoomscaleBinarySearchIterations = 4;
 constexpr uint32_t kMaxRoomscaleRaycastAttempts = 8;
 constexpr uint32_t kRoomscaleGroundHit = 15;
 
@@ -121,6 +126,12 @@ struct RoomscaleDebugPalette {
     uint32_t blockedColor = 0;
     uint32_t xrayBlockedColor = 0;
 };
+
+static glm::fmat3 GetRoomscaleWorldToRoomRotation();
+static glm::fmat3 GetRoomscaleRoomToWorldRotation();
+static glm::fvec3 GetRoomscaleResidual();
+static void UpdateRoomscaleFade();
+static void ClearRoomscaleResolveState();
 
 static uint32_t ScaleRoomscaleDebugColor(uint32_t color, float rgbScale, float alphaScale = 1.0f) {
     auto scaleChannel = [&](int shift, float scale) {
@@ -197,12 +208,205 @@ static RoomscaleDebugBody GetRoomscaleDebugBody() {
     return body;
 }
 
+static bool IsRoomscaleSweepPhase(RoomscaleResolvePhase phase) {
+    return phase == RoomscaleResolvePhase_ForwardSweep || phase == RoomscaleResolvePhase_StepUpSweep || phase == RoomscaleResolvePhase_StepForwardSweep;
+}
+
+static bool IsRoomscaleSupportProbePhase(RoomscaleResolvePhase phase) {
+    return phase == RoomscaleResolvePhase_DownSupportProbe || phase == RoomscaleResolvePhase_StepDownSupportProbe;
+}
+
+static bool HasRoomscaleValidSweepNormal(const glm::fvec3& normal) {
+    return glm::all(glm::isfinite(normal)) && glm::dot(normal, normal) > 0.000001f;
+}
+
+static bool HasRoomscaleValidSupportState(const RoomscaleSupportState& support) {
+    return support.valid && glm::all(glm::isfinite(support.point)) && glm::all(glm::isfinite(support.normal)) && glm::all(glm::isfinite(support.bodyPos)) && HasRoomscaleValidSweepNormal(support.normal);
+}
+
+static glm::fvec3 NormalizeRoomscaleSweepHitNormal(const RoomscaleRaycastScratch& scratch) {
+    glm::fvec3 hitNormal = scratch.hitNormal.getLE();
+    if (!HasRoomscaleValidSweepNormal(hitNormal)) {
+        return glm::fvec3(0.0f);
+    }
+
+    hitNormal = glm::normalize(hitNormal);
+    glm::fvec3 castDelta = scratch.castDelta.getLE();
+    if (glm::dot(castDelta, castDelta) > 0.000001f && glm::dot(hitNormal, castDelta) > 0.0f) {
+        hitNormal = -hitNormal;
+    }
+
+    return hitNormal;
+}
+
+static bool IsRoomscaleSweepNormalFloorLike(const glm::fvec3& normal) {
+    return HasRoomscaleValidSweepNormal(normal) && normal.y >= kRoomscaleStandableSweepNormalY;
+}
+
+static glm::fvec3 GetRoomscaleGroundProbeDelta(const RoomscaleDebugBody& body) {
+    return glm::fvec3(0.0f, -(body.groundProbeUp + body.groundProbeDown), 0.0f);
+}
+
+static glm::fvec3 GetRoomscaleBodyCapsuleCenter(const RoomscaleDebugBody& body, const glm::fvec3& bodyPos) {
+    return bodyPos + body.centerOffset;
+}
+
+static void PrepareRoomscaleSupportProbe(RoomscaleRaycastScratch& scratch, const RoomscaleDebugBody& body, const glm::fvec3& bodyPos) {
+    scratch.queryType = RoomscaleQueryType_SupportProbe;
+    scratch.sweepRadius = body.radius;
+    scratch.castFrom = GetRoomscaleBodyCapsuleCenter(body, bodyPos) + glm::fvec3(0.0f, body.groundProbeUp, 0.0f);
+    scratch.castDelta = GetRoomscaleGroundProbeDelta(body);
+    scratch.hitPos = scratch.castFrom.getLE() + scratch.castDelta.getLE();
+    scratch.hitNormal = glm::fvec3(0.0f);
+}
+
+static bool TryBuildRoomscaleSupportState(const RoomscaleDebugBody& body, const glm::fvec3& referenceBodyPos, float maxRise, const RoomscaleRaycastScratch& scratch, RoomscaleSupportState& outSupport) {
+    outSupport = {};
+    glm::fvec3 supportNormal = NormalizeRoomscaleSweepHitNormal(scratch);
+    if (HasRoomscaleValidSweepNormal(supportNormal) && supportNormal.y < 0.0f) {
+        supportNormal = -supportNormal;
+    }
+
+    if (!IsRoomscaleSweepNormalFloorLike(supportNormal)) {
+        return false;
+    }
+
+    glm::fvec3 castDelta = scratch.castDelta.getLE();
+    float castLengthSq = glm::dot(castDelta, castDelta);
+    if (castLengthSq < 0.000001f) {
+        return false;
+    }
+
+    const float cylinderHalfHeight = std::max(body.halfHeight - body.radius, 0.0f);
+    const glm::fvec3 hitPos = scratch.hitPos.getLE();
+    const glm::fvec3 bottomSphereCenter = hitPos + (supportNormal * body.radius);
+    const glm::fvec3 capsuleCenter = bottomSphereCenter + glm::fvec3(0.0f, cylinderHalfHeight, 0.0f);
+    float alongCast = glm::dot(capsuleCenter - scratch.castFrom.getLE(), castDelta) / castLengthSq;
+    if (alongCast < 0.0f || alongCast > 1.0f) {
+        return false;
+    }
+
+    glm::fvec3 bodyPos = capsuleCenter - body.centerOffset;
+    if (!glm::all(glm::isfinite(bodyPos)) || (bodyPos.y - referenceBodyPos.y) > maxRise) {
+        return false;
+    }
+
+    outSupport.valid = true;
+    outSupport.point = hitPos;
+    outSupport.normal = supportNormal;
+    outSupport.bodyPos = bodyPos;
+    return true;
+}
+
+static RoomscaleSupportState StabilizeRoomscaleSupportState(const RoomscaleSupportState& previousSupport, const RoomscaleSupportState& nextSupport) {
+    if (!HasRoomscaleValidSupportState(nextSupport)) {
+        return {};
+    }
+
+    if (!HasRoomscaleValidSupportState(previousSupport)) {
+        return nextSupport;
+    }
+
+    RoomscaleSupportState resolvedSupport = nextSupport;
+    if (std::abs(nextSupport.bodyPos.y - previousSupport.bodyPos.y) <= kRoomscaleGroundSnapJitterTolerance && glm::dot(nextSupport.normal, previousSupport.normal) >= kRoomscaleSupportRetainNormalDot) {
+        resolvedSupport.bodyPos.y = previousSupport.bodyPos.y;
+        resolvedSupport.point.y = previousSupport.point.y;
+        resolvedSupport.normal = previousSupport.normal;
+    }
+
+    return resolvedSupport;
+}
+
+static glm::fvec3 ProjectRoomscaleDeltaOntoSupport(const glm::fvec3& worldDelta, const RoomscaleSupportState& support) {
+    if (!HasRoomscaleValidSupportState(support)) {
+        return worldDelta;
+    }
+
+    glm::fvec3 supportNormal = glm::normalize(support.normal);
+    if (std::abs(supportNormal.y) < 0.000001f) {
+        return worldDelta;
+    }
+
+    glm::fvec3 projectedDelta = worldDelta;
+    projectedDelta.y = -(supportNormal.x * worldDelta.x + supportNormal.z * worldDelta.z) / supportNormal.y;
+    return projectedDelta;
+}
+
+static void BeginRoomscaleResolvePhase(RoomscaleResolvePhase phase) {
+    s_roomscaleState.resolvePhase = phase;
+}
+
+static glm::fvec3 ConvertRoomscaleWorldDeltaToRoomDelta(const glm::fvec3& worldDelta) {
+    glm::fvec3 roomDelta = GetRoomscaleWorldToRoomRotation() * worldDelta;
+    roomDelta.y = 0.0f;
+    return roomDelta;
+}
+
+static bool WouldRoomscaleResidualImproveWithAppliedDelta(glm::fvec3 appliedHeadDelta) {
+    if (!s_roomscaleState.isProbeOnly) {
+        return true;
+    }
+
+    appliedHeadDelta.y = 0.0f;
+    glm::fvec3 oldResidual = GetRoomscaleResidual();
+    glm::fvec3 newResidual = oldResidual - appliedHeadDelta;
+    newResidual.y = 0.0f;
+    return glm::dot(newResidual, newResidual) + kMinRoomscaleMoveDistanceSq < glm::dot(oldResidual, oldResidual);
+}
+
+static bool CommitRoomscaleBodyMove(uint32_t scratchPtr, RoomscaleRaycastScratch& scratch, const glm::fvec3& worldPos, glm::fvec3 appliedHeadDelta) {
+    appliedHeadDelta.y = 0.0f;
+    if (!WouldRoomscaleResidualImproveWithAppliedDelta(appliedHeadDelta)) {
+        return false;
+    }
+
+    scratch.currentPos = worldPos;
+    s_roomscaleState.appliedHeadPos += appliedHeadDelta;
+    CemuHooks::writeMemory(scratchPtr, &scratch);
+    return true;
+}
+
+static bool CommitRoomscaleBodyMoveWithSupport(uint32_t scratchPtr, RoomscaleRaycastScratch& scratch, const RoomscaleSupportState& support, glm::fvec3 appliedHeadDelta) {
+    if (!HasRoomscaleValidSupportState(support)) {
+        return false;
+    }
+
+    if (!CommitRoomscaleBodyMove(scratchPtr, scratch, support.bodyPos, appliedHeadDelta)) {
+        return false;
+    }
+
+    s_roomscaleState.support = support;
+    return true;
+}
+
+static void AdvanceRoomscaleCommittedStep(glm::fvec3 appliedHeadDelta) {
+    appliedHeadDelta.y = 0.0f;
+    s_roomscaleState.remainingRawDelta -= appliedHeadDelta;
+    s_roomscaleState.remainingWorldDelta = GetRoomscaleRoomToWorldRotation() * s_roomscaleState.remainingRawDelta;
+    s_roomscaleState.remainingWorldDelta.y = 0.0f;
+    s_roomscaleState.attemptIndex++;
+    s_roomscaleState.hasActiveStep = false;
+    BeginRoomscaleResolvePhase(RoomscaleResolvePhase_ForwardSweep);
+}
+
+static void FinishRoomscaleResolveWarp(PPCInterpreter_t* hCPU, bool blocked, bool blockedByCollision) {
+    s_roomscaleState.isBlocked = blocked;
+    s_roomscaleState.isBlockedByCollision = blocked && blockedByCollision;
+    UpdateRoomscaleFade();
+    ClearRoomscaleResolveState();
+    hCPU->gpr[3] = RoomscaleHookResult_Warp;
+}
+
 static void DrawRoomscaleDebugPositionMarker(const glm::fvec3& pos, float radius, uint32_t color, bool xray = false) {
     DebugDraw::instance().Dot(pos, radius, color, xray);
 }
 
+static void DrawRoomscaleDebugBodyCapsule(const RoomscaleDebugBody& body, const glm::fvec3& bodyPos, uint32_t color, bool xray = false) {
+    DebugDraw::instance().Capsule(GetRoomscaleBodyCapsuleCenter(body, bodyPos), body.radius, body.halfHeight, color, 1.0f, 0, xray);
+}
+
 static bool IsRoomscaleGroundProbe(const RoomscaleRaycastScratch& scratch) {
-    return scratch.queryType.getLE() == RoomscaleQueryType_GroundProbe;
+    return scratch.queryType.getLE() != RoomscaleQueryType_Sweep;
 }
 
 static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool isProbeOnly) {
@@ -214,18 +418,15 @@ static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool 
     const RoomscaleDebugPalette palette = GetRoomscaleDebugPalette(false, isProbeOnly);
     const glm::fvec3 castFrom = scratch.castFrom.getLE();
     const glm::fvec3 castTo = castFrom + scratch.castDelta.getLE();
-    const float sweepRadius = std::max(scratch.sweepRadius.getLE(), 0.01f);
 
     DebugDraw::instance().Line(castFrom, castTo, palette.pathColor, 1.0f, true);
-    DebugDraw::instance().PhysicsBody(castFrom, body.radius, body.halfHeight, ScaleRoomscaleDebugColor(palette.bodyColor, 0.85f, 0.28f), 1.0f, 0, true);
-    DebugDraw::instance().PhysicsBody(castTo, body.radius, body.halfHeight, ScaleRoomscaleDebugColor(palette.bodyColor, 0.75f, 0.22f), 1.0f, 0, true);
-    DebugDraw::instance().Sphere(castFrom, sweepRadius, palette.pathColor, 0, true);
-    DebugDraw::instance().Sphere(castTo, sweepRadius, palette.pathSecondaryColor, 0, true);
-    DrawRoomscaleDebugPositionMarker(castFrom, 0.05f, palette.markerColor, true);
-    DrawRoomscaleDebugPositionMarker(castTo, 0.05f, palette.pathSecondaryColor, true);
+    DrawRoomscaleDebugBodyCapsule(body, castFrom - body.centerOffset, ScaleRoomscaleDebugColor(palette.bodyColor, 0.85f, 0.28f), true);
+    DrawRoomscaleDebugBodyCapsule(body, castTo - body.centerOffset, ScaleRoomscaleDebugColor(palette.bodyColor, 0.75f, 0.22f), true);
+    DrawRoomscaleDebugPositionMarker(castFrom, 0.04f, palette.markerColor, true);
+    DrawRoomscaleDebugPositionMarker(castTo, 0.04f, palette.pathSecondaryColor, true);
 }
 
-static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch, bool isProbeOnly, bool hadHit) {
+static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch, bool isProbeOnly, bool hadHit, bool acceptedHit) {
     if (!GetSettings().ShouldShowRoomPhysics()) {
         return;
     }
@@ -234,15 +435,32 @@ static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch,
     const RoomscaleDebugPalette palette = GetRoomscaleDebugPalette(isGroundProbe, isProbeOnly);
     const glm::fvec3 castFrom = scratch.castFrom.getLE();
     const glm::fvec3 castTo = castFrom + scratch.castDelta.getLE();
-    if (!hadHit || isGroundProbe) {
+    if (!hadHit) {
         return;
     }
 
     const glm::fvec3 hitPos = scratch.hitPos.getLE();
+    glm::fvec3 hitNormal = NormalizeRoomscaleSweepHitNormal(scratch);
+    if (isGroundProbe) {
+        uint32_t hitColor = acceptedHit ? palette.successColor : palette.blockedColor;
+        DebugDraw::instance().Line(castFrom, hitPos, hitColor, 1.0f, true);
+        if (glm::dot(hitPos - castTo, hitPos - castTo) > 0.000001f) {
+            DebugDraw::instance().Line(hitPos, castTo, ScaleRoomscaleDebugColor(hitColor, 0.45f, 0.35f), 1.0f, true);
+        }
+        if (HasRoomscaleValidSweepNormal(hitNormal)) {
+            DebugDraw::instance().Line(hitPos, hitPos + (hitNormal * 0.18f), palette.floorColor, 1.0f, true);
+        }
+        DrawRoomscaleDebugPositionMarker(hitPos, 0.08f, hitColor, true);
+        return;
+    }
+
     const float sweepRadius = std::max(scratch.sweepRadius.getLE(), 0.01f);
     DebugDraw::instance().Line(castFrom, hitPos, palette.blockedColor, 1.0f, true);
     if (glm::dot(hitPos - castTo, hitPos - castTo) > 0.000001f) {
         DebugDraw::instance().Line(hitPos, castTo, ScaleRoomscaleDebugColor(palette.blockedColor, 0.45f, 0.35f), 1.0f, true);
+    }
+    if (HasRoomscaleValidSweepNormal(hitNormal)) {
+        DebugDraw::instance().Line(hitPos, hitPos + (hitNormal * 0.18f), palette.markerColor, 1.0f, true);
     }
     DebugDraw::instance().Sphere(hitPos, sweepRadius, ScaleRoomscaleDebugColor(palette.blockedColor, 0.85f, 0.28f), 0, true);
     DrawRoomscaleDebugPositionMarker(hitPos, 0.08f, palette.blockedColor, true);
@@ -250,50 +468,24 @@ static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch,
 
 static void ResetRoomscaleActiveStep() {
     s_roomscaleState.hasActiveStep = false;
-    s_roomscaleState.isBinarySearchingStep = false;
     s_roomscaleState.currentStepBlockedByCollision = false;
-    s_roomscaleState.currentStepTriedStepUp = false;
     s_roomscaleState.currentStepRawDelta = glm::fvec3(0.0f);
     s_roomscaleState.currentStepWorldDelta = glm::fvec3(0.0f);
+    s_roomscaleState.currentStepResolvedWorldDelta = glm::fvec3(0.0f);
     s_roomscaleState.currentStepCandidateWorldPos = glm::fvec3(0.0f);
-    s_roomscaleState.currentStepLastSafeWorldPos = glm::fvec3(0.0f);
-    s_roomscaleState.currentStepLowScale = 0.0f;
-    s_roomscaleState.currentStepHighScale = 1.0f;
-    s_roomscaleState.currentStepProbeScale = 1.0f;
-    s_roomscaleState.currentStepLastSafeScale = 0.0f;
-    s_roomscaleState.currentStepSearchIteration = 0;
-    s_roomscaleState.resolvePhase = RoomscaleResolvePhase_ForwardSweep;
+    s_roomscaleState.currentStepSupport = {};
+    BeginRoomscaleResolvePhase(RoomscaleResolvePhase_ForwardSweep);
 }
 
 static void BeginRoomscaleActiveStep(uint32_t remainingSteps) {
     s_roomscaleState.hasActiveStep = true;
-    s_roomscaleState.isBinarySearchingStep = false;
     s_roomscaleState.currentStepBlockedByCollision = false;
-    s_roomscaleState.currentStepTriedStepUp = false;
     s_roomscaleState.currentStepRawDelta = s_roomscaleState.remainingRawDelta / (float)remainingSteps;
     s_roomscaleState.currentStepWorldDelta = s_roomscaleState.remainingWorldDelta / (float)remainingSteps;
+    s_roomscaleState.currentStepResolvedWorldDelta = ProjectRoomscaleDeltaOntoSupport(s_roomscaleState.currentStepWorldDelta, s_roomscaleState.support);
     s_roomscaleState.currentStepCandidateWorldPos = glm::fvec3(0.0f);
-    s_roomscaleState.currentStepLastSafeWorldPos = glm::fvec3(0.0f);
-    s_roomscaleState.currentStepLowScale = 0.0f;
-    s_roomscaleState.currentStepHighScale = 1.0f;
-    s_roomscaleState.currentStepProbeScale = 1.0f;
-    s_roomscaleState.currentStepLastSafeScale = 0.0f;
-    s_roomscaleState.currentStepSearchIteration = 0;
-    s_roomscaleState.resolvePhase = RoomscaleResolvePhase_ForwardSweep;
-}
-
-static bool IsRoomscaleGroundProbeValid(const glm::fvec3& candidateWorldPos, const glm::fvec3& hitPos, float maxRise) {
-    if (!glm::all(glm::isfinite(hitPos))) {
-        return false;
-    }
-
-    return (hitPos.y - candidateWorldPos.y) <= maxRise;
-}
-
-static glm::fvec3 ResolveRoomscaleGroundPosition(const glm::fvec3& candidateWorldPos, const glm::fvec3& hitPos) {
-    glm::fvec3 resolvedWorldPos = candidateWorldPos;
-    resolvedWorldPos.y = hitPos.y;
-    return resolvedWorldPos;
+    s_roomscaleState.currentStepSupport = {};
+    BeginRoomscaleResolvePhase(RoomscaleResolvePhase_ForwardSweep);
 }
 
 static glm::fmat3 GetRoomscaleRoomToWorldRotation() {
@@ -302,31 +494,6 @@ static glm::fmat3 GetRoomscaleRoomToWorldRotation() {
 
 static glm::fmat3 GetRoomscaleWorldToRoomRotation() {
     return glm::transpose(GetRoomscaleRoomToWorldRotation());
-}
-
-static bool QueueNextRoomscaleBinarySearchProbe(bool candidateWasSafe) {
-    if (candidateWasSafe) {
-        s_roomscaleState.currentStepLastSafeScale = s_roomscaleState.currentStepProbeScale;
-        s_roomscaleState.currentStepLowScale = s_roomscaleState.currentStepProbeScale;
-    }
-    else {
-        s_roomscaleState.currentStepHighScale = s_roomscaleState.currentStepProbeScale;
-        s_roomscaleState.isBinarySearchingStep = true;
-    }
-
-    if (!s_roomscaleState.isBinarySearchingStep) {
-        return false;
-    }
-
-    if (s_roomscaleState.currentStepSearchIteration >= kRoomscaleBinarySearchIterations || (s_roomscaleState.currentStepHighScale - s_roomscaleState.currentStepLowScale) <= kRoomscaleBinarySearchScaleResolution) {
-        return false;
-    }
-
-    s_roomscaleState.currentStepSearchIteration++;
-    s_roomscaleState.currentStepProbeScale = (s_roomscaleState.currentStepLowScale + s_roomscaleState.currentStepHighScale) * 0.5f;
-    s_roomscaleState.currentStepTriedStepUp = false;
-    s_roomscaleState.resolvePhase = RoomscaleResolvePhase_ForwardSweep;
-    return true;
 }
 
 static void ClearRoomscaleResolveState() {
@@ -344,6 +511,7 @@ static void ResetRoomscaleState() {
     s_roomscaleState.hasAppliedHeadPos = false;
     s_roomscaleState.isBlocked = false;
     s_roomscaleState.isBlockedByCollision = false;
+    s_roomscaleState.support = {};
     s_roomscaleState.previousHeadPos = glm::fvec3(0.0f);
     s_roomscaleState.appliedHeadPos = glm::fvec3(0.0f);
     s_roomscaleState.trackedHeadPos = glm::fvec3(0.0f);
@@ -352,17 +520,8 @@ static void ResetRoomscaleState() {
 }
 
 static void UpdateRoomscaleFade() {
-    if (!s_roomscaleState.hasAppliedHeadPos || !s_roomscaleState.isBlockedByCollision) {
-        s_roomscaleFadeAmount.store(0.0f, std::memory_order_relaxed);
-        return;
-    }
-
-    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
-    glm::fvec2 residual = glm::fvec2(s_roomscaleState.trackedHeadPos.x - s_roomscaleState.appliedHeadPos.x, s_roomscaleState.trackedHeadPos.z - s_roomscaleState.appliedHeadPos.z);
-    float residualDistance = glm::length(residual);
-    float headPenetrationDistance = residualDistance - std::max(body.sweepRadius - kRoomscaleHeadCollisionRadius, 0.0f);
-    float fadeAmount = glm::smoothstep(kRoomscaleFadeStartDistance, kRoomscaleFadeFullDistance, headPenetrationDistance);
-    s_roomscaleFadeAmount.store(glm::clamp(fadeAmount, 0.0f, 1.0f), std::memory_order_relaxed);
+    // Room collision fading is handled separately from body driving now.
+    s_roomscaleFadeAmount.store(0.0f, std::memory_order_relaxed);
 }
 
 static glm::fvec3 GetRoomscaleResidual() {
@@ -388,8 +547,16 @@ static glm::fvec3 RemoveResolvedRoomscaleDelta(glm::fvec3 roomDelta, glm::fvec3 
         return roomDelta;
     }
 
-    float cancelDistance = std::min(-alongResidual, residualDistance);
-    return roomDelta + (residualDir * cancelDistance);
+    glm::fvec3 tangentialDelta = roomDelta - (residualDir * alongResidual);
+    if (s_roomscaleState.isBlockedByCollision) {
+        float towardBodyDistance = -alongResidual;
+        float tangentialDistance = glm::length(tangentialDelta);
+        if (towardBodyDistance >= (tangentialDistance * kRoomscaleBlockedReturnTangentialAllowance)) {
+            return glm::fvec3(0.0f);
+        }
+    }
+
+    return tangentialDelta;
 }
 
 static std::optional<glm::fvec3> TryGetCurrentHeadPos() {
@@ -451,6 +618,7 @@ static void PrimeRoomscaleBaseline(const glm::fvec3& headPos) {
     s_roomscaleState.hasAppliedHeadPos = true;
     s_roomscaleState.isBlocked = false;
     s_roomscaleState.isBlockedByCollision = false;
+    s_roomscaleState.support = {};
     ClearRoomscaleResolveState();
     UpdateRoomscaleFade();
 }
@@ -678,34 +846,37 @@ void CemuHooks::hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU) {
 
     const RoomscaleDebugBody body = GetRoomscaleDebugBody();
     const glm::fvec3 currentWorldPos = scratch.currentPos.getLE();
-    const float probeScale = glm::clamp(s_roomscaleState.currentStepProbeScale, 0.0f, 1.0f);
+    const RoomscaleResolvePhase phase = s_roomscaleState.resolvePhase;
 
     scratch.groundHit = kRoomscaleGroundHit;
     scratch.sweepRadius = body.sweepRadius;
-    if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_ForwardSweep) {
-        const glm::fvec3 sweepDelta = s_roomscaleState.currentStepWorldDelta * probeScale;
-
+    scratch.hitNormal = glm::fvec3(0.0f);
+    if (phase == RoomscaleResolvePhase_ForwardSweep) {
         scratch.queryType = RoomscaleQueryType_Sweep;
-        // currentPos tracks the controller/body origin, so center the sphere sweep on the body.
-        scratch.castFrom = currentWorldPos + body.centerOffset;
-        scratch.castDelta = sweepDelta;
-        scratch.hitPos = scratch.castFrom.getLE() + sweepDelta;
-        s_roomscaleState.currentStepCandidateWorldPos = currentWorldPos + sweepDelta;
+        scratch.castFrom = GetRoomscaleBodyCapsuleCenter(body, currentWorldPos);
+        scratch.castDelta = s_roomscaleState.currentStepResolvedWorldDelta;
+        scratch.hitPos = scratch.castFrom.getLE() + scratch.castDelta.getLE();
+        s_roomscaleState.currentStepCandidateWorldPos = currentWorldPos + s_roomscaleState.currentStepResolvedWorldDelta;
     }
-    else if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_StepUpSweep) {
-        const glm::fvec3 sweepDelta = s_roomscaleState.currentStepWorldDelta * probeScale;
-
+    else if (phase == RoomscaleResolvePhase_StepUpSweep) {
+        const glm::fvec3 stepUpDelta = glm::fvec3(0.0f, kRoomscaleStepUpHeight, 0.0f);
         scratch.queryType = RoomscaleQueryType_Sweep;
-        scratch.castFrom = currentWorldPos + body.centerOffset + glm::fvec3(0.0f, kRoomscaleStepUpHeight, 0.0f);
-        scratch.castDelta = sweepDelta;
-        scratch.hitPos = scratch.castFrom.getLE() + sweepDelta;
-        s_roomscaleState.currentStepCandidateWorldPos = currentWorldPos + sweepDelta + glm::fvec3(0.0f, kRoomscaleStepUpHeight, 0.0f);
+        scratch.castFrom = GetRoomscaleBodyCapsuleCenter(body, currentWorldPos);
+        scratch.castDelta = stepUpDelta;
+        scratch.hitPos = scratch.castFrom.getLE() + stepUpDelta;
+        s_roomscaleState.currentStepCandidateWorldPos = currentWorldPos + stepUpDelta;
     }
-    else {
-        scratch.queryType = RoomscaleQueryType_GroundProbe;
-        scratch.castFrom = glm::fvec3(s_roomscaleState.currentStepCandidateWorldPos.x, s_roomscaleState.currentStepCandidateWorldPos.y + body.groundProbeUp, s_roomscaleState.currentStepCandidateWorldPos.z);
-        scratch.castDelta = glm::fvec3(0.0f, -(body.groundProbeUp + body.groundProbeDown), 0.0f);
-        scratch.hitPos = glm::fvec3(0.0f);
+    else if (phase == RoomscaleResolvePhase_StepForwardSweep) {
+        const glm::fvec3 steppedUpWorldPos = s_roomscaleState.currentStepCandidateWorldPos;
+        scratch.queryType = RoomscaleQueryType_Sweep;
+        scratch.castFrom = GetRoomscaleBodyCapsuleCenter(body, steppedUpWorldPos);
+        scratch.castDelta = s_roomscaleState.currentStepResolvedWorldDelta;
+        scratch.hitPos = scratch.castFrom.getLE() + scratch.castDelta.getLE();
+        s_roomscaleState.currentStepCandidateWorldPos = steppedUpWorldPos + s_roomscaleState.currentStepResolvedWorldDelta;
+    }
+    else if (IsRoomscaleSupportProbePhase(phase)) {
+        glm::fvec3 probeBodyPos = s_roomscaleState.currentStepCandidateWorldPos;
+        PrepareRoomscaleSupportProbe(scratch, body, probeBodyPos);
     }
 
     DrawRoomscaleDebugCast(scratch, s_roomscaleState.isProbeOnly);
@@ -747,146 +918,84 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_ForwardSweep) {
-        DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit);
+    if (IsRoomscaleSweepPhase(s_roomscaleState.resolvePhase)) {
+        DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit, false);
         if (hadHit) {
             s_roomscaleState.currentStepBlockedByCollision = true;
-            if (!s_roomscaleState.currentStepTriedStepUp) {
-                s_roomscaleState.currentStepTriedStepUp = true;
-                s_roomscaleState.resolvePhase = RoomscaleResolvePhase_StepUpSweep;
+            if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_ForwardSweep) {
+                BeginRoomscaleResolvePhase(RoomscaleResolvePhase_StepUpSweep);
                 hCPU->gpr[3] = RoomscaleHookResult_Cast;
                 return;
             }
 
-            if (QueueNextRoomscaleBinarySearchProbe(false)) {
-                hCPU->gpr[3] = RoomscaleHookResult_Cast;
-                return;
-            }
-
-            if (s_roomscaleState.currentStepLastSafeScale > 0.0f) {
-                scratch.currentPos = s_roomscaleState.currentStepLastSafeWorldPos;
-                s_roomscaleState.appliedHeadPos += s_roomscaleState.currentStepRawDelta * s_roomscaleState.currentStepLastSafeScale;
-                writeMemory(scratchPtr, &scratch);
-            }
-
-            s_roomscaleState.isBlocked = true;
-            s_roomscaleState.isBlockedByCollision = true;
-            UpdateRoomscaleFade();
-            ClearRoomscaleResolveState();
-            hCPU->gpr[3] = RoomscaleHookResult_Warp;
+            FinishRoomscaleResolveWarp(hCPU, true, true);
             return;
         }
 
-        s_roomscaleState.resolvePhase = RoomscaleResolvePhase_GroundProbe;
+        if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_ForwardSweep) {
+            BeginRoomscaleResolvePhase(RoomscaleResolvePhase_DownSupportProbe);
+        }
+        else if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_StepUpSweep) {
+            BeginRoomscaleResolvePhase(RoomscaleResolvePhase_StepForwardSweep);
+        }
+        else {
+            BeginRoomscaleResolvePhase(RoomscaleResolvePhase_StepDownSupportProbe);
+        }
+
         hCPU->gpr[3] = RoomscaleHookResult_Cast;
         return;
     }
 
-    if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_StepUpSweep) {
-        DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit);
-        if (hadHit) {
-            s_roomscaleState.currentStepBlockedByCollision = true;
-            if (QueueNextRoomscaleBinarySearchProbe(false)) {
-                hCPU->gpr[3] = RoomscaleHookResult_Cast;
+    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
+    const bool isStepProbe = s_roomscaleState.resolvePhase == RoomscaleResolvePhase_StepDownSupportProbe;
+    const float maxGroundRise = isStepProbe ? (kRoomscaleStepUpHeight + kRoomscaleGroundSnapMaxRise) : kRoomscaleGroundSnapMaxRise;
+    RoomscaleSupportState support = {};
+    const bool hasSupport = hadHit && TryBuildRoomscaleSupportState(body, scratch.currentPos.getLE(), maxGroundRise, scratch, support);
+    DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit, hasSupport);
+
+    if (!hasSupport) {
+        if (!isStepProbe) {
+            glm::fvec3 appliedHeadDelta = s_roomscaleState.currentStepRawDelta;
+            if (!CommitRoomscaleBodyMove(scratchPtr, scratch, s_roomscaleState.currentStepCandidateWorldPos, appliedHeadDelta)) {
+                FinishRoomscaleResolveWarp(hCPU, true, s_roomscaleState.currentStepBlockedByCollision);
                 return;
             }
 
-            if (s_roomscaleState.currentStepLastSafeScale > 0.0f) {
-                scratch.currentPos = s_roomscaleState.currentStepLastSafeWorldPos;
-                s_roomscaleState.appliedHeadPos += s_roomscaleState.currentStepRawDelta * s_roomscaleState.currentStepLastSafeScale;
-                writeMemory(scratchPtr, &scratch);
+            s_roomscaleState.support = {};
+            AdvanceRoomscaleCommittedStep(appliedHeadDelta);
+            if (glm::dot(s_roomscaleState.remainingWorldDelta, s_roomscaleState.remainingWorldDelta) < kMinRoomscaleMoveDistanceSq) {
+                FinishRoomscaleResolveWarp(hCPU, false, false);
+                return;
             }
 
-            s_roomscaleState.isBlocked = true;
-            s_roomscaleState.isBlockedByCollision = true;
-            UpdateRoomscaleFade();
-            ClearRoomscaleResolveState();
-            hCPU->gpr[3] = RoomscaleHookResult_Warp;
-            return;
-        }
+            if (s_roomscaleState.attemptIndex >= s_roomscaleState.maxAttempts) {
+                FinishRoomscaleResolveWarp(hCPU, true, false);
+                return;
+            }
 
-        s_roomscaleState.resolvePhase = RoomscaleResolvePhase_GroundProbe;
-        hCPU->gpr[3] = RoomscaleHookResult_Cast;
-        return;
-    }
-
-    glm::fvec3 groundProbeBaseWorldPos = s_roomscaleState.currentStepCandidateWorldPos;
-    if (s_roomscaleState.currentStepTriedStepUp) {
-        groundProbeBaseWorldPos.y -= kRoomscaleStepUpHeight;
-    }
-
-    float maxGroundRise = s_roomscaleState.currentStepTriedStepUp ? (kRoomscaleStepUpHeight + kRoomscaleGroundSnapMaxRise) : kRoomscaleGroundSnapMaxRise;
-    bool allowAirStep = !hadHit && !s_roomscaleState.currentStepTriedStepUp;
-    bool groundValid = allowAirStep || (hadHit && IsRoomscaleGroundProbeValid(groundProbeBaseWorldPos, scratch.hitPos.getLE(), maxGroundRise));
-    // If there is no landing surface below an ordinary horizontal move, keep the stepped body move and let BotW's own gravity handle the fall.
-    glm::fvec3 snappedCandidateWorldPos = (groundValid && hadHit) ? ResolveRoomscaleGroundPosition(groundProbeBaseWorldPos, scratch.hitPos.getLE()) : groundProbeBaseWorldPos;
-    DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, groundValid && hadHit);
-
-    if (!groundValid) {
-        if (QueueNextRoomscaleBinarySearchProbe(false)) {
             hCPU->gpr[3] = RoomscaleHookResult_Cast;
             return;
         }
 
-        if (s_roomscaleState.currentStepLastSafeScale > 0.0f) {
-            scratch.currentPos = s_roomscaleState.currentStepLastSafeWorldPos;
-            s_roomscaleState.appliedHeadPos += s_roomscaleState.currentStepRawDelta * s_roomscaleState.currentStepLastSafeScale;
-            writeMemory(scratchPtr, &scratch);
-        }
-
-        s_roomscaleState.isBlocked = true;
-        s_roomscaleState.isBlockedByCollision = false;
-        UpdateRoomscaleFade();
-        ClearRoomscaleResolveState();
-        hCPU->gpr[3] = RoomscaleHookResult_Warp;
+        FinishRoomscaleResolveWarp(hCPU, true, s_roomscaleState.currentStepBlockedByCollision);
         return;
     }
 
-    s_roomscaleState.currentStepLastSafeWorldPos = snappedCandidateWorldPos;
-    if (QueueNextRoomscaleBinarySearchProbe(true)) {
-        hCPU->gpr[3] = RoomscaleHookResult_Cast;
+    s_roomscaleState.currentStepSupport = StabilizeRoomscaleSupportState(s_roomscaleState.support, support);
+    glm::fvec3 appliedHeadDelta = s_roomscaleState.currentStepRawDelta;
+    if (!CommitRoomscaleBodyMoveWithSupport(scratchPtr, scratch, s_roomscaleState.currentStepSupport, appliedHeadDelta)) {
+        FinishRoomscaleResolveWarp(hCPU, true, s_roomscaleState.currentStepBlockedByCollision);
         return;
     }
 
-    if (s_roomscaleState.isBinarySearchingStep) {
-        if (s_roomscaleState.currentStepLastSafeScale > 0.0f) {
-            scratch.currentPos = s_roomscaleState.currentStepLastSafeWorldPos;
-            s_roomscaleState.appliedHeadPos += s_roomscaleState.currentStepRawDelta * s_roomscaleState.currentStepLastSafeScale;
-            writeMemory(scratchPtr, &scratch);
-        }
-
-        s_roomscaleState.isBlocked = true;
-        s_roomscaleState.isBlockedByCollision = s_roomscaleState.currentStepBlockedByCollision;
-        UpdateRoomscaleFade();
-        ClearRoomscaleResolveState();
-        hCPU->gpr[3] = RoomscaleHookResult_Warp;
-        return;
-    }
-
-    scratch.currentPos = snappedCandidateWorldPos;
-    s_roomscaleState.appliedHeadPos += s_roomscaleState.currentStepRawDelta;
-    s_roomscaleState.remainingRawDelta -= s_roomscaleState.currentStepRawDelta;
-    s_roomscaleState.remainingWorldDelta -= s_roomscaleState.currentStepWorldDelta;
-    s_roomscaleState.attemptIndex++;
-    s_roomscaleState.hasActiveStep = false;
-    s_roomscaleState.resolvePhase = RoomscaleResolvePhase_ForwardSweep;
-    writeMemory(scratchPtr, &scratch);
-
+    AdvanceRoomscaleCommittedStep(appliedHeadDelta);
     if (glm::dot(s_roomscaleState.remainingWorldDelta, s_roomscaleState.remainingWorldDelta) < kMinRoomscaleMoveDistanceSq) {
-        s_roomscaleState.isBlocked = false;
-        s_roomscaleState.isBlockedByCollision = false;
-        UpdateRoomscaleFade();
-        ClearRoomscaleResolveState();
-        hCPU->gpr[3] = RoomscaleHookResult_Warp;
+        FinishRoomscaleResolveWarp(hCPU, false, false);
         return;
     }
 
     if (s_roomscaleState.attemptIndex >= s_roomscaleState.maxAttempts) {
-        s_roomscaleState.isBlocked = true;
-        s_roomscaleState.isBlockedByCollision = false;
-        UpdateRoomscaleFade();
-        ClearRoomscaleResolveState();
-        hCPU->gpr[3] = RoomscaleHookResult_Warp;
+        FinishRoomscaleResolveWarp(hCPU, true, false);
         return;
     }
 
