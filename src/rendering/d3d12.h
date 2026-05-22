@@ -70,50 +70,45 @@ public:
     class CommandContext {
     public:
         template <typename F>
-        CommandContext(ID3D12Device* d3d12Device, ID3D12CommandQueue* d3d12Queue, ID3D12CommandAllocator* d3d12Allocator, F&& recordCallback): m_device(d3d12Device), m_queue(d3d12Queue) {
-            // Create commands to upload buffers
-            checkHResult(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3d12Allocator, nullptr, IID_PPV_ARGS(&this->m_cmdList)), "Failed to create D3D12_CommandContext's command list!");
+        CommandContext(RND_D3D12* d3d12, F&& recordCallback): m_d3d12(d3d12) {
+            checkAssert(m_d3d12 != nullptr, "D3D12 command context is missing its renderer backend!");
+            m_waitFor.reserve(4);
+            m_signalTo.reserve(4);
+
+            if constexpr (blockTillExecuted) {
+                m_cmdList = m_d3d12->AcquireImmediateCommandList();
+            }
+            else {
+                m_cmdList = m_d3d12->AcquireFrameCommandList();
+            }
 
             recordCallback(this);
         }
 
         ~CommandContext() {
-            // Close command list and then execute command list in queue
-            checkHResult(this->m_cmdList->Close(), "Failed to close D3D12_CommandContext's queue");
-            ID3D12CommandList* collectedList[] = { this->m_cmdList.Get() };
+            checkHResult(m_cmdList->Close(), "Failed to close D3D12 command list!");
 
-            for (auto& [texture, value] : this->m_waitFor)
+            for (auto& [texture, value] : m_waitFor)
                 texture->d3d12WaitForFence(value);
-            m_queue->ExecuteCommandLists((UINT)std::size(collectedList), collectedList);
-            for (auto& [texture, value] : this->m_signalTo)
+
+            m_d3d12->ExecuteCommandList(m_cmdList);
+
+            for (auto& [texture, value] : m_signalTo)
                 texture->d3d12SignalFence(value);
 
-            // If enabled, wait until the command list and the fence signal has been executed
             if constexpr (blockTillExecuted) {
-                m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&this->m_blockFence));
-                m_queue->Signal(this->m_blockFence.Get(), 1);
-
-                HANDLE waitEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-                checkAssert(waitEvent != NULL, "Failed to create upload event!");
-
-                if (this->m_blockFence->GetCompletedValue() < 1) {
-                    this->m_blockFence->SetEventOnCompletion(1, waitEvent);
-                    WaitForSingleObject(waitEvent, INFINITE);
-                }
-                CloseHandle(waitEvent);
+                const uint64_t fenceValue = m_d3d12->SignalQueueFence();
+                m_d3d12->WaitForQueueFence(fenceValue);
             }
         }
 
-        ID3D12GraphicsCommandList* GetRecordList() { return this->m_cmdList.Get(); }
-        void WaitFor(Texture* texture, uint64_t value) { this->m_waitFor.push_back({ texture, value }); }
-        void Signal(Texture* texture, uint64_t value) { this->m_signalTo.push_back({ texture, value }); }
+        ID3D12GraphicsCommandList* GetRecordList() { return m_cmdList; }
+        void WaitFor(Texture* texture, uint64_t value) { m_waitFor.push_back({ texture, value }); }
+        void Signal(Texture* texture, uint64_t value) { m_signalTo.push_back({ texture, value }); }
 
     private:
-        ID3D12Device* m_device;
-        ID3D12CommandQueue* m_queue;
-
-        ComPtr<ID3D12GraphicsCommandList> m_cmdList;
-        ComPtr<ID3D12Fence> m_blockFence;
+        RND_D3D12* m_d3d12 = nullptr;
+        ID3D12GraphicsCommandList* m_cmdList = nullptr;
         std::vector<std::pair<Texture*, uint64_t>> m_waitFor;
         std::vector<std::pair<Texture*, uint64_t>> m_signalTo;
     };
@@ -155,8 +150,34 @@ public:
     };
 
 private:
+    static constexpr uint32_t kFrameContextCount = 3;
+    static constexpr uint32_t kFrameCommandListCount = 4;
+
+    struct FrameContext {
+        ComPtr<ID3D12CommandAllocator> allocator;
+        std::array<ComPtr<ID3D12GraphicsCommandList>, kFrameCommandListCount> commandLists = {};
+        uint32_t nextCommandListIndex = 0;
+        uint64_t completionFenceValue = 0;
+    };
+
+    struct ImmediateContext {
+        ComPtr<ID3D12CommandAllocator> allocator;
+        ComPtr<ID3D12GraphicsCommandList> commandList;
+    };
+
+    FrameContext& GetCurrentFrameContext();
+    ID3D12GraphicsCommandList* AcquireFrameCommandList();
+    ID3D12GraphicsCommandList* AcquireImmediateCommandList();
+    void ExecuteCommandList(ID3D12GraphicsCommandList* commandList);
+    uint64_t SignalQueueFence();
+    void WaitForQueueFence(uint64_t fenceValue);
+
     ComPtr<ID3D12Device> m_device;
     ComPtr<ID3D12CommandQueue> m_queue;
-    ComPtr<ID3D12CommandAllocator> m_allocator;
+    std::array<FrameContext, kFrameContextCount> m_frameContexts = {};
+    ImmediateContext m_immediateContext = {};
+    uint32_t m_currentFrameContextIndex = kFrameContextCount - 1;
     ComPtr<ID3D12Fence> m_fence;
+    HANDLE m_fenceEvent = nullptr;
+    uint64_t m_nextFenceValue = 1;
 };

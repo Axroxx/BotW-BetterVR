@@ -67,9 +67,88 @@ RND_D3D12::RND_D3D12() {
         .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
     };
     checkHResult(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_queue)), "Failed to create D3D12 command queue!");
+
+    checkHResult(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create D3D12 queue fence!");
+    m_fenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    checkAssert(m_fenceEvent != NULL, "Failed to create D3D12 queue event!");
+
+    auto createReusableCommandList = [this](ID3D12CommandAllocator* allocator, ComPtr<ID3D12GraphicsCommandList>& commandList) {
+        checkHResult(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(commandList.ReleaseAndGetAddressOf())), "Failed to create reusable D3D12 command list!");
+        checkHResult(commandList->Close(), "Failed to close reusable D3D12 command list after creation!");
+    };
+
+    for (auto& frameContext : m_frameContexts) {
+        checkHResult(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(frameContext.allocator.ReleaseAndGetAddressOf())), "Failed to create frame command allocator!");
+        for (auto& commandList : frameContext.commandLists) {
+            createReusableCommandList(frameContext.allocator.Get(), commandList);
+        }
+    }
+
+    checkHResult(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(m_immediateContext.allocator.ReleaseAndGetAddressOf())), "Failed to create immediate command allocator!");
+    createReusableCommandList(m_immediateContext.allocator.Get(), m_immediateContext.commandList);
 }
 
 RND_D3D12::~RND_D3D12() {
+    if (m_fenceEvent != nullptr) {
+        CloseHandle(m_fenceEvent);
+        m_fenceEvent = nullptr;
+    }
+}
+
+void RND_D3D12::StartFrame() {
+    m_currentFrameContextIndex = (m_currentFrameContextIndex + 1) % kFrameContextCount;
+
+    FrameContext& frameContext = GetCurrentFrameContext();
+    if (frameContext.completionFenceValue != 0) {
+        WaitForQueueFence(frameContext.completionFenceValue);
+        frameContext.completionFenceValue = 0;
+    }
+
+    checkHResult(frameContext.allocator->Reset(), "Failed to reset frame command allocator!");
+    frameContext.nextCommandListIndex = 0;
+}
+
+void RND_D3D12::EndFrame() {
+    GetCurrentFrameContext().completionFenceValue = SignalQueueFence();
+}
+
+RND_D3D12::FrameContext& RND_D3D12::GetCurrentFrameContext() {
+    return m_frameContexts[m_currentFrameContextIndex];
+}
+
+ID3D12GraphicsCommandList* RND_D3D12::AcquireFrameCommandList() {
+    FrameContext& frameContext = GetCurrentFrameContext();
+    checkAssert(frameContext.nextCommandListIndex < frameContext.commandLists.size(), "Exceeded the reusable D3D12 frame command list pool!");
+
+    ID3D12GraphicsCommandList* commandList = frameContext.commandLists[frameContext.nextCommandListIndex++].Get();
+    checkHResult(commandList->Reset(frameContext.allocator.Get(), nullptr), "Failed to reset reusable frame command list!");
+    return commandList;
+}
+
+ID3D12GraphicsCommandList* RND_D3D12::AcquireImmediateCommandList() {
+    checkHResult(m_immediateContext.allocator->Reset(), "Failed to reset immediate command allocator!");
+    checkHResult(m_immediateContext.commandList->Reset(m_immediateContext.allocator.Get(), nullptr), "Failed to reset immediate command list!");
+    return m_immediateContext.commandList.Get();
+}
+
+void RND_D3D12::ExecuteCommandList(ID3D12GraphicsCommandList* commandList) {
+    ID3D12CommandList* collectedLists[] = { commandList };
+    m_queue->ExecuteCommandLists((UINT)std::size(collectedLists), collectedLists);
+}
+
+uint64_t RND_D3D12::SignalQueueFence() {
+    const uint64_t fenceValue = m_nextFenceValue++;
+    checkHResult(m_queue->Signal(m_fence.Get(), fenceValue), "Failed to signal the reusable D3D12 queue fence!");
+    return fenceValue;
+}
+
+void RND_D3D12::WaitForQueueFence(uint64_t fenceValue) {
+    if (m_fence->GetCompletedValue() >= fenceValue) {
+        return;
+    }
+
+    checkHResult(m_fence->SetEventOnCompletion(fenceValue, m_fenceEvent), "Failed to arm the reusable D3D12 queue event!");
+    WaitForSingleObject(m_fenceEvent, INFINITE);
 }
 
 template <bool depth>
@@ -162,12 +241,9 @@ RND_D3D12::PresentPipeline<depth>::PresentPipeline(RND_Renderer* pRenderer): m_r
 
     // upload screen indices
     ComPtr<ID3D12Resource> screenIndicesStaging;
-    ComPtr<ID3D12CommandAllocator> uploadBufferAllocator;
     {
         ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
-        ID3D12CommandQueue* queue = VRManager::instance().D3D12->GetCommandQueue();
-        device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&uploadBufferAllocator));
-        RND_D3D12::CommandContext<true> uploadBufferContext(device, queue, uploadBufferAllocator.Get(), [this, device, &screenIndicesStaging](RND_D3D12::CommandContext<true>* context) {
+        RND_D3D12::CommandContext<true> uploadBufferContext(VRManager::instance().D3D12.get(), [this, device, &screenIndicesStaging](RND_D3D12::CommandContext<true>* context) {
             m_screenIndicesBuffer = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_DEFAULT, sizeof(screenIndices));
 
             screenIndicesStaging = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(screenIndices));

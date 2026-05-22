@@ -299,11 +299,9 @@ void RND_Renderer::Layer3D::StartRendering() {
 }
 
 void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData) {
-    ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
-    ID3D12CommandQueue* queue = VRManager::instance().D3D12->GetCommandQueue();
-    ID3D12CommandAllocator* allocator = VRManager::instance().D3D12->GetFrameAllocator();
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::Layer3DRender);
 
-    RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, side, frameIdx, fadeTexture, &debugDrawData](RND_D3D12::CommandContext<false>* context) {
+    RND_D3D12::CommandContext<false> renderSharedTexture(VRManager::instance().D3D12.get(), [this, side, frameIdx, fadeTexture, &debugDrawData](RND_D3D12::CommandContext<false>* context) {
         D3D12_SET_NAME(context->GetRecordList(), L"RenderSharedTexture");
         auto& texture = m_textures[side][frameIdx];
         auto& depthTexture = m_depthTextures[side][frameIdx];
@@ -440,14 +438,9 @@ RND_Renderer::Layer2D::Layer2D(VkExtent2D inputRes, VkExtent2D outputRes) {
         D3D12_SET_NAME(this->m_textures[i]->d3d12GetTexture(), L"Layer2D - Color Texture");
     }
 
-    ComPtr<ID3D12CommandAllocator> cmdAllocator;
     {
+        RND_D3D12::CommandContext<true> transitionInitialTextures(VRManager::instance().D3D12.get(), [this](RND_D3D12::CommandContext<true>* context) {
             D3D12_SET_NAME(context->GetRecordList(), L"transitionInitialTextures");
-        ID3D12CommandQueue* d3d12Queue = VRManager::instance().D3D12->GetCommandQueue();
-        d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&cmdAllocator));
-
-        RND_D3D12::CommandContext<true> transitionInitialTextures(d3d12Device, d3d12Queue, cmdAllocator.Get(), [this](RND_D3D12::CommandContext<true>* context) {
-            context->GetRecordList()->SetName(L"transitionInitialTextures");
             for (int i = 0; i < 2; ++i) {
                 this->m_textures[i]->d3d12TransitionLayout(context->GetRecordList(), D3D12_RESOURCE_STATE_COMMON);
             }
@@ -477,11 +470,9 @@ void RND_Renderer::Layer2D::StartRendering() const {
 }
 
 void RND_Renderer::Layer2D::Render(long frameIdx) {
-    ID3D12Device* device = VRManager::instance().D3D12->GetDevice();
-    ID3D12CommandQueue* queue = VRManager::instance().D3D12->GetCommandQueue();
-    ID3D12CommandAllocator* allocator = VRManager::instance().D3D12->GetFrameAllocator();
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::Layer2DRender);
 
-    RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, frameIdx](RND_D3D12::CommandContext<false>* context) {
+    RND_D3D12::CommandContext<false> renderSharedTexture(VRManager::instance().D3D12.get(), [this, frameIdx](RND_D3D12::CommandContext<false>* context) {
         D3D12_SET_NAME(context->GetRecordList(), L"RenderSharedTexture");
 
         // wait for both since we only have one 2D swap buffer to render to

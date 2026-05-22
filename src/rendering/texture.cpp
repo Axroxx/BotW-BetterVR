@@ -472,14 +472,9 @@ void SharedTexture::Init(const VkCommandBuffer& cmdBuffer) {
     VulkanUtils::TransitionLayout(cmdBuffer, m_vkImage, m_vkCurrLayout, VK_IMAGE_LAYOUT_GENERAL, GetAspectMask());
     VulkanUtils::DebugPipelineBarrier(cmdBuffer);
 
-    ComPtr<ID3D12CommandAllocator> cmdAllocator;
     {
+        RND_D3D12::CommandContext<true> transitionInitialTextures(VRManager::instance().D3D12.get(), [this](RND_D3D12::CommandContext<true>* context) {
             D3D12_SET_NAME(context->GetRecordList(), L"transitionInitialTextures");
-        ID3D12CommandQueue* d3d12Queue = VRManager::instance().D3D12->GetCommandQueue();
-        d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&cmdAllocator));
-
-        RND_D3D12::CommandContext<true> transitionInitialTextures(d3d12Device, d3d12Queue, cmdAllocator.Get(), [this](RND_D3D12::CommandContext<true>* context) {
-            context->GetRecordList()->SetName(L"transitionInitialTextures");
             for (int i = 0; i < 2; ++i) {
                 this->d3d12TransitionLayout(context->GetRecordList(), D3D12_RESOURCE_STATE_COMMON);
             }
