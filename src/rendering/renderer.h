@@ -236,7 +236,7 @@ public:
         return m_cameraIsCapturing3DFrameBuffer > 0;
     }
     void SignalGameCapturing3DFrameBuffer() {
-        m_cameraIsCapturing3DFrameBuffer = 1;
+        m_cameraIsCapturing3DFrameBuffer = 5;
     }
 
     void SetCustomFadeAmount(float amount) {

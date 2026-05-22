@@ -92,7 +92,7 @@ static std::optional<std::pair<glm::fvec3, glm::fquat>> TryGetAppliedEyePose(Ope
 }
 
 static bool TryUpdateGameplayCameraTarget(const glm::fvec3& cameraPos, const glm::fvec3& cameraTarget, const glm::fvec3& cameraUp) {
-    if (!glm::any(glm::isfinite(cameraPos)) || !glm::any(glm::isfinite(cameraTarget)) || !glm::any(glm::isfinite(cameraUp))) {
+    if (!glm::all(glm::isfinite(cameraPos)) || !glm::all(glm::isfinite(cameraTarget)) || !glm::all(glm::isfinite(cameraUp))) {
         return false;
     }
 
@@ -181,7 +181,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
 
     Log::print<RENDERING>("Getting gameplay camera (pos = {})", oldCameraPosition);
 
-    if (GetSettings().GetCameraMode() == CameraMode::FIRST_PERSON) {
+    if (IsFirstPerson()) {
         // remove verticality from the camera position to avoid pitch changes that aren't from the VR headset
         oldCameraPosition.y = oldCameraTarget.y;
     }
@@ -296,10 +296,12 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     s_framesSinceLastCameraUpdate = 0;
 }
 
+// the gameplay camera is just a look-at camera that doesn't seem to have a pivot point at the point we hook it
+// so this hook adjusts it afterwards to have properly working gameplay camera rotations
 void CemuHooks::hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (!s_hasGameplayCameraTarget || CemuHooks::GetFramesSinceLastCameraUpdate() > 4 || UseBlackBarsDuringEvents()) {
+    if (IsThirdPerson() || !s_hasGameplayCameraTarget || GetFramesSinceLastCameraUpdate() > 4 || UseBlackBarsDuringEvents()) {
         return;
     }
 
@@ -682,6 +684,10 @@ void CemuHooks::hook_CheckIfCameraCanSeePos(PPCInterpreter_t* hCPU) {
 
 void CemuHooks::hook_ModifyPixelUniformBlockData(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    if (UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
+        return;
+    }
 
     auto currFovOpt = TryGetRenderFOV(EyeSide::RIGHT);
     if (!currFovOpt.has_value()) {
