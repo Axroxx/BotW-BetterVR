@@ -75,7 +75,9 @@ While more integrated solutions are being found out, there's probably ways to se
    - `FPS++`: Set the FPS limit to at least 120 or 144. Your headset/runtime will still control the actual VR framerate.
    - `Enhancements`: Set anisotropic filtering to 16x, and optionally set a Clarity preset to make the colors less washed out.
 
-7. Double click the game in Cemu's game list while your VR headset is turned on and connected. If things went correctly, you should now be playing the game in VR!  
+7. [Optional] To avoid some heavy stutters when you first start the game, download the shader caches from https://chriztr.github.io/cemu_shader_and_pipeline_caches/ and follow the `How to install the caches` section on that page.
+
+8. Double click the game in Cemu's game list while your VR headset is turned on and connected. If things went correctly, you should now be playing the game in VR!  
 
 Use the in-game BetterVR menu to see the BetterVR settings and controls guide (hold the X or equivalent button on your left VR controller, or long press the Menu button on your Xbox controller).  
 In the settings you can also enable an option to immediately start the game when you start the `BetterVR_Launcher.exe`. You can also add this executable to Virtual Desktop, SteamVR etc. as a non-official Steam game.

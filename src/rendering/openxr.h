@@ -161,9 +161,9 @@ public:
         bool trigger_pressed_over_body_slot = false;
     };
     std::atomic<GameState> m_gameState{};
-    std::atomic_bool m_isMenuOpen;
-    std::atomic_uint8_t m_currMenuTab;
-    std::atomic_bool m_forceTabChange;
+    std::atomic_bool m_isMenuOpen = false;
+    std::atomic_uint8_t m_currMenuTab = 0;
+    std::atomic_bool m_forceTabChange = false;
 
     // We'll manage the rumble commands priority inside controls.cpp
     struct RumbleParameters {

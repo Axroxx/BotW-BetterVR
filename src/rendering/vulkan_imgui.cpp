@@ -1,9 +1,10 @@
+#include "pch.h"
+
+#include "vulkan.h"
 #include "hooking/cemu_hooks.h"
-#include "hooking/entity_debugger.h"
 #include "hooking/imgui_menus.h"
 #include "instance.h"
 #include "utils/vulkan_utils.h"
-#include "vulkan.h"
 #include "utils/mod_settings.h"
 
 #undef __cpuid
@@ -311,6 +312,8 @@ static void TransformDrawList(ImDrawList* drawList, const ImVec2& scale, const I
 
 
 void RND_Renderer::ImGuiOverlay::Update() {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::ImGuiUpdate);
+
     ImGui::GetIO().FontGlobalScale = 1.0f;
     auto& io = ImGui::GetIO();
 
@@ -375,6 +378,8 @@ void RND_Renderer::ImGuiOverlay::Update() {
 }
 
 void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bool isDesktopView) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::ImGuiRender);
+
     auto* renderer = VRManager::instance().XR->GetRenderer();
     auto& frame = renderer->GetFrame(frameIdx);
 
@@ -438,7 +443,7 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
     ImGuiMenus::DrawWeaponSensitivityOverlays();
 
     if (((renderBackground && GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_ONLY) || GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR) && !VRManager::instance().XR->m_isMenuOpen) {
-        EntityDebugger::DrawFPSOverlay(renderer);
+        ImGuiMenus::DrawFPSOverlay(renderer);
     }
 
     DrawHelpMenu();
@@ -622,6 +627,8 @@ void RND_Renderer::ImGuiOverlay::DrawHUDLayerAsBackground(VkCommandBuffer cb, Vk
 }
 
 void RND_Renderer::ImGuiOverlay::DrawAndCopyToImage(VkCommandBuffer cb, VkImage destImage, long frameIdx, bool isDesktopView) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::ImGuiDrawAndCopy);
+
     ImGui::Render();
 
     ImDrawData* draw_data = ImGui::GetDrawData();

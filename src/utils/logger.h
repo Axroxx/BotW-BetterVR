@@ -254,7 +254,7 @@ public:
         if constexpr (L == INFO) {
             return true;
         }
-#if defined(_DEBUG)
+#ifdef _DEBUG
         if constexpr (L == VERBOSE) {
             return true;
         }

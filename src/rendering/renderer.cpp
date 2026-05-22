@@ -5,6 +5,7 @@
 #include "texture.h"
 #include "utils/d3d12_utils.h"
 #include "utils/render_utils.h"
+#include "hooking/imgui_menus.h"
 
 std::atomic_bool RND_Renderer::Layer2D::s_isBowAimingActive = false;
 
@@ -30,6 +31,19 @@ RND_Renderer::~RND_Renderer() {
 }
 
 void RND_Renderer::StartFrame() {
+    bool shouldEnableProfiler = false;
+    if (auto* xr = VRManager::instance().XR.get(); xr != nullptr) {
+        const bool isMenuOpen = xr->m_isMenuOpen.load(std::memory_order_relaxed);
+        const uint8_t currentTab = xr->m_currMenuTab.load(std::memory_order_relaxed);
+        const bool isDebugTabOpen = isMenuOpen && GetSettings().enableDebuggerTools.load(std::memory_order_relaxed) && currentTab == ImGuiMenus::DEBUG_TAB;
+        const bool isProfilerTabOpen = isMenuOpen && currentTab == ImGuiMenus::FPS_OVERLAY_TAB;
+        const PerformanceOverlayMode performanceOverlay = GetSettings().performanceOverlay.load(std::memory_order_relaxed);
+        const bool showsCompactProfilerOverlay = !isMenuOpen && performanceOverlay != PerformanceOverlayMode::DISABLE;
+        shouldEnableProfiler = isDebugTabOpen || isProfilerTabOpen || showsCompactProfilerOverlay;
+    }
+
+    BetterVRProfiler::SetEnabled(shouldEnableProfiler);
+    BetterVRProfiler::AdvanceFrame();
     m_isInitialized = true;
 
     XrFrameWaitInfo waitFrameInfo = { XR_TYPE_FRAME_WAIT_INFO };
@@ -204,10 +218,10 @@ RND_Renderer::Layer3D::Layer3D(VkExtent2D inputRes, VkExtent2D outputRes) {
         this->m_depthTextures[OpenXR::EyeSide::LEFT][i] = std::make_unique<SharedTexture>(inputRes.width, inputRes.height, VK_FORMAT_D32_SFLOAT, D3D12Utils::ToDXGIFormat(VK_FORMAT_D32_SFLOAT));
         this->m_depthTextures[OpenXR::EyeSide::RIGHT][i] = std::make_unique<SharedTexture>(inputRes.width, inputRes.height, VK_FORMAT_D32_SFLOAT, D3D12Utils::ToDXGIFormat(VK_FORMAT_D32_SFLOAT));
 
-        this->m_textures[OpenXR::EyeSide::LEFT][i]->d3d12GetTexture()->SetName(L"Layer3D - Left Color Texture");
-        this->m_textures[OpenXR::EyeSide::RIGHT][i]->d3d12GetTexture()->SetName(L"Layer3D - Right Color Texture");
-        this->m_depthTextures[OpenXR::EyeSide::LEFT][i]->d3d12GetTexture()->SetName(L"Layer3D - Left Depth Texture");
-        this->m_depthTextures[OpenXR::EyeSide::RIGHT][i]->d3d12GetTexture()->SetName(L"Layer3D - Right Depth Texture");
+        D3D12_SET_NAME(this->m_textures[OpenXR::EyeSide::LEFT][i]->d3d12GetTexture(), L"Layer3D - Left Color Texture");
+        D3D12_SET_NAME(this->m_textures[OpenXR::EyeSide::RIGHT][i]->d3d12GetTexture(), L"Layer3D - Right Color Texture");
+        D3D12_SET_NAME(this->m_depthTextures[OpenXR::EyeSide::LEFT][i]->d3d12GetTexture(), L"Layer3D - Left Depth Texture");
+        D3D12_SET_NAME(this->m_depthTextures[OpenXR::EyeSide::RIGHT][i]->d3d12GetTexture(), L"Layer3D - Right Depth Texture");
     }
 }
 
@@ -251,6 +265,8 @@ void RND_Renderer::Layer3D::PrepareRendering(OpenXR::EyeSide side) {
 }
 
 std::optional<std::array<XrView, 2>> RND_Renderer::UpdateViews(XrTime predictedDisplayTime) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::XRLocateViews);
+
     std::array newViews = { XrView{ XR_TYPE_VIEW }, XrView{ XR_TYPE_VIEW } };
     XrViewLocateInfo viewLocateInfo = { XR_TYPE_VIEW_LOCATE_INFO };
     viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -288,7 +304,7 @@ void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTe
     ID3D12CommandAllocator* allocator = VRManager::instance().D3D12->GetFrameAllocator();
 
     RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, side, frameIdx, fadeTexture, &debugDrawData](RND_D3D12::CommandContext<false>* context) {
-        context->GetRecordList()->SetName(L"RenderSharedTexture");
+        D3D12_SET_NAME(context->GetRecordList(), L"RenderSharedTexture");
         auto& texture = m_textures[side][frameIdx];
         auto& depthTexture = m_depthTextures[side][frameIdx];
         checkAssert(fadeTexture != nullptr, "Layer3D fade texture is missing!");
@@ -421,12 +437,12 @@ RND_Renderer::Layer2D::Layer2D(VkExtent2D inputRes, VkExtent2D outputRes) {
     // initialize textures
     for (int i = 0; i < 2; ++i) {
         this->m_textures[i] = std::make_unique<SharedTexture>(inputRes.width, inputRes.height, VK_FORMAT_A2B10G10R10_UNORM_PACK32, D3D12Utils::ToDXGIFormat(VK_FORMAT_A2B10G10R10_UNORM_PACK32));
-        this->m_textures[i]->d3d12GetTexture()->SetName(L"Layer2D - Color Texture");
+        D3D12_SET_NAME(this->m_textures[i]->d3d12GetTexture(), L"Layer2D - Color Texture");
     }
 
     ComPtr<ID3D12CommandAllocator> cmdAllocator;
     {
-        ID3D12Device* d3d12Device = VRManager::instance().D3D12->GetDevice();
+            D3D12_SET_NAME(context->GetRecordList(), L"transitionInitialTextures");
         ID3D12CommandQueue* d3d12Queue = VRManager::instance().D3D12->GetCommandQueue();
         d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&cmdAllocator));
 
@@ -466,7 +482,7 @@ void RND_Renderer::Layer2D::Render(long frameIdx) {
     ID3D12CommandAllocator* allocator = VRManager::instance().D3D12->GetFrameAllocator();
 
     RND_D3D12::CommandContext<false> renderSharedTexture(device, queue, allocator, [this, frameIdx](RND_D3D12::CommandContext<false>* context) {
-        context->GetRecordList()->SetName(L"RenderSharedTexture");
+        D3D12_SET_NAME(context->GetRecordList(), L"RenderSharedTexture");
 
         // wait for both since we only have one 2D swap buffer to render to
         // fixme: Why do we signal to the global command list instead of the local one?!

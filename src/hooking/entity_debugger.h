@@ -1,7 +1,5 @@
 #pragma once
 
-#include <imgui_memory_editor.h>
-
 struct MemoryRange {
     uint32_t start;
     uint32_t end;
@@ -24,8 +22,6 @@ public:
     void UpdateKeyboardControls();
     void DrawWorldSpaceOverlaySettings(bool* changed);
     void DrawEntityInspectorContent();
-    static void DrawFPSOverlay(class RND_Renderer* renderer);
-    static void DrawFPSOverlayContent(class RND_Renderer* renderer, bool renderText);
 
     struct EntityValue {
         std::string value_name;

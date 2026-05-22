@@ -43,7 +43,7 @@ Swapchain<T>::Swapchain(uint32_t width, uint32_t height, uint32_t sampleCount): 
 
     for (size_t i = 0; i < swapchainImages.size(); i++) {
         // D3D12Utils::CreateConstantBuffer(D3D12_HEAP_TYPE_DEFAULT);
-        swapchainImages[i].texture->SetName(std::format(L"Swapchain Image {}", i).c_str());
+        D3D12_SET_NAME(swapchainImages[i].texture, std::format(L"Swapchain Image {}", i).c_str());
         m_swapchainTextures.emplace_back(swapchainImages[i].texture);
     }
 }

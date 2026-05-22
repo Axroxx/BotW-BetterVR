@@ -497,6 +497,8 @@ static glm::fmat3 GetRoomscaleWorldToRoomRotation() {
 }
 
 static void ClearRoomscaleResolveState() {
+    BetterVRProfiler::EndSpan(BetterVRProfiler::Section::RoomscaleResolve);
+
     s_roomscaleState.isResolving = false;
     s_roomscaleState.isProbeOnly = false;
     s_roomscaleState.remainingRawDelta = glm::fvec3(0.0f);
@@ -755,6 +757,8 @@ float CemuHooks::GetRoomscaleFadeAmount() {
 
 
 void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::RoomscaleBeginHook);
+
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
     uint32_t controller = hCPU->gpr[3];
@@ -793,6 +797,7 @@ void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
         s_roomscaleState.isResolving = true;
         s_roomscaleState.isProbeOnly = true;
         hCPU->gpr[3] = RoomscaleHookResult_Cast;
+        BetterVRProfiler::BeginSpan(BetterVRProfiler::Section::RoomscaleResolve);
         return;
     }
     (void)currentHeadPos;
@@ -807,6 +812,7 @@ void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
     s_roomscaleState.isResolving = true;
     s_roomscaleState.isProbeOnly = false;
     hCPU->gpr[3] = RoomscaleHookResult_Cast;
+    BetterVRProfiler::BeginSpan(BetterVRProfiler::Section::RoomscaleResolve);
 }
 
 void CemuHooks::hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU) {

@@ -3,10 +3,10 @@
 #include "imgui_menus.h"
 
 #include "cemu_hooks.h"
-#include "entity_debugger.h"
 #include "instance.h"
 #include "rendering/renderer.h"
 #include "rendering/openxr.h"
+#include "utils/profiler.h"
 #include "utils/mod_settings.h"
 #include "weapon.h"
 
@@ -80,6 +80,226 @@ static void DrawSectionHeader(const char* label) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
     ImGui::Text(label);
     ImGui::PopStyleColor();
+}
+
+static void DrawCompactProfilerSummary() {
+    auto snapshots = BetterVRProfiler::GetSnapshots();
+    std::sort(snapshots.begin(), snapshots.end(), [](const BetterVRProfiler::Snapshot& lhs, const BetterVRProfiler::Snapshot& rhs) {
+        return std::max(lhs.lastFrameMs, lhs.averageFrameMs) > std::max(rhs.lastFrameMs, rhs.averageFrameMs);
+    });
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("BetterVR CPU");
+
+    int rowsDrawn = 0;
+    for (const auto& snapshot : snapshots) {
+        if (std::max(snapshot.lastFrameMs, snapshot.averageFrameMs) < 0.01 && snapshot.maxFrameMs < 0.01) {
+            continue;
+        }
+
+        ImGui::Text("%s %.2f/%.2f ms x%u", snapshot.name, snapshot.lastFrameMs, snapshot.averageFrameMs, snapshot.lastFrameCalls);
+        rowsDrawn++;
+        if (rowsDrawn >= 5) {
+            break;
+        }
+    }
+
+    if (rowsDrawn == 0) {
+        ImGui::TextDisabled("Profiler warming up...");
+    }
+}
+
+static void DrawDetailedProfilerSummary() {
+    auto snapshots = BetterVRProfiler::GetSnapshots();
+    std::sort(snapshots.begin(), snapshots.end(), [](const BetterVRProfiler::Snapshot& lhs, const BetterVRProfiler::Snapshot& rhs) {
+        return std::max(lhs.lastFrameMs, lhs.averageFrameMs) > std::max(rhs.lastFrameMs, rhs.averageFrameMs);
+    });
+
+    ImGui::SeparatorText("BetterVR Profiling");
+    ImGui::TextWrapped(
+        "CPU-side wall time only. Frame columns are aggregated per OpenXR frame, avg uses the last %u frame buckets, and Roomscale Resolve spans the full sweep/probe loop between the BetterVR roomscale hooks.",
+        BetterVRProfiler::GetAverageWindowFrames());
+
+    if (ImGui::Button("Reset BetterVR Profiling")) {
+        BetterVRProfiler::Reset();
+    }
+
+    constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
+    if (!ImGui::BeginTable("##BetterVRProfiling", 7, tableFlags)) {
+        return;
+    }
+
+    ImGui::TableSetupColumn("Section");
+    ImGui::TableSetupColumn("Last Frame");
+    ImGui::TableSetupColumn("Avg Frame");
+    ImGui::TableSetupColumn("Max Frame");
+    ImGui::TableSetupColumn("Calls");
+    ImGui::TableSetupColumn("Last Call");
+    ImGui::TableSetupColumn("Max Call");
+    ImGui::TableHeadersRow();
+
+    for (const auto& snapshot : snapshots) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(snapshot.name);
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%.3f ms", snapshot.lastFrameMs);
+
+        ImGui::TableSetColumnIndex(2);
+        ImGui::Text("%.3f ms", snapshot.averageFrameMs);
+
+        ImGui::TableSetColumnIndex(3);
+        ImGui::Text("%.3f ms", snapshot.maxFrameMs);
+
+        ImGui::TableSetColumnIndex(4);
+        ImGui::Text("%u", snapshot.lastFrameCalls);
+
+        ImGui::TableSetColumnIndex(5);
+        ImGui::Text("%.3f ms", snapshot.lastCallMs);
+
+        ImGui::TableSetColumnIndex(6);
+        ImGui::Text("%.3f ms", snapshot.maxCallMs);
+    }
+
+    ImGui::EndTable();
+}
+
+static void DrawBetterVRProfiler(bool detailed) {
+    if (detailed) {
+        DrawDetailedProfilerSummary();
+    }
+    else {
+        DrawCompactProfilerSummary();
+    }
+}
+
+static void DrawFPSOverlayContent(RND_Renderer* renderer, bool renderText) {
+    const float predictedDisplayPeriodMs = (float)renderer->GetPredictedDisplayPeriodMs();
+    const float predictedHz = GetSettings().performanceOverlayFrequency;
+
+    const float appMs = (float)renderer->GetLastFrameTimeMs();      // Total frame time (includes wait)
+    const float workMs = (float)renderer->GetLastFrameWorkTimeMs(); // GPU Work time only (excludes wait)
+    const float waitMs = (float)renderer->GetLastWaitTimeMs();
+    const float overheadMs = (float)renderer->GetLastOverheadMs();
+
+    // --- 2. Convert to FPS ---
+    const float appFps = appMs > 0.0000001f ? (1000.0f / appMs) : 0.0f;
+
+    // "Theoretical FPS": How fast you COULD run if you didn't have to wait for V-Sync/OpenXR
+    const float workFps = workMs >= 0.0000001f ? (1000.0f / workMs) : 0.0f;
+
+    // Calculate percentage of the frame budget used (still useful in % terms)
+    const float workPct = predictedDisplayPeriodMs > 0.0f ? (workMs / predictedDisplayPeriodMs) * 100.0f : 0.0f;
+
+    // --- 3. Text Summary ---
+    if (renderText) {
+        ImGui::Text("The visualization refresh rate of your headset is set to %.0f Hz", predictedHz);
+        ImGui::Text("Currently Running At %.1f FPS", appFps);
+        ImGui::Text("");
+        ImGui::Text("OpenXR waited %.1f ms so that it can interpolate/have low latency.", waitMs);
+        ImGui::Text("Theoretically, it'd run at %.1f FPS if that didn't matter", workFps);
+    }
+
+    if (predictedHz > 0.0f && workFps >= 0.0f) {
+        auto rateForDivisor = [predictedHz](int divisor) -> double {
+            return divisor > 0 ? (predictedHz / (double)divisor) : 0.0;
+        };
+
+        auto chooseBestDivisor = [&](double fps) -> int {
+            // Pick the refresh divisor (1x, 1/2x, 1/3x, 1/4x) that is able to be achieved using the workFPS (frame time minus OpenXR wait time)
+            for (int div = 1; div <= 4; ++div) {
+                if (fps >= rateForDivisor(div)) {
+                    return div;
+                }
+            }
+            return 4;
+        };
+
+        // Use theoretical FPS (GPU work time) as the basis for which step we're closest to.
+        const int currentDiv = chooseBestDivisor(workFps);
+        const double currentTarget = rateForDivisor(currentDiv);
+        const int nextDiv = std::max(1, currentDiv - 1);
+        const double nextTarget = rateForDivisor(nextDiv);
+        const double missingNext = std::max(0.0, nextTarget - (double)workFps);
+
+        if (renderText) {
+            if (currentDiv == 1) {
+                ImGui::Text("Its reaching the full refresh rate you've set (%.0f hz)", currentTarget);
+                ImGui::Text("You've got ~%.1f FPS of headroom to spare", (float)std::max(0.0, (double)workFps - nextTarget));
+            }
+            else {
+                ImGui::Text("It is however able to reliably reach %.0f FPS (%.0f Hz / %d)", currentTarget, predictedHz, currentDiv);
+                ImGui::Text("You'd need to get %.1f FPS more to get it to switch to %.0f FPS", missingNext, nextTarget);
+            }
+        }
+    }
+
+    // --- 4. History Buffers (Storing FPS now) ---
+    static float history_app_fps[60] = {};
+    static float history_work_fps[60] = {};
+    static int offset = 0;
+
+    history_app_fps[offset] = appFps;
+    history_work_fps[offset] = workFps;
+    offset = (offset + 1) % 60;
+
+    // --- 5. Plotting ---
+    const double targetFps = predictedHz;
+    const double halfFps = predictedHz / 2.0;
+    const double thirdFps = predictedHz / 3.0;
+    const double fourthFps = predictedHz / 4.0;
+
+    if (ImPlot::BeginPlot("##Frametime", ImVec2(300, 150), ImPlotFlags_NoFrame | ImPlotFlags_NoTitle | ImPlotFlags_NoMouseText | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect | ImPlotFlags_NoInputs)) {
+        ImPlot::SetupAxes(nullptr, "##FPS", ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoInitialFit);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0, 60, ImPlotCond_Always);
+
+        if (targetFps >= 0.000000001f) {
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, predictedHz * 1.5f, ImPlotCond_Always);
+
+            // 1. Target Refresh Rate (Green)
+            ImPlot::SetNextLineStyle(ImVec4(0, 1, 0, 0.5f));
+            ImPlot::PlotInfLines("##Target", &targetFps, 1, ImPlotInfLinesFlags_Horizontal);
+            ImPlot::TagY(targetFps, ImVec4(0, 1, 0, 0.5f), "%.0f Hz", targetFps);
+
+            // 2. Half Rate (ASW/Reprojection threshold) (Yellow)
+            ImPlot::SetNextLineStyle(ImVec4(1, 1, 0, 0.5f));
+            ImPlot::PlotInfLines("##1/2 Rate", &halfFps, 1, ImPlotInfLinesFlags_Horizontal);
+            ImPlot::TagY(halfFps, ImVec4(1, 1, 0, 0.5f), "%.0f Hz", halfFps);
+
+            // 3. Third Rate (Red)
+            ImPlot::SetNextLineStyle(ImVec4(1, 0, 0, 0.5f));
+            ImPlot::PlotInfLines("##1/3 Rate", &thirdFps, 1, ImPlotInfLinesFlags_Horizontal);
+        }
+        else {
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 144.0, ImPlotCond_Always);
+        }
+
+        // --- Draw Graphs ---
+        // 1. Theoretical Max FPS (Work Time) - Purple/Pink
+        ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 1.0f, 1.0f));
+        ImPlot::PlotLine("Theoretical Max", history_work_fps, 60, 1.0, 0.0, 0, offset);
+
+        // 2. Actual FPS (App Time) - Blue
+        // This represents what is actually hitting the screen (capped by Wait).
+        ImPlot::SetNextFillStyle(ImVec4(0.4f, 0.4f, 1.0f, 0.50f));
+        ImPlot::SetNextLineStyle(ImVec4(0.4f, 0.4f, 1.0f, 1.0f));
+        ImPlot::PlotShaded("Actual", history_app_fps, 60, 0.0, 1.0, 0.0, 0, offset);
+        ImPlot::PlotLine("##TotalLine", history_app_fps, 60, 1.0, 0.0, 0, offset);
+
+        // Current FPS Tag
+        if (appFps > 0.0f) {
+            const double currentFps = appFps;
+            ImPlot::SetNextLineStyle(ImVec4(1, 1, 1, 0.65f));
+            ImPlot::PlotInfLines("##Current", &currentFps, 1, ImPlotInfLinesFlags_Horizontal);
+            ImPlot::TagY(currentFps, ImVec4(1, 1, 1, 0.8f), "%.1f FPS", currentFps);
+        }
+
+        ImPlot::EndPlot();
+    }
+
+    DrawBetterVRProfiler(renderText);
 }
 
 namespace WeaponAttackDebugger {
@@ -451,6 +671,20 @@ namespace WeaponAttackDebugger {
 }
 
 namespace ImGuiMenus {
+    void DrawFPSOverlay(RND_Renderer* renderer) {
+        ImGui::SetNextWindowBgAlpha(0.4f);
+
+        ImVec2 windowSize = ImGui::GetIO().DisplaySize;
+
+        const ImVec2 pad(10.0f, 10.0f);
+        ImGui::SetNextWindowPos(ImVec2(windowSize.x - pad.x, pad.y), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+
+        if (ImGui::Begin("AppMS Overlay", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove)) {
+            DrawFPSOverlayContent(renderer, false);
+        }
+        ImGui::End();
+    }
+
     void DrawWeaponSensitivityOverlays() {
         for (uint8_t sideIdx = 0; sideIdx < WeaponAttackDebugger::s_showWeaponSensitivityOverlay.size(); ++sideIdx) {
             if (!WeaponAttackDebugger::s_showWeaponSensitivityOverlay[sideIdx]) {
@@ -760,7 +994,11 @@ void RND_Renderer::ImGuiOverlay::DrawFPSOverlayTab(const ImVec2& windowWidth, bo
         });
 
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        EntityDebugger::DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true);
+        DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true);
+    }
+    else {
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        DrawBetterVRProfiler(true);
     }
 
     ImGui::EndTabItem();

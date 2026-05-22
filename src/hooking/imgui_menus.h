@@ -10,6 +10,7 @@ namespace ImGuiMenus {
     inline constexpr uint8_t CREDITS_TAB = 4;
     inline constexpr uint8_t CUSTOM_ATTACK_SENSITIVITY_TAB = 5;
 
+    void DrawFPSOverlay(class RND_Renderer* renderer);
     void DrawWeaponSensitivityOverlays();
     bool IsWeaponSensitivityOverlayVisible(OpenXR::EyeSide side);
     void SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide side, bool visible);

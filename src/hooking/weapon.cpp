@@ -138,6 +138,8 @@ bool ObjectCanBeThrown(uint32_t flags)
 }
 
 void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::WeaponHandHook);
+
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
     // r3 holds the source actor pointer
@@ -317,6 +319,8 @@ void CemuHooks::hook_GetContactLayerOfAttack(PPCInterpreter_t* hCPU) {
 
 
 void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::WeaponAttackHook);
+
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
     if (GetSettings().GetCameraMode() == CameraMode::THIRD_PERSON)

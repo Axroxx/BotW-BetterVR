@@ -63,6 +63,7 @@ using Microsoft::WRL::ComPtr;
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 #include <implot.h>
+#include <imgui_memory_editor.h>
 
 // glm includes
 #define GLM_FORCE_XYZW_ONLY
@@ -533,3 +534,4 @@ struct data_VRProjectionMatrixOut {
 #include "game_structs.h"
 #include "cemu.h"
 #include "utils/logger.h"
+#include "utils/profiler.h"

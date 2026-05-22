@@ -17,24 +17,8 @@ public:
     ID3D12Device* GetDevice() { return m_device.Get(); };
     ID3D12CommandQueue* GetCommandQueue() { return m_queue.Get(); };
 
-    void StartFrame() {
-        checkHResult(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)), "Failed to created D3D12_CommandContext's allocator!");
-    }
-    void EndFrame() {
-        // Wait for GPU to finish queue
-        checkHResult(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create fence for end-of-frame waiting!");
-        checkHResult(m_queue->Signal(m_fence.Get(), 1), "Failed to signal fence for end-of-frame waiting!");
-
-        HANDLE waitEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-        checkAssert(waitEvent != NULL, "Failed to create upload event!");
-        checkHResult(m_fence->SetEventOnCompletion(1, waitEvent), "Failed to set event completion for end-of-frame waiting!");
-        WaitForSingleObject(waitEvent, INFINITE);
-
-        // Reset allocator after queue is finished
-        m_allocator->Reset();
-    };
-
-    ID3D12CommandAllocator* GetFrameAllocator() { return m_allocator.Get(); };
+    void StartFrame();
+    void EndFrame();
 
     // todo: extract most to a base pipeline class if other pipelines are needed
     template <bool depth>

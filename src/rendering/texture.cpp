@@ -1,6 +1,6 @@
 #include "texture.h"
-#include "../utils/d3d12_utils.h"
 #include "instance.h"
+#include "utils/d3d12_utils.h"
 #include "utils/vulkan_utils.h"
 
 
@@ -474,7 +474,7 @@ void SharedTexture::Init(const VkCommandBuffer& cmdBuffer) {
 
     ComPtr<ID3D12CommandAllocator> cmdAllocator;
     {
-        ID3D12Device* d3d12Device = VRManager::instance().D3D12->GetDevice();
+            D3D12_SET_NAME(context->GetRecordList(), L"transitionInitialTextures");
         ID3D12CommandQueue* d3d12Queue = VRManager::instance().D3D12->GetCommandQueue();
         d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&cmdAllocator));
 

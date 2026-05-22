@@ -1,5 +1,11 @@
 #pragma once
 
+#ifdef _DEBUG
+#define D3D12_SET_NAME(object, name) do { (object)->SetName(name); } while (0)
+#else
+#define D3D12_SET_NAME(object, name) do { } while (0)
+#endif
+
 namespace D3D12Utils {
     static ComPtr<ID3DBlob> CompileShader(const char* sourceHLSL, const char* entryPoint, const char* version) {
         DWORD shaderCompileFlags = D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS;

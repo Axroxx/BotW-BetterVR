@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "openxr.h"
 #include "instance.h"
 
@@ -36,7 +38,7 @@ OpenXR::OpenXR() {
             timeConvSupported = true;
         }
         else if (strcmp(extensionProperties.extensionName, XR_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
-#if defined(_DEBUG)
+#ifdef _DEBUG
             debugUtilsSupported = Log::isLogTypeEnabled<XR_DEBUGUTILS>();
 #endif
         }
@@ -500,6 +502,8 @@ void CheckButtonState(bool buttonPressed, ButtonState& buttonState) {
 }
 
 std::optional<OpenXR::InputState> OpenXR::UpdateActions(XrTime predictedFrameTime, glm::fquat controllerRotation, bool inMenu) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::XRUpdateActions);
+
     XrActiveActionSet activeActionSet = { (inMenu ? m_menuActionSet : m_gameplayActionSet), XR_NULL_PATH };
 
     XrActionsSyncInfo syncInfo = { XR_TYPE_ACTIONS_SYNC_INFO };
@@ -753,6 +757,8 @@ std::optional<OpenXR::InputState> OpenXR::UpdateActions(XrTime predictedFrameTim
 
 
 std::optional<XrSpaceLocation> OpenXR::UpdateSpaces(XrTime predictedDisplayTime) {
+    BetterVRProfiler::Scope profile(BetterVRProfiler::Section::XRUpdateSpaces);
+
     XrSpaceLocation spaceLocation = { XR_TYPE_SPACE_LOCATION };
     if (XrResult result = xrLocateSpace(m_headSpace, m_stageSpace, predictedDisplayTime, &spaceLocation); XR_SUCCEEDED(result)) {
         if (result != XR_ERROR_TIME_INVALID) {
