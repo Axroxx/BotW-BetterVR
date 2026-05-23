@@ -26,6 +26,12 @@ static float ComputeAttackDamageMultiplier(float swingPower) {
     return 0.20f + 1.15f * rampedPower;
 }
 
+static bool IsSwingableWeaponType(WeaponType weaponType) {
+    return weaponType == WeaponType::SmallSword
+        || weaponType == WeaponType::LargeSword
+        || weaponType == WeaponType::Spear;
+}
+
 static bool isDroppable(std::string actorName) {
     static const std::string_view nonDroppableItems[] = {
         "AncientArrow",
@@ -335,16 +341,35 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     readMemory(weaponPtr, &weapon);
 
     WeaponType weaponType = weapon.type.getLE();
-    if (weaponType == WeaponType::Bow || weaponType == WeaponType::Shield) {
+    if (!IsSwingableWeaponType(weaponType)) {
         return;
     }
 
-    // Weapons not currently bound to a VR hand (e.g. sheathed on back) must never
-    // have their attack sensor activated, otherwise they cut grass / hit NPCs.
-    bool isHandBoundWeapon = (weaponPtr == m_heldWeapons[0] || weaponPtr == m_heldWeapons[1]);
-
     if (heldIndex >= m_motionAnalyzers.size()) {
         Log::print<CONTROLS>("Invalid heldIndex: {}. Skipping motion analysis.", heldIndex);
+        return;
+    }
+
+    // Game's hand indexing is inverted relative to OpenXR's convention
+    uint32_t motionIndex = heldIndex == 0 ? 1 : 0;
+
+    // Weapons not currently bound to a VR hand (e.g. sheathed on back) must never
+    // consume that hand's motion analysis slot, otherwise the real held weapon can
+    // lose its swing detection for the frame.
+    bool isHandBoundWeapon = weaponPtr == m_heldWeapons[motionIndex];
+    auto& motionAnalyser = m_motionAnalyzers[motionIndex];
+    const bool canUseWeaponMotion = isHandBoundWeapon && isHeldByPlayer;
+
+    if (!canUseWeaponMotion) {
+        if (m_heldWeapons[motionIndex] == 0 || isHandBoundWeapon) {
+            motionAnalyser.Reset();
+        }
+
+        motionAnalyser.SetHitboxEnabled(false);
+        weapon.setupAttackSensor.resetAttack = 1;
+        weapon.setupAttackSensor.mode = 1; // deactivate attack sensor
+        weapon.setupAttackSensor.isContactLayerInitialized = 0;
+        writeMemory(weaponPtr, &weapon);
         return;
     }
 
@@ -355,35 +380,32 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     }
     currFrame.ranMotionAnalysis[heldIndex] = true;
 
-    // Game's hand indexing is inverted relative to OpenXR's convention
-    heldIndex = heldIndex == 0 ? 1 : 0;
-
     auto inputs = VRManager::instance().XR->m_input.load();
     auto headset = VRManager::instance().XR->GetRenderer()->GetMiddlePose();
     if (!headset.has_value()) {
         return;
     }
 
-    m_motionAnalyzers[heldIndex].ResetIfWeaponTypeChanged(weaponType);
-    m_motionAnalyzers[heldIndex].ApplyProfile(GetSettings().GetSwingSensitivity());
-    m_motionAnalyzers[heldIndex].Update(inputs.shared.poseLocation[heldIndex], inputs.shared.poseVelocity[heldIndex], headset.value(), inputs.shared.inputTime);
+    motionAnalyser.ResetIfWeaponTypeChanged(weaponType);
+    motionAnalyser.ApplyProfile(GetSettings().GetSwingSensitivity());
+    motionAnalyser.Update(inputs.shared.poseLocation[motionIndex], inputs.shared.poseVelocity[motionIndex], headset.value(), inputs.shared.inputTime);
 
     // Use the analysed motion to determine whether the weapon is swinging or stabbing
-    if (isHandBoundWeapon && isHeldByPlayer && m_motionAnalyzers[heldIndex].IsAttacking()) {
-        m_motionAnalyzers[heldIndex].SetHitboxEnabled(true);
+    if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
+        motionAnalyser.SetHitboxEnabled(true);
         weapon.setupAttackSensor.resetAttack = 1;
         weapon.setupAttackSensor.mode = 2;
         weapon.setupAttackSensor.isContactLayerInitialized = 0;
         weapon.setupAttackSensor.shieldBreakPower = 2; // damageType 2 required for chopping trees
 
         // Weak motions stay light; proper swings ramp up closer to full damage.
-        const float power = m_motionAnalyzers[heldIndex].GetSwingPower();
+        const float power = motionAnalyser.GetSwingPower();
         weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale();
 
         writeMemory(weaponPtr, &weapon);
     }
-    else if (!isHandBoundWeapon || m_motionAnalyzers[heldIndex].IsHitboxEnabled()) {
-        m_motionAnalyzers[heldIndex].SetHitboxEnabled(false);
+    else if (!canUseWeaponMotion || motionAnalyser.IsHitboxEnabled()) {
+        motionAnalyser.SetHitboxEnabled(false);
         weapon.setupAttackSensor.resetAttack = 1;
         weapon.setupAttackSensor.mode = 1; // deactivate attack sensor
         weapon.setupAttackSensor.isContactLayerInitialized = 0;
@@ -391,8 +413,8 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     }
 
     // Haptic feedback
-    if (m_motionAnalyzers[heldIndex].IsAttacking()) {
-        float rumbleVelocity = std::max(0.0f, m_motionAnalyzers[heldIndex].GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
+    if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
+        float rumbleVelocity = std::max(0.0f, motionAnalyser.GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
 
         const RumbleParameters rumbleParams = {
             false,
