@@ -442,7 +442,7 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
 
     ImGuiMenus::DrawWeaponSensitivityOverlays();
 
-    if (((renderBackground && GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_ONLY) || GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR) && !VRManager::instance().XR->m_isMenuOpen) {
+    if (((renderBackground && GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_ONLY) || GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR || GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER) && !VRManager::instance().XR->m_isMenuOpen) {
         ImGuiMenus::DrawFPSOverlay(renderer);
     }
 

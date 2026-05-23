@@ -776,9 +776,43 @@ struct CameraParamValueOffset {
     float originalValue;
 };
 
+struct ActionFloatParamPointerOverride {
+    std::string name;
+    uint32_t destPointerAddress;
+    bool storedOriginalPointer = false;
+    uint32_t originalPointer = 0;
+};
+
 // key = vtable address, value = list of parameter names and their offsets inside the camera object
 std::mutex storedCameraParametersLock;
 std::unordered_map<uint32_t, std::vector<CameraParamValueOffset>> storedCameraParameters;
+std::mutex storedActionFloatParamsLock;
+std::unordered_map<uint32_t, std::vector<ActionFloatParamPointerOverride>> storedActionFloatParams;
+
+static void ApplyStoredActionFloatParamOverrides() {
+    constexpr uint32_t kPlayerLaunchZeroFloat = 0x101D3CC8;
+
+    std::scoped_lock lock(storedActionFloatParamsLock);
+
+    for (auto& entries : storedActionFloatParams | std::views::values) {
+        for (auto& entry : entries) {
+            uint32_t currentPointer = CemuHooks::getMemory<BEType<uint32_t>>(entry.destPointerAddress).getLE();
+            if (!entry.storedOriginalPointer && currentPointer != 0 && currentPointer != kPlayerLaunchZeroFloat) {
+                entry.originalPointer = currentPointer;
+                entry.storedOriginalPointer = true;
+            }
+
+            if (!entry.storedOriginalPointer) {
+                continue;
+            }
+
+            uint32_t targetPointer = CemuHooks::IsFirstPerson() ? kPlayerLaunchZeroFloat : entry.originalPointer;
+            if (currentPointer != targetPointer) {
+                CemuHooks::setMemory<uint32_t>(entry.destPointerAddress, targetPointer);
+            }
+        }
+    }
+}
 
 void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
@@ -820,13 +854,16 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     constexpr uint32_t kCameraMagneCatchVtbl = 0x101BAB4C;
 
     static uint32_t s_lastLoggedCameraVtbl = 0;
-    if (currentCameraVtbl != s_lastLoggedCameraVtbl) {
-        Log::print<INFO>("Camera mode changed (vtbl={:#X}, camera={:#X})", currentCameraVtbl, currCameraInstance);
-#ifdef _DEBUG
-        std::string actionName = GameUtils::GetActionName(currCameraInstance);
-        Log::print<INFO>(" - Action name: {}", actionName.empty() ? "Unknown" : actionName);
-#endif
+    static uint32_t s_lastLoggedCameraInstance = 0;
+    static uint32_t s_lastLoggedCameraChaseInstance = 0;
+    bool vtblChanged = currentCameraVtbl != s_lastLoggedCameraVtbl;
+    bool cameraInstanceChanged = currCameraInstance != s_lastLoggedCameraInstance;
+    bool cameraChaseInstanceChanged = cameraChaseInstance != s_lastLoggedCameraChaseInstance;
+    if (vtblChanged || cameraInstanceChanged || cameraChaseInstanceChanged) {
+        Log::print<INFO>("Camera changed (vtbl={:#X}, camera={:#X}, chase={:#X}, vtbl_changed={}, camera_changed={}, chase_changed={})", currentCameraVtbl, currCameraInstance, cameraChaseInstance, vtblChanged, cameraInstanceChanged, cameraChaseInstanceChanged);
         s_lastLoggedCameraVtbl = currentCameraVtbl;
+        s_lastLoggedCameraInstance = currCameraInstance;
+        s_lastLoggedCameraChaseInstance = cameraChaseInstance;
     }
 
     //hCPU->gpr[3] = cameraChaseInstance;
@@ -848,33 +885,69 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     //Log::print<INFO>("Camera mode: {:#X}, tail mode: {:#X}, vtbl: {:#X}", currCameraInstance, cameraChaseInstance, currentCameraVtbl);
 }
 
+void CemuHooks::UpdateFloatParamOverrides() {
+    ApplyStoredActionFloatParamOverrides();
+}
+
 constexpr uint32_t orig_GetStaticParam_float_funcAddr = 0x030E9BE0;
 
+static bool ShouldZeroFirstPersonDamageFloatParam(std::string_view paramName) {
+    return paramName.find("Speed") != std::string_view::npos || paramName.starts_with("JumpHeight") || paramName.starts_with("AddLinearImpulse") || paramName.starts_with("AddRollImpulse") || paramName == "NoRagdollTime";
+}
+
 // hook for ksys::act::ai::ActionBase::getStaticParam<FLOAT> calls
-void CemuHooks::hook_OverwriteCameraParam(PPCInterpreter_t* hCPU) {
+void CemuHooks::hook_OverwriteFloatParam(PPCInterpreter_t* hCPU) {
     uint32_t actionPtr = hCPU->gpr[3];
     uint32_t destFloatPtr = hCPU->gpr[4];
-    const char* paramName = (const char*)(s_memoryBaseAddress + getMemory<BEType<uint32_t>>(hCPU->gpr[5]).getLE());
-    if (actionPtr == 0 || destFloatPtr == 0 || paramName == nullptr) {
+    uint32_t paramNameArgPtr = hCPU->gpr[5];
+    if (actionPtr == 0 || destFloatPtr == 0 || paramNameArgPtr == 0) {
         hCPU->instructionPointer = orig_GetStaticParam_float_funcAddr;
         return;
     }
-    std::string paramNameStr = paramName;
-    
+
+    uint32_t paramNamePtr = getMemory<uint32_t>(paramNameArgPtr).getLE();
+    if (paramNamePtr == 0) {
+        hCPU->instructionPointer = orig_GetStaticParam_float_funcAddr;
+        return;
+    }
+
+    const char* paramName = (const char*)(s_memoryBaseAddress + paramNamePtr);
+    std::string_view paramNameStr = paramName;
+    if (ShouldZeroFirstPersonDamageFloatParam(paramNameStr)) {
+        std::string paramNameOwned = std::string(paramNameStr);
+
+        {
+            std::scoped_lock lock(storedActionFloatParamsLock);
+
+            auto& paramList = storedActionFloatParams[actionPtr];
+            auto it = std::ranges::find_if(paramList, [&paramNameOwned](const ActionFloatParamPointerOverride& entry) {
+                return entry.name == paramNameOwned;
+            });
+            if (it == paramList.end()) {
+                Log::print<PPC>("Storing float param '{}' offset {:08X} for action at {:08X}", paramNameOwned, destFloatPtr, actionPtr);
+                paramList.push_back({ paramNameOwned, destFloatPtr });
+            }
+        }
+
+        hCPU->instructionPointer = orig_GetStaticParam_float_funcAddr;
+        return;
+    }
+
     {
+        std::string paramNameOwned = std::string(paramNameStr);
+
         std::scoped_lock(storedCameraParametersLock);
 
         auto& paramList = storedCameraParameters[actionPtr];
         // store parameter offset if not already stored
-        auto it = std::ranges::find_if(paramList, [&paramNameStr](const CameraParamValueOffset& entry) {
-            return entry.name == paramNameStr;
+        auto it = std::ranges::find_if(paramList, [&paramNameOwned](const CameraParamValueOffset& entry) {
+            return entry.name == paramNameOwned;
         });
         if (it == paramList.end()) {
-            // get offset by calling original function first
             hCPU->instructionPointer = orig_GetStaticParam_float_funcAddr;
 
-            Log::print<PPC>("Storing camera param '{}' offset {:08X} for camera action at {:08X}", paramNameStr, destFloatPtr, actionPtr);
-            paramList.push_back({ paramNameStr, destFloatPtr });
+            Log::print<PPC>("Storing float param '{}' offset {:08X} for action at {:08X}", paramNameOwned, destFloatPtr, actionPtr);
+            paramList.push_back({ paramNameOwned, destFloatPtr });
         }
     }
 

@@ -15,6 +15,34 @@ public:
         ImGuiUpdate,
         ImGuiRender,
         ImGuiDrawAndCopy,
+        PPCSystemPreCalc,
+        PPCSystemStateMachine,
+        PPCSystemPostCalc,
+        PPCCalcPlacementMgr,
+        PPCPhysicsPostBgBaseProcMgr,
+        PPCActorUpdateJobs,
+        PPCGraphicsCalc,
+        PPCSystemTaskPreCalc,
+        PPCSystemTaskPostCalc,
+        PPCSystemTaskDrawTV,
+        PPCSystemTaskDrawDRC,
+        PPCSystemTaskPostDrawTV,
+        PPCSystemTaskPostDrawDRC,
+        PPCLayer3DDraw,
+        PPCLayer3DCalcView,
+        PPCLayer3DCalcViewGPU,
+        PPCLayer3DDrawBG,
+        PPCLayer3DDrawOpaque,
+        PPCLayer3DDrawXlu,
+        PPCLayer3DDrawPostEffects,
+        PPCLayer3DDrawFinalImage,
+        PPCActorJob0_1,
+        PPCActorJob0_2,
+        PPCActorJob1_1,
+        PPCActorJob1_2,
+        PPCActorJob2_1Ragdoll,
+        PPCActorJob2_2,
+        PPCActorJob4,
         Count
     };
 
@@ -98,7 +126,22 @@ public:
             return;
         }
 
-        s_states[(size_t)section].activeSpanStartNs.store(GetTimestampNs(), std::memory_order_relaxed);
+        auto& threadState = s_threadSpanState;
+        uint32_t generation = s_spanGeneration.load(std::memory_order_relaxed);
+        if (threadState.generation != generation) {
+            threadState.count = 0;
+            threadState.generation = generation;
+        }
+
+        if (threadState.count >= threadState.spans.size()) {
+            return;
+        }
+
+        threadState.spans[threadState.count++] = {
+            .section = section,
+            .startNs = GetTimestampNs(),
+            .generation = generation,
+        };
     }
 
     static void EndSpan(Section section) {
@@ -106,14 +149,37 @@ public:
             return;
         }
 
-        auto& state = s_states[(size_t)section];
-        uint64_t startNs = state.activeSpanStartNs.exchange(0, std::memory_order_relaxed);
-        if (startNs == 0) {
+        auto& threadState = s_threadSpanState;
+        uint32_t generation = s_spanGeneration.load(std::memory_order_relaxed);
+        if (threadState.generation != generation) {
+            threadState.count = 0;
+            threadState.generation = generation;
             return;
         }
 
-        uint64_t endNs = GetTimestampNs();
-        Record(section, std::chrono::nanoseconds((std::chrono::nanoseconds::rep)(endNs > startNs ? (endNs - startNs) : 0ull)));
+        if (threadState.count == 0) {
+            return;
+        }
+
+        for (size_t index = threadState.count; index > 0; --index) {
+            ActiveSpan activeSpan = threadState.spans[index - 1];
+            if (activeSpan.section != section) {
+                continue;
+            }
+
+            for (size_t moveIndex = index; moveIndex < threadState.count; ++moveIndex) {
+                threadState.spans[moveIndex - 1] = threadState.spans[moveIndex];
+            }
+            threadState.count--;
+
+            if (activeSpan.generation != generation) {
+                return;
+            }
+
+            uint64_t endNs = GetTimestampNs();
+            Record(section, std::chrono::nanoseconds((std::chrono::nanoseconds::rep)(endNs > activeSpan.startNs ? (endNs - activeSpan.startNs) : 0ull)));
+            return;
+        }
     }
 
     static void AdvanceFrame() {
@@ -145,6 +211,8 @@ public:
     }
 
     static void Reset() {
+        s_spanGeneration.fetch_add(1, std::memory_order_relaxed);
+
         for (auto& state : s_states) {
             state.pendingFrameTotalNs.store(0, std::memory_order_relaxed);
             state.pendingFrameCalls.store(0, std::memory_order_relaxed);
@@ -182,6 +250,18 @@ public:
     }
 
 private:
+    struct ActiveSpan {
+        Section section = Section::RoomscaleResolve;
+        uint64_t startNs = 0;
+        uint32_t generation = 0;
+    };
+
+    struct ThreadSpanState {
+        std::array<ActiveSpan, 64> spans = {};
+        size_t count = 0;
+        uint32_t generation = 0;
+    };
+
     struct SectionState {
         std::atomic<uint64_t> pendingFrameTotalNs = 0;
         std::atomic<uint32_t> pendingFrameCalls = 0;
@@ -196,7 +276,9 @@ private:
     };
 
     inline static std::atomic_bool s_enabled = false;
+    inline static std::atomic_uint32_t s_spanGeneration = 1;
     inline static std::array<SectionState, kSectionCount> s_states = {};
+    inline static thread_local ThreadSpanState s_threadSpanState = {};
     inline static constexpr std::array<const char*, kSectionCount> s_sectionNames = {
         "Roomscale Resolve",
         "Roomscale Begin",
@@ -210,6 +292,34 @@ private:
         "ImGui Update",
         "ImGui Render",
         "ImGui Draw/Copy",
+        "PPC System::preCalc",
+        "PPC System::calcAndRunStateMachine",
+        "PPC System::postCalc",
+        "PPC CalcPlacementMgr",
+        "PPC MCMgr::calcPostBgBaseProcMgr",
+        "PPC runActorUpdateStuff",
+        "PPC gameScene::CalcGraphicsStuff",
+        "PPC SystemTask::preCalc_",
+        "PPC SystemTask::postCalc_",
+        "PPC SystemTask::drawTV_",
+        "PPC SystemTask::drawDRC_",
+        "PPC SystemTask::postDrawTV_",
+        "PPC SystemTask::postDrawDRC_",
+        "PPC Layer3D::draw",
+        "PPC Layer3D CalcView",
+        "PPC Layer3D CalcViewGPU",
+        "PPC Layer3D DrawBG",
+        "PPC Layer3D DrawOpaque",
+        "PPC Layer3D DrawXlu",
+        "PPC Layer3D DrawPostEffects",
+        "PPC Layer3D DrawFinalImage",
+        "PPC Actor::job0_1",
+        "PPC Actor::job0_2",
+        "PPC Actor::job1_1",
+        "PPC Actor::job1_2",
+        "PPC Actor::job2_1_ragdoll_related",
+        "PPC Actor::job2_2",
+        "PPC Actor::job4",
     };
 
     static constexpr double NsToMs(uint64_t durationNs) {
@@ -227,6 +337,8 @@ private:
     }
 
     static void ResetPendingFrame() {
+        s_spanGeneration.fetch_add(1, std::memory_order_relaxed);
+
         for (auto& state : s_states) {
             state.pendingFrameTotalNs.store(0, std::memory_order_relaxed);
             state.pendingFrameCalls.store(0, std::memory_order_relaxed);

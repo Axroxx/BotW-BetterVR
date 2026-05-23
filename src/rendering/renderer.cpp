@@ -38,8 +38,8 @@ void RND_Renderer::StartFrame() {
         const bool isDebugTabOpen = isMenuOpen && GetSettings().enableDebuggerTools.load(std::memory_order_relaxed) && currentTab == ImGuiMenus::DEBUG_TAB;
         const bool isProfilerTabOpen = isMenuOpen && currentTab == ImGuiMenus::FPS_OVERLAY_TAB;
         const PerformanceOverlayMode performanceOverlay = GetSettings().performanceOverlay.load(std::memory_order_relaxed);
-        const bool showsCompactProfilerOverlay = !isMenuOpen && performanceOverlay != PerformanceOverlayMode::DISABLE;
-        shouldEnableProfiler = isDebugTabOpen || isProfilerTabOpen || showsCompactProfilerOverlay;
+        const bool showsProfilerOverlay = !isMenuOpen && performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER;
+        shouldEnableProfiler = isDebugTabOpen || isProfilerTabOpen || showsProfilerOverlay;
     }
 
     BetterVRProfiler::SetEnabled(shouldEnableProfiler);

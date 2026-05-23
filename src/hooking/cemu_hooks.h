@@ -53,8 +53,9 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_UseCameraDistance", &hook_UseCameraDistance);
         osLib_registerHLEFunction("coreinit", "hook_ReplaceCameraMode", &hook_ReplaceCameraMode);
         osLib_registerHLEFunction("coreinit", "hook_GetEventName", &hook_GetEventName);
+        osLib_registerHLEFunction("coreinit", "hook_PlayerNormalChangeState", &hook_PlayerNormalChangeState);
         osLib_registerHLEFunction("coreinit", "hook_ShouldSkipEventCamera", &hook_ShouldSkipEventCamera);
-        osLib_registerHLEFunction("coreinit", "hook_OverwriteCameraParam", &hook_OverwriteCameraParam);
+        osLib_registerHLEFunction("coreinit", "hook_OverwriteFloatParam", &hook_OverwriteFloatParam);
         osLib_registerHLEFunction("coreinit", "hook_PlayerLadderFix", &hook_PlayerLadderFix);
         osLib_registerHLEFunction("coreinit", "hook_PlayerIsRiding", &hook_PlayerIsRiding);
         osLib_registerHLEFunction("coreinit", "hook_PlayerIsRidingSandSeal", &hook_PlayerIsRidingSandSeal);
@@ -88,6 +89,8 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_CreateNewScreen", &hook_CreateNewScreen);
         osLib_registerHLEFunction("coreinit", "hook_FixUIBlending", &hook_FixUIBlending);
         osLib_registerHLEFunction("coreinit", "hook_FixCameraSaveFilesAndInventory", &hook_FixCameraSaveFilesAndInventory);
+        osLib_registerHLEFunction("coreinit", "hook_ProfileSectionBegin", &hook_ProfileSectionBegin);
+        osLib_registerHLEFunction("coreinit", "hook_ProfileSectionEnd", &hook_ProfileSectionEnd);
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicVec3", &hook_LoadDynamicVec3);
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicBool", &hook_LoadDynamicBool);
         osLib_registerHLEFunction("coreinit", "hook_VisualizeRayCastHits", &hook_VisualizeRayCastHits);
@@ -135,6 +138,9 @@ public:
     static bool UseMonoFrameBufferTemporarilyDuringMenusOrPictures();
 
     static std::string s_currentEvent;
+    static std::string s_currentPlayerNormalState;
+    static std::string s_lastRequestedPlayerNormalState;
+    static std::string s_lastBlockedPlayerNormalState;
     static HybridEventSettings s_currentEventSettings;
     static std::unordered_map<std::string, HybridEventSettings> s_eventSettings;
     static void initCutsceneDefaultSettings(uint32_t ppc_TableOfCutsceneEventsSettingsOffset);
@@ -150,6 +156,7 @@ public:
     static bool IsAnyFadeScreenVisible();
     static glm::fvec3 GetAppliedRoomscaleHeadPosition();
     static float GetRoomscaleFadeAmount();
+    static void UpdateFloatParamOverrides();
 
     uint64_t GetCurrentTitleId() const {
         if (gameMeta_getTitleId == nullptr) {
@@ -207,8 +214,9 @@ private:
     static void hook_UseCameraDistance(PPCInterpreter_t* hCPU);
     static void hook_ReplaceCameraMode(PPCInterpreter_t* hCPU);
     static void hook_GetEventName(PPCInterpreter_t* hCPU);
+    static void hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU);
     static void hook_ShouldSkipEventCamera(PPCInterpreter_t* hCPU);
-    static void hook_OverwriteCameraParam(PPCInterpreter_t* hCPU);
+    static void hook_OverwriteFloatParam(PPCInterpreter_t* hCPU);
     static void hook_PlayerLadderFix(PPCInterpreter_t* hCPU);
     static void hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU);
     static void hook_FixLadder(PPCInterpreter_t* hCPU);
@@ -243,6 +251,8 @@ private:
     static void hook_CreateNewScreen(PPCInterpreter_t* hCPU);
     static void hook_FixUIBlending(PPCInterpreter_t* hCPU);
     static void hook_FixCameraSaveFilesAndInventory(PPCInterpreter_t* hCPU);
+    static void hook_ProfileSectionBegin(PPCInterpreter_t* hCPU);
+    static void hook_ProfileSectionEnd(PPCInterpreter_t* hCPU);
     static void hook_LoadDynamicVec3(PPCInterpreter_t* hCPU);
     static void hook_LoadDynamicBool(PPCInterpreter_t* hCPU);
 

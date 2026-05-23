@@ -5,6 +5,9 @@
 #include "utils/game_utils.h"
 
 std::string CemuHooks::s_currentEvent = {};
+std::string CemuHooks::s_currentPlayerNormalState = {};
+std::string CemuHooks::s_lastRequestedPlayerNormalState = {};
+std::string CemuHooks::s_lastBlockedPlayerNormalState = {};
 CemuHooks::HybridEventSettings CemuHooks::s_currentEventSettings = {};
 std::unordered_map<std::string, CemuHooks::HybridEventSettings> CemuHooks::s_eventSettings = {};
 
@@ -18,6 +21,24 @@ constexpr CemuHooks::HybridEventSettings defaultFirstPersonSettings = {
     .disablePlayerDrivenLinkHands = false,
     .ignoreCameraRotation = true
 };
+
+constexpr uint32_t orig_PlayerNormalChangeStateInnerChangeChildFuncAddr = 0x037B8284;
+constexpr uint32_t orig_PlayerNormalChangeStateBlockedExitFuncAddr = 0x02D0A994;
+
+static bool ShouldBlockFirstPersonPlayerNormalState(std::string_view stateName, uint32_t stateNamePtr) {
+    switch (stateNamePtr) {
+    case 0x101E0234:
+    case 0x101E0910:
+    case 0x101E0930:
+    case 0x101E0940:
+    case 0x101E0C1C:
+        return true;
+    default:
+        break;
+    }
+
+    return stateName == "DamageSUpper";
+}
 
 bool CemuHooks::HasActiveCutscene() {
     return !s_currentEvent.empty();
@@ -246,6 +267,33 @@ void CemuHooks::hook_GetEventName(PPCInterpreter_t* hCPU) {
         Log::print<INFO>("Event '{}' has now ended", s_currentEvent);
         s_currentEvent = "";
     }
+}
+
+void CemuHooks::hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU) {
+    uint32_t stateNamePtr = hCPU->gpr[4];
+    if (stateNamePtr == 0) {
+        hCPU->instructionPointer = orig_PlayerNormalChangeStateInnerChangeChildFuncAddr;
+        return;
+    }
+
+    std::string requestedState = GameUtils::GetString(stateNamePtr);
+    s_lastRequestedPlayerNormalState = requestedState;
+
+    if (IsFirstPerson() && ShouldBlockFirstPersonPlayerNormalState(requestedState, stateNamePtr)) {
+        if (requestedState != s_lastBlockedPlayerNormalState) {
+            Log::print<PPC>("Blocking PlayerNormal state '{}' in first person", requestedState);
+            s_lastBlockedPlayerNormalState = requestedState;
+        }
+        hCPU->instructionPointer = orig_PlayerNormalChangeStateBlockedExitFuncAddr;
+        return;
+    }
+
+    if (requestedState != s_currentPlayerNormalState) {
+        Log::print<PPC>("PlayerNormal state changed to '{}'", requestedState);
+        s_currentPlayerNormalState = requestedState;
+    }
+
+    hCPU->instructionPointer = orig_PlayerNormalChangeStateInnerChangeChildFuncAddr;
 }
 
 void CemuHooks::hook_ShouldSkipEventCamera(PPCInterpreter_t* hCPU) {

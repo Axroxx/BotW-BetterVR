@@ -28,6 +28,7 @@ target_sources(BetterVR_Layer PUBLIC
     ${CMAKE_SOURCE_DIR}/src/hooking/camera.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/game_state.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/settings.cpp
+    ${CMAKE_SOURCE_DIR}/src/hooking/profiler_hooks.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/weapon.h
     ${CMAKE_SOURCE_DIR}/src/hooking/weapon.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/imgui_menus.h

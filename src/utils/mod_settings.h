@@ -545,6 +545,7 @@ enum class PerformanceOverlayMode : int32_t {
     DISABLE = 0,
     WINDOW_ONLY = 1,
     WINDOW_AND_VR = 2,
+    WINDOW_AND_VR_WITH_PROFILER = 3,
 };
 
 enum class SwingSensitivity : int32_t {
@@ -660,6 +661,8 @@ struct ModSettings {
                 return "WINDOW_ONLY";
             case PerformanceOverlayMode::WINDOW_AND_VR:
                 return "WINDOW_AND_VR";
+            case PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER:
+                return "WINDOW_AND_VR_WITH_PROFILER";
             default:
                 return "";
         }
@@ -673,6 +676,8 @@ struct ModSettings {
                 return "Only show in Cemu window";
             case PerformanceOverlayMode::WINDOW_AND_VR:
                 return "Show in both Cemu and VR";
+            case PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER:
+                return "Show in both Cemu and VR with profiler";
             default:
                 return "";
         }
@@ -728,7 +733,7 @@ struct ModSettings {
     BoolSetting debugShowRaycastLines = BoolSetting("DebugShowRaycastLines", false);
     BoolSetting alwaysPreventFirstPersonCutsceneCameraMovement = BoolSetting("AlwaysPreventFirstPersonCutsceneCameraMovement", false);
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
-    EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR });
+    EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR, PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
     BoolSetting tutorialPromptShown = BoolSetting("TutorialPromptShown", false);
     BoolSetting bootDirectlyIntoGame = BoolSetting("BootDirectlyIntoGame", false);

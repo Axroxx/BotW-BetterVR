@@ -150,6 +150,8 @@ void CemuHooks::hook_UpdateSettings(PPCInterpreter_t* hCPU) {
         VRManager::instance().Hooks->m_entityDebugger->UpdateEntityMemory();
     }
 
+    UpdateFloatParamOverrides();
+
     ++s_framesSinceLastCameraUpdate;
 
 #ifdef _DEBUG

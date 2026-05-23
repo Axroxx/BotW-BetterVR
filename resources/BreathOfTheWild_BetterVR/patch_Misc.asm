@@ -4,7 +4,7 @@ moduleMatches = 0x6267BFD0
 .origin = codecave
 
 ; disable sideOffsetBowCus
-;0x02C01A5C = bla import.coreinit.hook_OverwriteCameraParam
+;0x02C01A5C = bla import.coreinit.hook_OverwriteFloatParam
 
 ; disable agl::fx::Cloud::drawSunOcc which uses texture readback
 ;0x0340425C = cmpwi r1, 0
@@ -44,7 +44,7 @@ moduleMatches = 0x6267BFD0
 
 ; ==================================================================================
 ; make jump always jump twice as high to compensate for increased player gravity due to bug
-;0x02CA2464 = bla import.coreinit.hook_OverwriteCameraParam
+;0x02CA2464 = bla import.coreinit.hook_OverwriteFloatParam
 
 
 ; player move speed, doesn't affect gravity
@@ -131,6 +131,57 @@ moduleMatches = 0x6267BFD0
 ;0x024AC8D4 = nop
 ;0x024AC8DC = cmpw r3, r3
 ;0x024AC7B4 = nop
+
+; track and optionally block first-person PlayerNormal damage state changes
+0x02D0A558 = bla import.coreinit.hook_PlayerNormalChangeState
+
+; neutralize PlayerLaunch movement for Link by overriding the launch float params to 0.0f
+0x02CAE018 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAE038 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAE058 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAE078 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAE098 = bla import.coreinit.hook_OverwriteFloatParam
+
+; neutralize PlayerLargeDamage movement for Link by overriding its speed, jump, impulse, and ragdoll float params to 0.0f
+0x02CAB32C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB350 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB374 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB398 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB3BC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB3E0 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB404 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB428 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB44C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB470 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB494 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB4B8 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB4DC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB500 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB524 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB548 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB56C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB58C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB5AC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB5CC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB5EC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB60C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB62C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB64C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB66C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB68C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB6AC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB6CC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB6EC = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB70C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB72C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB74C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CAB76C = bla import.coreinit.hook_OverwriteFloatParam
+0x02CABAE8 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CABB08 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CABB28 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CABB48 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CABB68 = bla import.coreinit.hook_OverwriteFloatParam
+0x02CABB88 = bla import.coreinit.hook_OverwriteFloatParam
 
 ;0x02C18754 = nop
 ;0x02C18764 = nop

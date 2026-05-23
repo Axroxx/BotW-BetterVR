@@ -89,8 +89,6 @@ static void DrawCompactProfilerSummary() {
     });
 
     ImGui::Separator();
-    ImGui::TextUnformatted("BetterVR CPU");
-
     int rowsDrawn = 0;
     for (const auto& snapshot : snapshots) {
         if (std::max(snapshot.lastFrameMs, snapshot.averageFrameMs) < 0.01 && snapshot.maxFrameMs < 0.01) {
@@ -99,7 +97,7 @@ static void DrawCompactProfilerSummary() {
 
         ImGui::Text("%s %.2f/%.2f ms x%u", snapshot.name, snapshot.lastFrameMs, snapshot.averageFrameMs, snapshot.lastFrameCalls);
         rowsDrawn++;
-        if (rowsDrawn >= 5) {
+        if (rowsDrawn >= 3) {
             break;
         }
     }
@@ -115,11 +113,7 @@ static void DrawDetailedProfilerSummary() {
         return std::max(lhs.lastFrameMs, lhs.averageFrameMs) > std::max(rhs.lastFrameMs, rhs.averageFrameMs);
     });
 
-    ImGui::SeparatorText("BetterVR Profiling");
-    ImGui::TextWrapped(
-        "CPU-side wall time only. Frame columns are aggregated per OpenXR frame, avg uses the last %u frame buckets, and Roomscale Resolve spans the full sweep/probe loop between the BetterVR roomscale hooks.",
-        BetterVRProfiler::GetAverageWindowFrames());
-
+    ImGui::SeparatorText("BetterVR CPU Profiling");
     if (ImGui::Button("Reset BetterVR Profiling")) {
         BetterVRProfiler::Reset();
     }
@@ -175,7 +169,13 @@ static void DrawBetterVRProfiler(bool detailed) {
     }
 }
 
-static void DrawFPSOverlayContent(RND_Renderer* renderer, bool renderText) {
+enum class OverlayProfilerMode : uint8_t {
+    NONE = 0,
+    COMPACT = 1,
+    DETAILED = 2,
+};
+
+static void DrawFPSOverlayContent(RND_Renderer* renderer, bool renderText, OverlayProfilerMode profilerMode) {
     const float predictedDisplayPeriodMs = (float)renderer->GetPredictedDisplayPeriodMs();
     const float predictedHz = GetSettings().performanceOverlayFrequency;
 
@@ -299,7 +299,9 @@ static void DrawFPSOverlayContent(RND_Renderer* renderer, bool renderText) {
         ImPlot::EndPlot();
     }
 
-    DrawBetterVRProfiler(renderText);
+    if (profilerMode != OverlayProfilerMode::NONE) {
+        DrawBetterVRProfiler(profilerMode == OverlayProfilerMode::DETAILED);
+    }
 }
 
 namespace WeaponAttackDebugger {
@@ -679,8 +681,13 @@ namespace ImGuiMenus {
         const ImVec2 pad(10.0f, 10.0f);
         ImGui::SetNextWindowPos(ImVec2(windowSize.x - pad.x, pad.y), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
 
+        OverlayProfilerMode profilerMode = OverlayProfilerMode::NONE;
+        if (GetSettings().performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER) {
+            profilerMode = OverlayProfilerMode::COMPACT;
+        }
+
         if (ImGui::Begin("AppMS Overlay", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove)) {
-            DrawFPSOverlayContent(renderer, false);
+            DrawFPSOverlayContent(renderer, false, profilerMode);
         }
         ImGui::End();
     }
@@ -994,12 +1001,11 @@ void RND_Renderer::ImGuiOverlay::DrawFPSOverlayTab(const ImVec2& windowWidth, bo
         });
 
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true);
+        DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true, OverlayProfilerMode::NONE);
     }
-    else {
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
-        DrawBetterVRProfiler(true);
-    }
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    DrawBetterVRProfiler(true);
 
     ImGui::EndTabItem();
 }
@@ -1221,21 +1227,27 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                 ImGui::PopStyleVar();
 
                 if (BeginStyledTab(ICON_KI_COG "Settings", selectedTab, ImGuiMenus::SETTINGS_TAB, setTab)) {
+                    selectedTab = ImGuiMenus::SETTINGS_TAB;
                     DrawSettingsTab(windowWidth, &changed);
                 }
                 if (hasDebugTab && BeginStyledTab("Debug", selectedTab, ImGuiMenus::DEBUG_TAB, setTab)) {
+                    selectedTab = ImGuiMenus::DEBUG_TAB;
                     DrawDebugTab(&changed);
                 }
                 if (BeginStyledTab(ICON_KI_INFO_CIRCLE " Help & Controller Guide", selectedTab, ImGuiMenus::HELP_TAB, setTab)) {
+                    selectedTab = ImGuiMenus::HELP_TAB;
                     DrawHelpGuideTab();
                 }
                 if (BeginStyledTab(ICON_KI_PODIUM " FPS Overlay", selectedTab, ImGuiMenus::FPS_OVERLAY_TAB, setTab)) {
+                    selectedTab = ImGuiMenus::FPS_OVERLAY_TAB;
                     DrawFPSOverlayTab(windowWidth, &changed);
                 }
                 if (BeginStyledTab(ICON_KI_HEART " Credits", selectedTab, ImGuiMenus::CREDITS_TAB, setTab)) {
+                    selectedTab = ImGuiMenus::CREDITS_TAB;
                     DrawCreditsTab();
                 }
                 if (hasCustomAttackSensitivityTab && BeginStyledTab("Custom Attack Sensitivity", selectedTab, ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB, setTab)) {
+                    selectedTab = ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB;
                     DrawCustomAttackSensitivityTab(windowWidth, &changed);
                 }
 
