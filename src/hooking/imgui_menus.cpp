@@ -85,7 +85,7 @@ static void DrawSectionHeader(const char* label) {
 static void DrawCompactProfilerSummary() {
     auto snapshots = BetterVRProfiler::GetSnapshots();
     std::sort(snapshots.begin(), snapshots.end(), [](const BetterVRProfiler::Snapshot& lhs, const BetterVRProfiler::Snapshot& rhs) {
-        return std::max(lhs.lastFrameMs, lhs.averageFrameMs) > std::max(rhs.lastFrameMs, rhs.averageFrameMs);
+        return lhs.averageFrameMs > rhs.averageFrameMs;
     });
 
     ImGui::Separator();
