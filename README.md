@@ -3,7 +3,7 @@
 BetterVR is a VR mod/hook that adds a PC-VR mode for BotW using the Wii U emulator called Cemu.
 
 It currently supports the following features:
-* Fully stereo-rendered with 6DOF. No alternated eye rendering is used.
+* Fully stereo-rendered with 6DOF, with full roomscale support. No alternated eye rendering is used.
 * Full hands and arms support. You can deck yourself out in all the fanciest clothes.
 * Wield weapons, torches and bokoblin arms into combat.
 * Gestures to equip and throw weapons.
@@ -34,10 +34,8 @@ While more integrated solutions are being found out, there's probably ways to se
 
 ### Current Limitations & Known Issues
 
-- There's a very small chance that the screen stays black after exiting any menus, which requires restarting the game to continue.
+- There's a small chance that the screen stays black after exiting any menus, which requires restarting the game to continue.
 - Bow Aiming is done via a crosshair on the VR headset. Bow support might be added at some point.
-- No roomscale support. You can freely move around your room, but enemies and physics will use your center point.
-- Magnesis & Stasis aim is off-center at far distances. Point your gaze to the **right** of the object to highlight it.
 - Climbing ladders require jumping up the ladder to go up and you have to look at the ladder.
 - You can get stuck behind ladders sometimes, especially when you stop moving at the very top of the ladder while climbing down. So keep moving at the start!
 - Bombs, barrels etc. are thrown at a weird angle.
