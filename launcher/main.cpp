@@ -399,8 +399,11 @@ static bool RegisterImplicitLayer(const LauncherPaths& paths, LayerInstallScope 
     }
 
     const DWORD enabled = 0;
-    const std::wstring valueName = layerManifestPath.wstring();
-    const LONG setResult = RegSetValueExW(key, valueName.c_str(), 0, REG_DWORD, reinterpret_cast<const BYTE*>(&enabled), sizeof(enabled));
+    // intentionally write unicode path to an ANSI registry value, since the vulkan loader would fail to load the layer from e.g. cyrillic %appdata% paths
+    // this might break once this issue is fixed however, in case we'll want to revert this fix (probably?) and tell people to update
+    // https://github.com/KhronosGroup/Vulkan-Loader/issues/1592#issuecomment-4525169886
+    const std::string valueName = Narrow(layerManifestPath);
+    const LONG setResult = RegSetValueExA(key, valueName.c_str(), 0, REG_DWORD, reinterpret_cast<const BYTE*>(&enabled), sizeof(enabled));
     RegCloseKey(key);
 
     if (setResult != ERROR_SUCCESS) {
