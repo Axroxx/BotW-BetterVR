@@ -340,21 +340,21 @@ void RND_Renderer::ImGuiOverlay::Update() {
     ImVec2 physicalRes = ImVec2((float)renderPhysicalWidth, (float)renderPhysicalHeight);
     ImVec2 framebufferRes = ImVec2((float)m_outputRes.width, (float)m_outputRes.height);
     ImVec4 physicalUiRegion = CalculateCenteredAspectRegion(physicalRes);
-    ImVec4 framebufferUiRegion = CalculateCenteredAspectRegion(framebufferRes);
 
-    // keep a shared 16:9 canvas with a 1080p minimum menu size
+    // keep a shared 16:9 canvas with a 1080p size (DPI-wise)
     float uiScaleFactor = std::max(physicalUiRegion.w / 1080.0f, 1.0f);
-
     uiScaleFactor *= 1.85f;
 
-    ImVec2 logicalRes = ImVec2(framebufferUiRegion.z / uiScaleFactor, framebufferUiRegion.w / uiScaleFactor);
+    constexpr float kRefWidth = 1920.0f;
+    constexpr float kRefHeight = 1080.0f;
+    ImVec2 logicalRes = ImVec2(kRefWidth / uiScaleFactor, kRefHeight / uiScaleFactor);
 
     io.DisplaySize = logicalRes;
 
     uint32_t blackBarWidth = (windowWidth - renderPhysicalWidth) / 2;
     uint32_t blackBarHeight = (windowHeight - renderPhysicalHeight) / 2;
 
-    io.DisplayFramebufferScale = framebufferRes / logicalRes;
+    io.DisplayFramebufferScale = ImVec2(framebufferRes.x / logicalRes.x, framebufferRes.y / logicalRes.y);
 
     ImVec2 physicalMenuScale = ImVec2(physicalUiRegion.z / logicalRes.x, physicalUiRegion.w / logicalRes.y);
 
@@ -382,6 +382,7 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
 
     auto* renderer = VRManager::instance().XR->GetRenderer();
     auto& frame = renderer->GetFrame(frameIdx);
+
     const bool shouldHideGameUIInDesktopView = isDesktopView && CemuHooks::s_recordingOutputMode.load(std::memory_order_relaxed) == 2;
 
     ImVec2 windowSize = ImGui::GetIO().DisplaySize;
