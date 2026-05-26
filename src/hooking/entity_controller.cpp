@@ -116,6 +116,9 @@ struct RoomscaleDebugBody {
     float groundProbeDown = 0.75f;
 };
 
+static RoomscaleDebugBody s_roomscaleResolveBody = {};
+static bool s_roomscaleShouldShowPhysicsDebug = false;
+
 struct RoomscaleDebugPalette {
     uint32_t pathColor = 0;
     uint32_t pathSecondaryColor = 0;
@@ -181,13 +184,8 @@ static RoomscaleDebugPalette GetRoomscaleDebugPalette(bool isGroundProbe, bool i
     };
 }
 
-static RoomscaleDebugBody GetRoomscaleDebugBody() {
+static RoomscaleDebugBody BuildRoomscaleDebugBody(const PlayerBase& player) {
     RoomscaleDebugBody body = {};
-
-    PlayerBase player = {};
-    if (!GameUtils::TryReadPlayerBase(player)) {
-        return body;
-    }
 
     const glm::fvec3 localMin = player.aabb.min.getLE();
     const glm::fvec3 localMax = player.aabb.max.getLE();
@@ -206,6 +204,11 @@ static RoomscaleDebugBody GetRoomscaleDebugBody() {
     body.groundProbeUp = std::max(footOffset + 0.05f, 0.2f);
     body.groundProbeDown = std::max(footOffset + 0.25f, 0.5f);
     return body;
+}
+
+static void CacheRoomscaleResolveContext(const PlayerBase& player) {
+    s_roomscaleResolveBody = BuildRoomscaleDebugBody(player);
+    s_roomscaleShouldShowPhysicsDebug = GetSettings().ShouldShowRoomPhysics();
 }
 
 static bool IsRoomscaleSweepPhase(RoomscaleResolvePhase phase) {
@@ -409,12 +412,11 @@ static bool IsRoomscaleGroundProbe(const RoomscaleRaycastScratch& scratch) {
     return scratch.queryType.getLE() != RoomscaleQueryType_Sweep;
 }
 
-static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool isProbeOnly) {
-    if (!GetSettings().ShouldShowRoomPhysics() || IsRoomscaleGroundProbe(scratch)) {
+static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, const RoomscaleDebugBody& body, bool isProbeOnly, bool shouldShowRoomPhysics) {
+    if (!shouldShowRoomPhysics || IsRoomscaleGroundProbe(scratch)) {
         return;
     }
 
-    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
     const RoomscaleDebugPalette palette = GetRoomscaleDebugPalette(false, isProbeOnly);
     const glm::fvec3 castFrom = scratch.castFrom.getLE();
     const glm::fvec3 castTo = castFrom + scratch.castDelta.getLE();
@@ -426,8 +428,8 @@ static void DrawRoomscaleDebugCast(const RoomscaleRaycastScratch& scratch, bool 
     DrawRoomscaleDebugPositionMarker(castTo, 0.04f, palette.pathSecondaryColor, true);
 }
 
-static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch, bool isProbeOnly, bool hadHit, bool acceptedHit) {
-    if (!GetSettings().ShouldShowRoomPhysics()) {
+static void DrawRoomscaleDebugCastResult(const RoomscaleRaycastScratch& scratch, bool isProbeOnly, bool hadHit, bool acceptedHit, bool shouldShowRoomPhysics) {
+    if (!shouldShowRoomPhysics) {
         return;
     }
 
@@ -505,6 +507,8 @@ static void ClearRoomscaleResolveState() {
     s_roomscaleState.remainingWorldDelta = glm::fvec3(0.0f);
     s_roomscaleState.attemptIndex = 0;
     s_roomscaleState.maxAttempts = 0;
+    s_roomscaleResolveBody = {};
+    s_roomscaleShouldShowPhysicsDebug = false;
     ResetRoomscaleActiveStep();
 }
 
@@ -625,7 +629,7 @@ static void PrimeRoomscaleBaseline(const glm::fvec3& headPos) {
     UpdateRoomscaleFade();
 }
 
-static bool ShouldDrivePlayerBodyWithVR(const glm::fvec3& currentHeadPos, PlayerBase& player) {
+static bool ShouldDrivePlayerBodyWithVR(const glm::fvec3& currentHeadPos, const PlayerBase& player) {
     if (!CemuHooks::IsFirstPerson()) {
         SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode::DisabledNotFirstPerson);
         PrimeRoomscaleBaseline(currentHeadPos);
@@ -644,21 +648,8 @@ static bool ShouldDrivePlayerBodyWithVR(const glm::fvec3& currentHeadPos, Player
         return false;
     }
 
-    auto* renderer = VRManager::instance().XR->GetRenderer();
-    if (renderer == nullptr) {
-        SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode::DisabledNoRenderer);
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
     if (!VRManager::instance().XR->m_capabilities.supportsPositional) {
         SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode::DisabledNoPositional);
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
-    if (!GameUtils::TryReadPlayerBase(player)) {
-        SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode::DisabledNoPlayer);
         PrimeRoomscaleBaseline(currentHeadPos);
         return false;
     }
@@ -676,15 +667,10 @@ static bool ShouldDrivePlayerBodyWithVR(const glm::fvec3& currentHeadPos, Player
     return true;
 }
 
-static bool TryGetRoomscaleMoveDelta(uint32_t controller, glm::fvec3& currentHeadPos, glm::fvec3& roomDelta, glm::fvec3& worldDelta) {
+static bool TryGetRoomscaleMoveDelta(const PlayerBase& player, glm::fvec3& currentHeadPos, glm::fvec3& roomDelta, glm::fvec3& worldDelta) {
     currentHeadPos = glm::fvec3(0.0f);
     roomDelta = glm::fvec3(0.0f);
     worldDelta = glm::fvec3(0.0f);
-
-    uint32_t playerController = 0;
-    if (!GameUtils::TryGetPlayerCharacterController(playerController) || controller != playerController) {
-        return false;
-    }
 
     std::optional<glm::fvec3> currentHeadPosOpt = TryGetCurrentHeadPos();
     if (!currentHeadPosOpt.has_value()) {
@@ -695,7 +681,6 @@ static bool TryGetRoomscaleMoveDelta(uint32_t controller, glm::fvec3& currentHea
     currentHeadPos = currentHeadPosOpt.value();
     s_roomscaleState.trackedHeadPos = currentHeadPos;
 
-    PlayerBase player = {};
     if (!ShouldDrivePlayerBodyWithVR(currentHeadPos, player)) {
         return false;
     }
@@ -762,21 +747,23 @@ void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
     uint32_t controller = hCPU->gpr[3];
-    uint32_t scratchPtr = hCPU->gpr[4];
-    RoomscaleRaycastScratch scratch = {};
-    writeMemory(scratchPtr, &scratch);
     hCPU->gpr[3] = RoomscaleHookResult_Skip;
     ClearRoomscaleResolveState();
 
-    uint32_t playerController = 0;
-    if (!GameUtils::TryGetPlayerCharacterController(playerController) || controller != playerController) {
+    PlayerBase player = {};
+    if (!GameUtils::TryReadPlayerBase(player)) {
+        return;
+    }
+
+    uint32_t playerController = GameUtils::ResolveActorPhysicsController(player);
+    if (playerController == 0 || controller != playerController) {
         return;
     }
 
     glm::fvec3 currentHeadPos = {};
     glm::fvec3 roomDelta = {};
     glm::fvec3 worldDelta = {};
-    if (!TryGetRoomscaleMoveDelta(controller, currentHeadPos, roomDelta, worldDelta)) {
+    if (!TryGetRoomscaleMoveDelta(player, currentHeadPos, roomDelta, worldDelta)) {
         glm::fvec3 residual = GetRoomscaleResidual();
         glm::fvec3 residualWorldDelta = GetRoomscaleRoomToWorldRotation() * residual;
         residualWorldDelta.y = 0.0f;
@@ -796,6 +783,7 @@ void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
         s_roomscaleState.maxAttempts = maxAttempts;
         s_roomscaleState.isResolving = true;
         s_roomscaleState.isProbeOnly = true;
+        CacheRoomscaleResolveContext(player);
         hCPU->gpr[3] = RoomscaleHookResult_Cast;
         BetterVRProfiler::BeginSpan(BetterVRProfiler::Section::RoomscaleResolve);
         return;
@@ -811,6 +799,7 @@ void CemuHooks::hook_BeginRoomscaleMovement(PPCInterpreter_t* hCPU) {
     s_roomscaleState.maxAttempts = maxAttempts;
     s_roomscaleState.isResolving = true;
     s_roomscaleState.isProbeOnly = false;
+    CacheRoomscaleResolveContext(player);
     hCPU->gpr[3] = RoomscaleHookResult_Cast;
     BetterVRProfiler::BeginSpan(BetterVRProfiler::Section::RoomscaleResolve);
 }
@@ -850,7 +839,7 @@ void CemuHooks::hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
+    const RoomscaleDebugBody& body = s_roomscaleResolveBody;
     const glm::fvec3 currentWorldPos = scratch.currentPos.getLE();
     const RoomscaleResolvePhase phase = s_roomscaleState.resolvePhase;
 
@@ -885,7 +874,7 @@ void CemuHooks::hook_PrepareRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         PrepareRoomscaleSupportProbe(scratch, body, probeBodyPos);
     }
 
-    DrawRoomscaleDebugCast(scratch, s_roomscaleState.isProbeOnly);
+    DrawRoomscaleDebugCast(scratch, body, s_roomscaleState.isProbeOnly, s_roomscaleShouldShowPhysicsDebug);
     writeMemory(scratchPtr, &scratch);
     hCPU->gpr[3] = RoomscaleHookResult_Cast;
 }
@@ -915,8 +904,6 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    RoomscaleRaycastScratch scratch = {};
-    readMemory(scratchPtr, &scratch);
     uint32_t remainingSteps = s_roomscaleState.maxAttempts - s_roomscaleState.attemptIndex;
     if (remainingSteps == 0) {
         ClearRoomscaleResolveState();
@@ -925,7 +912,12 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
     }
 
     if (IsRoomscaleSweepPhase(s_roomscaleState.resolvePhase)) {
-        DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit, false);
+        if (s_roomscaleShouldShowPhysicsDebug) {
+            RoomscaleRaycastScratch scratch = {};
+            readMemory(scratchPtr, &scratch);
+            DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit, false, s_roomscaleShouldShowPhysicsDebug);
+        }
+
         if (hadHit) {
             s_roomscaleState.currentStepBlockedByCollision = true;
             if (s_roomscaleState.resolvePhase == RoomscaleResolvePhase_ForwardSweep) {
@@ -952,12 +944,14 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    const RoomscaleDebugBody body = GetRoomscaleDebugBody();
+    RoomscaleRaycastScratch scratch = {};
+    readMemory(scratchPtr, &scratch);
+    const RoomscaleDebugBody& body = s_roomscaleResolveBody;
     const bool isStepProbe = s_roomscaleState.resolvePhase == RoomscaleResolvePhase_StepDownSupportProbe;
     const float maxGroundRise = isStepProbe ? (kRoomscaleStepUpHeight + kRoomscaleGroundSnapMaxRise) : kRoomscaleGroundSnapMaxRise;
     RoomscaleSupportState support = {};
     const bool hasSupport = hadHit && TryBuildRoomscaleSupportState(body, scratch.currentPos.getLE(), maxGroundRise, scratch, support);
-    DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit, hasSupport);
+    DrawRoomscaleDebugCastResult(scratch, s_roomscaleState.isProbeOnly, hadHit, hasSupport, s_roomscaleShouldShowPhysicsDebug);
 
     if (!hasSupport) {
         if (!isStepProbe) {
