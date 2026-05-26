@@ -99,6 +99,7 @@ HWND CemuHooks::m_cemuTopWindow = NULL;
 HWND CemuHooks::m_cemuRenderWindow = NULL;
 uint64_t CemuHooks::s_memoryBaseAddress = 0;
 std::atomic_uint32_t CemuHooks::s_framesSinceLastCameraUpdate = 0;
+std::atomic_uint32_t CemuHooks::s_recordingOutputMode = 0;
 
 
 std::unordered_set<ScreenId> prevEnabledScreens = {};
@@ -145,6 +146,9 @@ void CemuHooks::hook_UpdateSettings(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
     uint32_t ppc_tableOfCutsceneEventSettings = hCPU->gpr[6];
+    uint32_t recordingOutputMode = 0;
+    readMemoryBE(0x10416BF4, &recordingOutputMode);
+    s_recordingOutputMode.store(recordingOutputMode, std::memory_order_relaxed);
     
     if (GetSettings().IsDebuggingToolsEnabled()) {
         VRManager::instance().Hooks->m_entityDebugger->UpdateEntityMemory();

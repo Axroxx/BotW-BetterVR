@@ -40,9 +40,14 @@ default = 1
 $recordingOutput:int = 0
 
 [Preset]
-name = Enabled (May Lower VR Quality And Performance)
+name = Enabled (May Affect Performance)
 category = Recording Mode
 $recordingOutput:int = 1
+
+[Preset]
+name = Enabled, Hide HUD In 2D View (May Affect Performance)
+category = Recording Mode
+$recordingOutput:int = 2
 
 # VR Resolution Multiplier (BetterVR)
 
@@ -113,14 +118,14 @@ $height = __BETTERVR_30_HEIGHT__
 [Preset]
 name = 1920x1080 (16:9 Recording)
 category = VR Resolution Multiplier
-condition = ($recordingOutput == 1)
+condition = ($recordingOutput != 0)
 $width = 1920
 $height = 1080
 
 [Preset]
 name = 2560x1440 (16:9 Recording, Default)
 category = VR Resolution Multiplier
-condition = ($recordingOutput == 1)
+condition = ($recordingOutput != 0)
 default = 1
 $width = 2560
 $height = 1440
@@ -128,7 +133,7 @@ $height = 1440
 [Preset]
 name = 3840x2160 (16:9 Recording)
 category = VR Resolution Multiplier
-condition = ($recordingOutput == 1)
+condition = ($recordingOutput != 0)
 $width = 3840
 $height = 2160
 

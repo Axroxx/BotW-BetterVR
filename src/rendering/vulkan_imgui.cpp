@@ -382,6 +382,7 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
 
     auto* renderer = VRManager::instance().XR->GetRenderer();
     auto& frame = renderer->GetFrame(frameIdx);
+    const bool shouldHideGameUIInDesktopView = isDesktopView && CemuHooks::s_recordingOutputMode.load(std::memory_order_relaxed) == 2;
 
     ImVec2 windowSize = ImGui::GetIO().DisplaySize;
     ImDrawList* backgroundDrawList = ImGui::GetBackgroundDrawList();
@@ -434,7 +435,9 @@ void RND_Renderer::ImGuiOverlay::Render(long frameIdx, bool renderBackground, bo
             renderMainBackground(isDesktopView);
         }
 
-        renderHUDBackground(shouldRenderHUDWithAlpha, true);
+        if (!shouldHideGameUIInDesktopView) {
+            renderHUDBackground(shouldRenderHUDWithAlpha, true);
+        }
     }
     else {
         renderHUDBackground(VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx), false);
