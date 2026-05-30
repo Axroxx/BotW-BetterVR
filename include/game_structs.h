@@ -656,8 +656,17 @@ struct InlineParamBool {
     BEType<uint32_t> keyPtr;
 };
 
+struct InlineParamFloat {
+    BEType<float> value;
+    BaseProcLink procLink;
+    BEType<uint8_t> gap1C[16+4+4+4];
+    BEType<uint32_t> type;
+    BEType<uint32_t> keyPtr;
+};
+
 static_assert(sizeof(InlineParamVec3) == 0x34, "InlineParamVec3 size mismatch");
 static_assert(sizeof(InlineParamBool) == 0x34, "InlineParamBool size mismatch");
+static_assert(sizeof(InlineParamFloat) == 0x34, "InlineParamFloat size mismatch");
 
 
 

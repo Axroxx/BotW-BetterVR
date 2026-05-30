@@ -191,7 +191,7 @@ static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corner
     }
 }
 
-static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, int segments, uint32_t color, bool xray) {
+static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, int segments, uint32_t color, bool xray, const glm::vec3& cameraPos) {
     if (segments < 2 || duration <= 0.0f) {
         return;
     }
@@ -201,7 +201,6 @@ static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start
     };
 
     const float arcWidth = ResolveArcWidth(duration);
-    const glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
     const uint32_t ribbonColor = ScaleColor(color, 0.95f, 0.45f);
 
     for (int i = 0; i < segments; ++i) {
@@ -215,11 +214,17 @@ static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start
         }
 
         tangent = glm::normalize(tangent);
-        glm::vec3 right = glm::cross(tangent, worldUp);
+        const glm::vec3 midPoint = (p0 + p1) * 0.5f;
+        const glm::vec3 toCamera = glm::normalize(cameraPos - midPoint);
+        const glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::vec3 right = glm::cross(tangent, toCamera);
         if (glm::length2(right) <= 0.000001f) {
-            right = glm::cross(tangent, glm::vec3(1.0f, 0.0f, 0.0f));
+            right = glm::cross(tangent, worldUp);
             if (glm::length2(right) <= 0.000001f) {
-                continue;
+                right = glm::cross(tangent, glm::vec3(1.0f, 0.0f, 0.0f));
+                if (glm::length2(right) <= 0.000001f) {
+                    continue;
+                }
             }
         }
 
@@ -394,6 +399,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 if (eyeState.IsValid()) {
                     renderData.viewProjections[eyeIndex] = eyeState.viewProjection;
                     renderData.hasViewProjections[eyeIndex] = true;
+                    renderData.cameraPos = glm::vec3(glm::inverse(eyeState.view)[3]);
                 }
                 s_frameDebugEyeStates[frameIdx][eyeIndex].Reset();
             }
@@ -404,6 +410,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 if (eyeState.IsValid()) {
                     renderData.viewProjections[eyeIndex] = eyeState.viewProjection;
                     renderData.hasViewProjections[eyeIndex] = true;
+                    renderData.cameraPos = glm::vec3(glm::inverse(eyeState.view)[3]);
                 }
             }
         }
@@ -525,7 +532,7 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                     break;
                 }
 
-                AddArcRibbon(renderData, prim.a, prim.b, prim.c, prim.duration, segments, prim.color, prim.xray);
+                AddArcRibbon(renderData, prim.a, prim.b, prim.c, prim.duration, segments, prim.color, prim.xray, renderData.cameraPos);
 
                 auto evaluatePoint = [&](float t) {
                     return prim.a + prim.b * t + prim.c * (0.5f * t * t);

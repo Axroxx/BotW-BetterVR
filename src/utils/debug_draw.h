@@ -26,6 +26,7 @@ struct DebugDrawRenderData {
     std::vector<DebugDrawLineVertex> xrayLineVertices;
     std::array<glm::mat4, 2> viewProjections = { glm::mat4(1.0f), glm::mat4(1.0f) };
     std::array<bool, 2> hasViewProjections = { false, false };
+    glm::vec3 cameraPos = glm::vec3(0.0f);
 
     bool IsEmpty() const { return triangleVertices.empty() && lineVertices.empty() && xrayTriangleVertices.empty() && xrayLineVertices.empty(); }
 };

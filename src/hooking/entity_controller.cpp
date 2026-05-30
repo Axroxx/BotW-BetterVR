@@ -1059,24 +1059,39 @@ void CemuHooks::hook_LoadDynamicBool(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
     hCPU->sprNew.LR = hCPU->gpr[0];
 
-    InlineParamBool boolParam;
+    InlineParamBool boolParam = {};
     readMemory(hCPU->gpr[30], &boolParam);
-
-    const char* paramString = (char*)(boolParam.keyPtr.getLE() + s_memoryBaseAddress);
-    Log::print<PPC>("[{:08X}] Loaded dynamic bool parameter for {}: {}", hCPU->gpr[0], paramString, boolParam.value.getLE());
-
-    if (std::string(paramString) == "IsShootByPlayer" && boolParam.value.getLE() == 1) {
-        Log::print<PPC>("Arrow is being shot by the player!");
-        shouldAdjustArrowTarget = true;
-    }
+    ArrowShotParamCapture::RecordBool(boolParam);
 }
 
 void CemuHooks::hook_LoadDynamicVec3(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = 0x030EC844;
 
-    InlineParamVec3 vec3Param;
+    InlineParamVec3 vec3Param = {};
     readMemory(hCPU->gpr[31], &vec3Param);
 
     vec3Param.value.z = hCPU->fpr[0].fp0;
     writeMemory(hCPU->gpr[31], &vec3Param);
+    ArrowShotParamCapture::RecordVec3(vec3Param);
+}
+
+void CemuHooks::hook_LoadDynamicFloat(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = 0x030EC7B8;
+
+    uint32_t keyPtr = hCPU->gpr[12];
+    writeMemoryBE(hCPU->gpr[31] + 0x30, &keyPtr);
+
+    InlineParamFloat floatParam = {};
+    readMemory(hCPU->gpr[31], &floatParam);
+    ArrowShotParamCapture::RecordFloat(floatParam);
+}
+
+void CemuHooks::hook_LoadArrowFallSpeedRatioByRange(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = 0x020E3928;
+    hCPU->gpr[0] = 0x10020000;
+
+    float fallSpeedRatioByRange = 0.0f;
+    readMemoryBE(hCPU->gpr[31] + 0x4C, &fallSpeedRatioByRange);
+    ArrowShotParamCapture::RecordFallSpeedRatioByRange(fallSpeedRatioByRange);
+}
 }
