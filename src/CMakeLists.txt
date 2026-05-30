@@ -41,6 +41,7 @@ target_sources(BetterVR_Layer PUBLIC
     ${CMAKE_SOURCE_DIR}/src/hooking/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/openxr_motion_bridge.h
     ${CMAKE_SOURCE_DIR}/src/hooking/entity_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/hooking/bow.cpp
     ${CMAKE_SOURCE_DIR}/src/rendering/d3d12.cpp
     ${CMAKE_SOURCE_DIR}/src/rendering/d3d12.h
     ${CMAKE_SOURCE_DIR}/src/rendering/renderer.cpp

@@ -93,8 +93,8 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_ProfileSectionEnd", &hook_ProfileSectionEnd);
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicVec3", &hook_LoadDynamicVec3);
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicBool", &hook_LoadDynamicBool);
-        osLib_registerHLEFunction("coreinit", "hook_LoadDynamicFloat", &hook_LoadDynamicFloat);
-        osLib_registerHLEFunction("coreinit", "hook_LoadArrowFallSpeedRatioByRange", &hook_LoadArrowFallSpeedRatioByRange);
+        osLib_registerHLEFunction("coreinit", "hook_OverrideArrowShotTransform", &hook_OverrideArrowShotTransform);
+        osLib_registerHLEFunction("coreinit", "hook_CaptureArrowShootDecision", &hook_CaptureArrowShootDecision);
         osLib_registerHLEFunction("coreinit", "hook_VisualizeRayCastHits", &hook_VisualizeRayCastHits);
     };
     ~CemuHooks() {
@@ -258,8 +258,8 @@ private:
     static void hook_ProfileSectionEnd(PPCInterpreter_t* hCPU);
     static void hook_LoadDynamicVec3(PPCInterpreter_t* hCPU);
     static void hook_LoadDynamicBool(PPCInterpreter_t* hCPU);
-    static void hook_LoadDynamicFloat(PPCInterpreter_t* hCPU);
-    static void hook_LoadArrowFallSpeedRatioByRange(PPCInterpreter_t* hCPU);
+    static void hook_OverrideArrowShotTransform(PPCInterpreter_t* hCPU);
+    static void hook_CaptureArrowShootDecision(PPCInterpreter_t* hCPU);
 
 public:
     template <typename T>

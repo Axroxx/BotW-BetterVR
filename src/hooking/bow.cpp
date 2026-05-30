@@ -1,0 +1,1370 @@
+#include "pch.h"
+
+#include "bow.h"
+
+#include <array>
+
+#include "cemu_hooks.h"
+#include "instance.h"
+#include "utils/debug_draw.h"
+
+enum class BowParamActionKind : uint8_t {
+    Move,
+    Homing,
+    MoveWithStickOffset,
+    MoveForLargeObject,
+    Sky,
+    Unknown,
+};
+
+enum class BowVisualizationOriginSource : uint8_t {
+    Unknown,
+    WeaponAttackPos,
+    RightHandPose,
+    LeftHandPose,
+    CameraPose,
+};
+
+enum class BowVisualizationDirectionSource : uint8_t {
+    Unknown,
+    TargetPos,
+    RightHandAimPose,
+    LeftHandAimPose,
+    RightHandForward,
+    LeftHandForward,
+    CameraAim,
+    CameraForward,
+};
+
+struct BowVisualizationState {
+    bool valid = false;
+    bool hasLaunchOrigin = false;
+    bool hasLaunchDirection = false;
+    bool hasTargetPos = false;
+    bool hasRelativeVel = false;
+    bool hasAtRange = false;
+    bool hasFallSpeedRatioByRange = false;
+    bool usedSyntheticTargetPos = false;
+    uint32_t weaponPtr = 0;
+    float drawAmount = 0.0f;
+    float launchSpeed = 0.0f;
+    float accel = 0.0f;
+    float aimSpeed = 0.0f;
+    float fallAccel = 0.0f;
+    float fallAimSpeed = 0.0f;
+    float gravity = 0.0f;
+    float atRange = 0.0f;
+    float fallSpeedRatioByRange = 0.0f;
+    BowParamActionKind actionKind = BowParamActionKind::Unknown;
+    BowVisualizationOriginSource originSource = BowVisualizationOriginSource::Unknown;
+    BowVisualizationDirectionSource directionSource = BowVisualizationDirectionSource::Unknown;
+    glm::vec3 launchOrigin = glm::vec3(0.0f);
+    glm::vec3 launchDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 targetPos = glm::vec3(0.0f);
+    glm::vec3 firstSpeed = glm::vec3(0.0f);
+    glm::vec3 relativeVel = glm::vec3(0.0f);
+};
+
+struct BowParamSnapshot {
+    bool valid = false;
+    bool hasIsPlayerShot = false;
+    bool isPlayerShot = false;
+    uint64_t timestampMs = 0;
+    uint32_t previewAiPtr = 0;
+};
+
+static const char* GetBowParamActionKindName(BowParamActionKind actionKind);
+
+static constexpr const char* kParamFirstSpeed = "FirstSpeed";
+static constexpr const char* kParamTargetPos = "TargetPos";
+static constexpr const char* kParamHomingTargetPos = "HomingTargetPos";
+static constexpr const char* kParamIsShootByPlayer = "IsShootByPlayer";
+
+static constexpr uint32_t kArrowShotVisualizationCallsiteStart = 0x02705644;
+static constexpr uint32_t kArrowShotVisualizationCallsiteEnd = 0x02706584;
+static constexpr uint32_t kArrowShootMoveLoadParamsCallsiteStart = 0x020E29AC;
+static constexpr uint32_t kArrowShootMoveLoadParamsCallsiteEnd = 0x020E3A4C;
+static constexpr uint32_t kArrowShootHomingLoadParamsCallsiteStart = 0x020E1538;
+static constexpr uint32_t kArrowShootHomingLoadParamsCallsiteEnd = 0x020E1808;
+static constexpr uint32_t kArrowShootMoveWithStickOffsetLoadParamsCallsiteStart = 0x020E8DEC;
+static constexpr uint32_t kArrowShootMoveWithStickOffsetLoadParamsCallsiteEnd = 0x020E8E40;
+static constexpr uint32_t kArrowHandleStateShootHomingDecisionCallsite = 0x0270640C;
+static constexpr uint32_t kArrowHandleStateShootSkyDecisionCallsite = 0x027064D8;
+static constexpr uint32_t kArrowHandleStateShootMoveDecisionCallsite = 0x02706518;
+static constexpr uint32_t kAiChangeChildAddress = 0x037B8284;
+static constexpr uint64_t kArrowShootDecisionLifetimeMs = 1500;
+
+static std::mutex s_captureMutex;
+static BowParamSnapshot s_previewSnapshot = {};
+static BowParamActionKind s_lastArrowShootDecisionKind = BowParamActionKind::Unknown;
+static uint64_t s_lastArrowShootDecisionTimestampMs = 0;
+
+static BowParamSnapshot& EnsurePreviewSnapshotLocked();
+static BowParamActionKind ResolveArrowShootDecisionKind(uint32_t callsiteAddress);
+static BowParamActionKind GetFreshArrowShootDecisionKindLocked();
+
+static bool IsFiniteVec3(const glm::vec3& value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+static bool IsReturnAddressInRange(uint32_t returnAddress, uint32_t start, uint32_t end) {
+    return returnAddress >= start && returnAddress < end;
+}
+
+static bool IsPreviewVisualReturnAddress(uint32_t returnAddress) {
+    return IsReturnAddressInRange(returnAddress, kArrowShotVisualizationCallsiteStart, kArrowShotVisualizationCallsiteEnd);
+}
+
+static bool IsShotLoadReturnAddress(uint32_t returnAddress) {
+    return IsReturnAddressInRange(returnAddress, kArrowShootMoveLoadParamsCallsiteStart, kArrowShootMoveLoadParamsCallsiteEnd) || IsReturnAddressInRange(returnAddress, kArrowShootHomingLoadParamsCallsiteStart, kArrowShootHomingLoadParamsCallsiteEnd) || IsReturnAddressInRange(returnAddress, kArrowShootMoveWithStickOffsetLoadParamsCallsiteStart, kArrowShootMoveWithStickOffsetLoadParamsCallsiteEnd);
+}
+
+static const char* ResolveParamName(uint32_t keyPtr) {
+    if (keyPtr == 0) {
+        return nullptr;
+    }
+
+    return (const char*)(CemuHooks::s_memoryBaseAddress + keyPtr);
+}
+
+static bool ParamMatches(const char* paramName, const char* expected) {
+    return paramName != nullptr && std::strcmp(paramName, expected) == 0;
+}
+
+static uint32_t ReadInlineParamPackAddVec3CallerSavedR30(PPCInterpreter_t* hCPU) {
+    uint32_t savedCallerR30 = 0;
+    // addVec3 saves the caller's r30 at sp+0x10 before reusing r30 for the SafeString* argument.
+    CemuHooks::readMemoryBE(hCPU->gpr[1] + 0x10, &savedCallerR30);
+    return savedCallerR30;
+}
+
+static void CapturePreviewHookContext(PPCInterpreter_t* hCPU, uint32_t sourceReturnAddress) {
+    if (!IsPreviewVisualReturnAddress(sourceReturnAddress)) {
+        return;
+    }
+
+    std::scoped_lock lock(s_captureMutex);
+    BowParamSnapshot& snapshot = EnsurePreviewSnapshotLocked();
+    snapshot.previewAiPtr = ReadInlineParamPackAddVec3CallerSavedR30(hCPU);
+}
+
+static void RecordArrowShootDecision(uint32_t arrowAiPtr, uint32_t callsiteAddress, uint32_t returnAddress) {
+    const BowParamActionKind actionKind = ResolveArrowShootDecisionKind(callsiteAddress);
+    if (actionKind == BowParamActionKind::Unknown) {
+        return;
+    }
+
+    std::scoped_lock lock(s_captureMutex);
+    BowParamSnapshot& snapshot = EnsurePreviewSnapshotLocked();
+    snapshot.previewAiPtr = arrowAiPtr;
+    if (snapshot.hasIsPlayerShot && snapshot.isPlayerShot) {
+        s_lastArrowShootDecisionKind = actionKind;
+        s_lastArrowShootDecisionTimestampMs = GetTickCount64();
+    }
+}
+
+static BowParamActionKind ResolveArrowShootDecisionKind(uint32_t callsiteAddress) {
+    switch (callsiteAddress) {
+        case kArrowHandleStateShootMoveDecisionCallsite:
+            return BowParamActionKind::Move;
+        case kArrowHandleStateShootHomingDecisionCallsite:
+            return BowParamActionKind::Homing;
+        case kArrowHandleStateShootSkyDecisionCallsite:
+            return BowParamActionKind::Sky;
+        default:
+            return BowParamActionKind::Unknown;
+    }
+}
+
+static BowParamActionKind GetFreshArrowShootDecisionKindLocked() {
+    if (s_lastArrowShootDecisionKind == BowParamActionKind::Unknown) {
+        return BowParamActionKind::Unknown;
+    }
+
+    const uint64_t now = GetTickCount64();
+    if (now < s_lastArrowShootDecisionTimestampMs || now - s_lastArrowShootDecisionTimestampMs > kArrowShootDecisionLifetimeMs) {
+        return BowParamActionKind::Unknown;
+    }
+
+    return s_lastArrowShootDecisionKind;
+}
+
+static BowParamSnapshot& BeginPreviewSnapshotLocked() {
+    s_previewSnapshot = {};
+    s_previewSnapshot.valid = true;
+    s_previewSnapshot.timestampMs = GetTickCount64();
+    return s_previewSnapshot;
+}
+
+static BowParamSnapshot& EnsurePreviewSnapshotLocked() {
+    if (!s_previewSnapshot.valid) {
+        return BeginPreviewSnapshotLocked();
+    }
+
+    s_previewSnapshot.timestampMs = GetTickCount64();
+    return s_previewSnapshot;
+}
+
+static uint32_t ReadInlineParamPackAddVec3CallerReturnAddress(PPCInterpreter_t* hCPU) {
+    uint32_t returnAddress = 0;
+    CemuHooks::readMemoryBE(hCPU->gpr[1] + 0x1C, &returnAddress);
+    return returnAddress;
+}
+
+static void RecordBool(const InlineParamBool& boolParam, uint32_t sourceReturnAddress) {
+    if (!IsPreviewVisualReturnAddress(sourceReturnAddress)) {
+        return;
+    }
+
+    const char* paramName = ResolveParamName(boolParam.keyPtr.getLE());
+    if (!ParamMatches(paramName, kParamIsShootByPlayer)) {
+        return;
+    }
+
+    std::scoped_lock lock(s_captureMutex);
+    BowParamSnapshot& snapshot = EnsurePreviewSnapshotLocked();
+    snapshot.hasIsPlayerShot = true;
+    snapshot.isPlayerShot = boolParam.value.getLE() != 0;
+}
+
+static constexpr float kPreviewOriginForwardOffset = 0.05f;
+static constexpr float kPreviewOriginMaxSnapDistanceSq = 1.0f;
+static constexpr float kPreviewAimDistance = 100.0f;
+static constexpr float kLaunchTargetDistance = 100.0f;
+static constexpr float kMinimumArrowSpeed = 0.01f;
+static constexpr uint64_t kActiveSnapshotLifetimeMs = 1500;
+static constexpr uint64_t kPendingShotOverrideLifetimeMs = 250;
+static constexpr uint32_t kPresetDefaultMaxFrames = 96;
+static constexpr float kPreviewFirstFrameStep = 0.01f;
+static constexpr float kPreviewSpeedEpsilon = 0.00000011920929f;
+static constexpr float kPreviewFallSpeedRatioRangeBase = 20.0f;
+static constexpr float kDefaultFallSpeedRatioByRange = 1.0f;
+static constexpr float kDefaultVfrScale = 1.0f;
+static constexpr float kPreviewImmediateFallRange = 10.0f;
+static constexpr uint32_t kActorParamPtrOffset = 0x39C;
+static constexpr uint32_t kActorParamGParamListOffset = 0x78;
+static constexpr uint32_t kWeaponFallbackOriginOffset = 0x204;
+static constexpr uint32_t kWeaponAttackPosOffset = 0x770;
+static constexpr uint32_t kWeaponTargetPosOffset = 0x77C;
+static constexpr uint32_t kWeaponAttackPosValidOffset = 0x7A0;
+static constexpr uint32_t kWeaponDrawAmountOffset = 0x94C;
+static constexpr uint32_t kGParamListNumObjectsOffset = 0x240;
+static constexpr uint32_t kGParamListObjectsPtrOffset = 0x244;
+static constexpr uint32_t kAttackObjectSlotOffset = 0x20;
+static constexpr uint32_t kBowObjectSlotOffset = 0x44;
+static constexpr uint32_t kAttackParamAtRangeOffset = 0x5C;
+static constexpr uint32_t kBowParamFirstSpeedOffset = 0x104;
+static constexpr uint32_t kBowParamAccelerationOffset = 0x114;
+static constexpr uint32_t kBowParamStabilitySpeedOffset = 0x124;
+static constexpr uint32_t kBowParamFallAccelerationOffset = 0x134;
+static constexpr uint32_t kBowParamFallStabilitySpeedOffset = 0x144;
+static constexpr uint32_t kBowParamGravityOffset = 0x154;
+static constexpr uint32_t kWeaponOriginalScaleZOffset = 0x998;
+static constexpr uint32_t kInlineParamPackEntryCountOffset = 0x680;
+static constexpr uint32_t kInlineParamPackMaxEntries = 32;
+
+struct LiveBowState {
+    bool valid = false;
+    bool hasOrigin = false;
+    bool hasTargetPos = false;
+    uint32_t weaponPtr = 0;
+    float drawAmount = 0.0f;
+    float launchSpeed = 0.0f;
+    float accel = 0.0f;
+    float aimSpeed = 0.0f;
+    float fallAccel = 0.0f;
+    float fallAimSpeed = 0.0f;
+    float gravity = 0.0f;
+    float atRange = 0.0f;
+    glm::vec3 origin = glm::vec3(0.0f);
+    glm::vec3 targetPos = glm::vec3(0.0f);
+};
+
+struct PoseFallbackState {
+    bool valid = false;
+    bool hasTargetPos = false;
+    glm::vec3 origin = glm::vec3(0.0f);
+    glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 targetPos = glm::vec3(0.0f);
+    BowVisualizationOriginSource originSource = BowVisualizationOriginSource::Unknown;
+    BowVisualizationDirectionSource directionSource = BowVisualizationDirectionSource::Unknown;
+};
+
+enum class PreviewPhase : uint8_t {
+    Start,
+    Middle,
+    Fall,
+};
+
+struct PreviewPoint {
+    glm::vec3 position = glm::vec3(0.0f);
+    PreviewPhase phase = PreviewPhase::Middle;
+};
+
+struct PendingShotOverride {
+    bool valid = false;
+    bool loadParamsConfirmed = false;
+    uint64_t timestampMs = 0;
+    float launchSpeed = 0.0f;
+    glm::vec3 origin = glm::vec3(0.0f);
+    glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 targetPos = glm::vec3(0.0f);
+};
+
+static std::mutex s_pendingShotOverrideMutex;
+static PendingShotOverride s_pendingShotOverride = {};
+
+static bool HasFiniteDirection(const glm::vec3& value) {
+    return IsFiniteVec3(value) && glm::length2(value) > 0.000001f;
+}
+
+static bool IsNearZero(float value) {
+    return value >= -kPreviewSpeedEpsilon && value <= kPreviewSpeedEpsilon;
+}
+
+static glm::vec3 NormalizeOrFallback(const glm::vec3& value, const glm::vec3& fallback) {
+    if (HasFiniteDirection(value)) {
+        return glm::normalize(value);
+    }
+
+    return fallback;
+}
+
+static glm::vec3 ScaleVectorToLengthOrScaleRaw(const glm::vec3& value, float targetLength) {
+    if (!IsFiniteVec3(value) || !std::isfinite(targetLength)) {
+        return glm::vec3(0.0f);
+    }
+
+    const float magnitudeSq = glm::length2(value);
+    if (magnitudeSq > 0.000001f) {
+        return glm::normalize(value) * targetLength;
+    }
+
+    return value * targetLength;
+}
+
+static bool IsSnapshotFresh(const BowParamSnapshot& snapshot, uint64_t maxAgeMs) {
+    if (!snapshot.valid) {
+        return false;
+    }
+
+    const uint64_t now = GetTickCount64();
+    if (now < snapshot.timestampMs) {
+        return false;
+    }
+
+    return now - snapshot.timestampMs <= maxAgeMs;
+}
+
+static BowParamActionKind GetPreviewActionKind() {
+    std::scoped_lock lock(s_captureMutex);
+    const BowParamActionKind actionKind = GetFreshArrowShootDecisionKindLocked();
+    return actionKind == BowParamActionKind::Unknown ? BowParamActionKind::Move : actionKind;
+}
+
+static bool TryGetMatchingPlayerPreviewSnapshot(uint32_t previewAiPtr) {
+    if (previewAiPtr == 0) {
+        return false;
+    }
+
+    std::scoped_lock lock(s_captureMutex);
+    const BowParamSnapshot& snapshot = s_previewSnapshot;
+    if (!snapshot.valid || snapshot.previewAiPtr != previewAiPtr || !snapshot.hasIsPlayerShot || !snapshot.isPlayerShot || !IsSnapshotFresh(snapshot, kActiveSnapshotLifetimeMs)) {
+        return false;
+    }
+
+    return true;
+}
+
+static uint32_t GetHeldLeftBowWeaponPtr() {
+    const uint32_t weaponPtr = CemuHooks::m_heldWeapons[OpenXR::EyeSide::LEFT];
+    if (weaponPtr == 0) {
+        return 0;
+    }
+
+    Weapon weapon = {};
+    CemuHooks::readMemory(weaponPtr, &weapon);
+    return weapon.type.getLE() == WeaponType::Bow ? weaponPtr : 0;
+}
+
+static bool TryReadWeaponAttackOrigin(uint32_t weaponPtr, glm::vec3& outOrigin) {
+    outOrigin = glm::vec3(0.0f);
+    if (weaponPtr == 0) {
+        return false;
+    }
+
+    uint8_t attackPosValid = 0;
+    CemuHooks::readMemory(weaponPtr + kWeaponAttackPosValidOffset, &attackPosValid);
+
+    BEVec3 beOrigin = {};
+    if (attackPosValid != 0) {
+        CemuHooks::readMemory(weaponPtr + kWeaponAttackPosOffset, &beOrigin);
+        outOrigin = beOrigin.getLE();
+        if (IsFiniteVec3(outOrigin)) {
+            return true;
+        }
+    }
+
+    CemuHooks::readMemory(weaponPtr + kWeaponFallbackOriginOffset, &beOrigin);
+    outOrigin = beOrigin.getLE();
+    return IsFiniteVec3(outOrigin);
+}
+
+static bool TryReadWeaponTargetPos(uint32_t weaponPtr, glm::vec3& outTargetPos) {
+    outTargetPos = glm::vec3(0.0f);
+    if (weaponPtr == 0) {
+        return false;
+    }
+
+    BEVec3 beTargetPos = {};
+    CemuHooks::readMemory(weaponPtr + kWeaponTargetPosOffset, &beTargetPos);
+    outTargetPos = beTargetPos.getLE();
+    return IsFiniteVec3(outTargetPos);
+}
+
+static bool TryReadLiveBowState(LiveBowState& outState) {
+    outState = {};
+
+    const uint32_t weaponPtr = GetHeldLeftBowWeaponPtr();
+    if (weaponPtr == 0) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryReadLiveBowState FAILED: no bow equipped in left hand");
+        return false;
+    }
+
+    float drawAmount = 0.0f;
+    CemuHooks::readMemoryBE(weaponPtr + kWeaponDrawAmountOffset, &drawAmount);
+    drawAmount = glm::clamp(drawAmount, 0.0f, 1.5f);
+
+    uint32_t actorParamPtr = 0;
+    CemuHooks::readMemoryBE(weaponPtr + kActorParamPtrOffset, &actorParamPtr);
+    if (actorParamPtr == 0) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryReadLiveBowState FAILED: actorParamPtr is 0 (weapon=0x{:08X}, draw={:.3f})", weaponPtr, drawAmount);
+        return false;
+    }
+
+    uint32_t gParamListPtr = 0;
+    CemuHooks::readMemoryBE(actorParamPtr + kActorParamGParamListOffset, &gParamListPtr);
+    if (gParamListPtr == 0) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryReadLiveBowState FAILED: gParamListPtr is 0");
+        return false;
+    }
+
+    uint32_t numObjects = 0;
+    uint32_t objectsPtr = 0;
+    CemuHooks::readMemoryBE(gParamListPtr + kGParamListNumObjectsOffset, &numObjects);
+    CemuHooks::readMemoryBE(gParamListPtr + kGParamListObjectsPtrOffset, &objectsPtr);
+    if (numObjects <= (kBowObjectSlotOffset / sizeof(uint32_t)) || objectsPtr == 0) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryReadLiveBowState FAILED: bad GParamList (numObjects={}, objectsPtr=0x{:08X})", numObjects, objectsPtr);
+        return false;
+    }
+
+    uint32_t bowParamPtr = 0;
+    CemuHooks::readMemoryBE(objectsPtr + kBowObjectSlotOffset, &bowParamPtr);
+    if (bowParamPtr == 0) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryReadLiveBowState FAILED: bowParamPtr is 0");
+        return false;
+    }
+
+    float firstSpeedRaw = 0.0f;
+    float accelerationRaw = 0.0f;
+    float stableSpeedRaw = 0.0f;
+    float fallAccelerationRaw = 0.0f;
+    float fallStableSpeedRaw = 0.0f;
+    float gravityRaw = 0.0f;
+    float attackAtRangeRaw = 0.0f;
+    float originalScaleZ = 1.0f;
+    glm::vec3 targetPos = glm::vec3(0.0f);
+    glm::vec3 origin = glm::vec3(0.0f);
+
+    CemuHooks::readMemoryBE(bowParamPtr + kBowParamFirstSpeedOffset, &firstSpeedRaw);
+    CemuHooks::readMemoryBE(bowParamPtr + kBowParamAccelerationOffset, &accelerationRaw);
+    CemuHooks::readMemoryBE(bowParamPtr + kBowParamStabilitySpeedOffset, &stableSpeedRaw);
+    CemuHooks::readMemoryBE(bowParamPtr + kBowParamFallAccelerationOffset, &fallAccelerationRaw);
+    CemuHooks::readMemoryBE(bowParamPtr + kBowParamFallStabilitySpeedOffset, &fallStableSpeedRaw);
+    CemuHooks::readMemoryBE(bowParamPtr + kBowParamGravityOffset, &gravityRaw);
+    if (numObjects > (kAttackObjectSlotOffset / sizeof(uint32_t))) {
+        uint32_t attackParamPtr = 0;
+        CemuHooks::readMemoryBE(objectsPtr + kAttackObjectSlotOffset, &attackParamPtr);
+        if (attackParamPtr != 0) {
+            CemuHooks::readMemoryBE(attackParamPtr + kAttackParamAtRangeOffset, &attackAtRangeRaw);
+        }
+    }
+
+    CemuHooks::readMemoryBE(weaponPtr + kWeaponOriginalScaleZOffset, &originalScaleZ);
+
+    if (!std::isfinite(firstSpeedRaw) || !std::isfinite(accelerationRaw) || !std::isfinite(stableSpeedRaw) || !std::isfinite(fallAccelerationRaw) || !std::isfinite(fallStableSpeedRaw) || !std::isfinite(gravityRaw) || !std::isfinite(attackAtRangeRaw) || !std::isfinite(originalScaleZ)) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryReadLiveBowState FAILED: non-finite bow params (firstSpeed={}, accel={}, gravity={})", firstSpeedRaw, accelerationRaw, gravityRaw);
+        return false;
+    }
+
+    outState.valid = true;
+    outState.weaponPtr = weaponPtr;
+    outState.drawAmount = drawAmount;
+    outState.launchSpeed = glm::max(firstSpeedRaw * drawAmount * drawAmount, 0.0f);
+    outState.accel = accelerationRaw;
+    outState.aimSpeed = stableSpeedRaw;
+    outState.fallAccel = std::abs(fallAccelerationRaw);
+    outState.fallAimSpeed = fallStableSpeedRaw;
+    outState.gravity = gravityRaw / 900.0f;
+    outState.atRange = attackAtRangeRaw * originalScaleZ;
+    outState.hasOrigin = TryReadWeaponAttackOrigin(weaponPtr, origin);
+    outState.origin = origin;
+    outState.hasTargetPos = TryReadWeaponTargetPos(weaponPtr, targetPos) && glm::length2(targetPos) > 0.000001f;
+    outState.targetPos = targetPos;
+    return true;
+}
+
+static glm::vec3 RemoveHeadsetHorizontalOffset(glm::vec3 trackedPos) {
+    const glm::vec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
+    trackedPos.x -= appliedHeadPos.x;
+    trackedPos.z -= appliedHeadPos.z;
+    return trackedPos;
+}
+
+static glm::mat4 GetHandCorrectionMtx(OpenXR::EyeSide side) {
+    if (side == OpenXR::EyeSide::LEFT) {
+        glm::fquat wristL = glm::identity<glm::fquat>();
+        wristL *= glm::angleAxis(glm::radians(90.0f), glm::fvec3(0, 1, 0));
+        wristL *= glm::angleAxis(glm::radians(-90.0f), glm::fvec3(0, 0, 1));
+        wristL *= glm::angleAxis(glm::radians(30.0f), glm::fvec3(0, 0, 1));
+        return glm::mat4_cast(wristL);
+    }
+
+    glm::fquat wristR = glm::identity<glm::fquat>();
+    wristR *= glm::angleAxis(glm::radians(-90.0f), glm::fvec3(0, 0, 1));
+    wristR *= glm::angleAxis(glm::radians(-180.0f), glm::fvec3(0, 1, 0));
+    wristR *= glm::angleAxis(glm::radians(180.0f), glm::fvec3(1, 0, 0));
+    wristR *= glm::angleAxis(glm::radians(30.0f), glm::fvec3(0, 0, 1));
+    return glm::mat4_cast(wristR);
+}
+
+static bool TryGetControllerWorldPose(const OpenXR::InputState& inputs, OpenXR::EyeSide side, bool useAimPose, glm::vec3& outPosition, glm::vec3& outForward) {
+    if (!inputs.shared.in_game) {
+        return false;
+    }
+
+    const XrActionStatePose& poseState = useAimPose ? inputs.shared.aimPose[side] : inputs.shared.pose[side];
+    if (!poseState.isActive) {
+        return false;
+    }
+
+    const XrSpaceLocation& pose = useAimPose ? inputs.shared.aimPoseLocation[side] : inputs.shared.poseLocation[side];
+    if ((pose.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0 || (pose.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) == 0) {
+        return false;
+    }
+
+    const glm::vec3 trackedPos = RemoveHeadsetHorizontalOffset(ToGLM(pose.pose.position));
+    const glm::quat trackedRot = ToGLM(pose.pose.orientation);
+    glm::mat4 controllerMat = glm::translate(glm::identity<glm::mat4>(), trackedPos) * glm::mat4_cast(trackedRot);
+    if (!useAimPose) {
+        controllerMat *= GetHandCorrectionMtx(side);
+    }
+    const glm::mat4 controllerWorld = CemuHooks::s_lastCameraMtx * controllerMat;
+    const glm::vec3 worldForward = glm::mat3(controllerWorld) * glm::vec3(0.0f, 0.0f, -1.0f);
+
+    outPosition = glm::vec3(controllerWorld[3]);
+    outForward = glm::length2(worldForward) > 0.000001f ? glm::normalize(worldForward) : glm::vec3(0.0f, 0.0f, -1.0f);
+    return IsFiniteVec3(outPosition) && IsFiniteVec3(outForward);
+}
+
+static bool TryGetGameplayCameraCenterPose(glm::vec3& outPosition, glm::vec3& outForward) {
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return false;
+    }
+
+    std::optional<glm::fmat4> middlePoseOpt = renderer->GetMiddlePose();
+    if (!middlePoseOpt.has_value()) {
+        return false;
+    }
+
+    glm::mat4 middlePose = middlePoseOpt.value();
+    middlePose[3] = glm::vec4(RemoveHeadsetHorizontalOffset(glm::vec3(middlePose[3])), 1.0f);
+
+    const glm::mat4 cameraWorld = CemuHooks::s_lastCameraMtx * middlePose;
+    const glm::vec3 worldForward = glm::mat3(cameraWorld) * glm::vec3(0.0f, 0.0f, -1.0f);
+    outPosition = glm::vec3(cameraWorld[3]);
+    outForward = glm::length2(worldForward) > 0.000001f ? glm::normalize(worldForward) : glm::vec3(0.0f, 0.0f, -1.0f);
+    return IsFiniteVec3(outPosition) && IsFiniteVec3(outForward);
+}
+
+static bool TryResolveDirectionToTarget(const glm::vec3& origin, const glm::vec3& targetPos, glm::vec3& outDirection) {
+    const glm::vec3 aimVector = targetPos - origin;
+    if (!HasFiniteDirection(aimVector)) {
+        return false;
+    }
+
+    outDirection = glm::normalize(aimVector);
+    return true;
+}
+
+static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTargetPos, const glm::vec3& targetPos, bool preferPoseAim, PoseFallbackState& outPose) {
+    outPose = {};
+    const OpenXR::InputState inputs = VRManager::instance().XR->m_input.load();
+
+    glm::vec3 cameraOrigin = glm::vec3(0.0f);
+    glm::vec3 cameraForward = glm::vec3(0.0f, 0.0f, -1.0f);
+    const bool hasCameraPose = TryGetGameplayCameraCenterPose(cameraOrigin, cameraForward);
+
+    if (!CemuHooks::IsFirstPerson()) {
+        if (!hasCameraPose) {
+            return false;
+        }
+
+        outPose.valid = true;
+        outPose.origin = cameraOrigin;
+        outPose.originSource = BowVisualizationOriginSource::CameraPose;
+        if (!preferPoseAim && hasTargetPos && TryResolveDirectionToTarget(outPose.origin, targetPos, outPose.direction)) {
+            outPose.directionSource = BowVisualizationDirectionSource::TargetPos;
+        }
+        else {
+            outPose.direction = cameraForward;
+            outPose.directionSource = BowVisualizationDirectionSource::CameraForward;
+        }
+        return true;
+    }
+
+    glm::vec3 rightWorldPos = glm::vec3(0.0f);
+    glm::vec3 rightWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
+    const bool hasRightHandPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::RIGHT, false, rightWorldPos, rightWorldForward);
+
+    glm::vec3 leftWorldPos = glm::vec3(0.0f);
+    glm::vec3 leftWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
+    const bool hasLeftHandPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::LEFT, false, leftWorldPos, leftWorldForward);
+
+    glm::vec3 rightAimWorldPos = glm::vec3(0.0f);
+    glm::vec3 rightAimWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
+    const bool hasRightAimPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::RIGHT, true, rightAimWorldPos, rightAimWorldForward);
+
+    glm::vec3 leftAimWorldPos = glm::vec3(0.0f);
+    glm::vec3 leftAimWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
+    const bool hasLeftAimPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::LEFT, true, leftAimWorldPos, leftAimWorldForward);
+
+    auto resolveDirectionAndTarget = [&](const glm::vec3& origin, glm::vec3& outDirection, BowVisualizationDirectionSource& outSource, glm::vec3& outTargetPos) -> bool {
+        auto tryAimPoint = [&](const glm::vec3& aimPoint, BowVisualizationDirectionSource source) -> bool {
+            if (!TryResolveDirectionToTarget(origin, aimPoint, outDirection)) {
+                return false;
+            }
+
+            outTargetPos = aimPoint;
+            outSource = source;
+            return true;
+        };
+
+        if (preferPoseAim) {
+            if (hasRightAimPose && tryAimPoint(rightAimWorldPos + rightAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::RightHandAimPose)) {
+                return true;
+            }
+            if (hasLeftAimPose && tryAimPoint(leftAimWorldPos + leftAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::LeftHandAimPose)) {
+                return true;
+            }
+            if (hasCameraPose && tryAimPoint(cameraOrigin + cameraForward * kPreviewAimDistance, BowVisualizationDirectionSource::CameraAim)) {
+                return true;
+            }
+        }
+
+        if (hasTargetPos && tryAimPoint(targetPos, BowVisualizationDirectionSource::TargetPos)) {
+            return true;
+        }
+
+        if (!preferPoseAim) {
+            if (hasRightAimPose && tryAimPoint(rightAimWorldPos + rightAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::RightHandAimPose)) {
+                return true;
+            }
+            if (hasLeftAimPose && tryAimPoint(leftAimWorldPos + leftAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::LeftHandAimPose)) {
+                return true;
+            }
+        }
+
+        if (hasCameraPose) {
+            return tryAimPoint(cameraOrigin + cameraForward * kPreviewAimDistance, BowVisualizationDirectionSource::CameraAim);
+        }
+
+        return false;
+    };
+
+    auto trySnapToWeaponAttackOrigin = [&](const glm::vec3& referencePos) {
+        if (!liveState.hasOrigin || glm::distance2(liveState.origin, referencePos) > kPreviewOriginMaxSnapDistanceSq) {
+            return;
+        }
+
+        outPose.origin = liveState.origin;
+        outPose.originSource = BowVisualizationOriginSource::WeaponAttackPos;
+    };
+
+    auto tryFinalizePose = [&](const glm::vec3& fallbackForward, BowVisualizationDirectionSource fallbackSource) -> bool {
+        if (resolveDirectionAndTarget(outPose.origin, outPose.direction, outPose.directionSource, outPose.targetPos)) {
+            outPose.hasTargetPos = true;
+        }
+        else {
+            outPose.direction = fallbackForward;
+            outPose.directionSource = fallbackSource;
+            if (HasFiniteDirection(outPose.direction)) {
+                outPose.targetPos = outPose.origin + glm::normalize(outPose.direction) * kPreviewAimDistance;
+                outPose.hasTargetPos = true;
+            }
+        }
+
+        outPose.valid = IsFiniteVec3(outPose.origin) && HasFiniteDirection(outPose.direction);
+        return outPose.valid;
+    };
+
+    if (hasLeftHandPose) {
+        outPose.origin = leftWorldPos + leftWorldForward * kPreviewOriginForwardOffset;
+        outPose.originSource = BowVisualizationOriginSource::LeftHandPose;
+        trySnapToWeaponAttackOrigin(leftWorldPos);
+        if (hasLeftAimPose) {
+            trySnapToWeaponAttackOrigin(leftAimWorldPos);
+        }
+
+        const glm::vec3 fallbackForward = hasRightAimPose ? rightAimWorldForward : (hasRightHandPose ? rightWorldForward : leftWorldForward);
+        const BowVisualizationDirectionSource fallbackSource = hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : (hasRightHandPose ? BowVisualizationDirectionSource::RightHandForward : BowVisualizationDirectionSource::LeftHandForward);
+        return tryFinalizePose(fallbackForward, fallbackSource);
+    }
+
+    if (liveState.hasOrigin) {
+        outPose.origin = liveState.origin;
+        outPose.originSource = BowVisualizationOriginSource::WeaponAttackPos;
+        const glm::vec3 fallbackForward = hasRightAimPose ? rightAimWorldForward : (hasRightHandPose ? rightWorldForward : (hasLeftAimPose ? leftAimWorldForward : glm::vec3(0.0f, 0.0f, -1.0f)));
+        const BowVisualizationDirectionSource fallbackSource = hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : (hasRightHandPose ? BowVisualizationDirectionSource::RightHandForward : (hasLeftAimPose ? BowVisualizationDirectionSource::LeftHandAimPose : BowVisualizationDirectionSource::CameraForward));
+        return tryFinalizePose(fallbackForward, fallbackSource);
+    }
+
+    if (hasRightHandPose) {
+        outPose.origin = rightWorldPos + rightWorldForward * kPreviewOriginForwardOffset;
+        outPose.originSource = BowVisualizationOriginSource::RightHandPose;
+        const glm::vec3 fallbackForward = hasRightAimPose ? rightAimWorldForward : rightWorldForward;
+        const BowVisualizationDirectionSource fallbackSource = hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : BowVisualizationDirectionSource::RightHandForward;
+        return tryFinalizePose(fallbackForward, fallbackSource);
+    }
+
+    if (hasLeftAimPose) {
+        outPose.origin = leftAimWorldPos;
+        outPose.originSource = BowVisualizationOriginSource::LeftHandPose;
+        return tryFinalizePose(leftAimWorldForward, BowVisualizationDirectionSource::LeftHandAimPose);
+    }
+
+    if (!hasCameraPose) {
+        return false;
+    }
+
+    outPose.valid = true;
+    outPose.origin = cameraOrigin;
+    outPose.originSource = BowVisualizationOriginSource::CameraPose;
+    if (resolveDirectionAndTarget(outPose.origin, outPose.direction, outPose.directionSource, outPose.targetPos)) {
+        outPose.hasTargetPos = true;
+        return true;
+    }
+
+    outPose.direction = cameraForward;
+    outPose.directionSource = BowVisualizationDirectionSource::CameraForward;
+    outPose.targetPos = outPose.origin + outPose.direction * kPreviewAimDistance;
+    outPose.hasTargetPos = true;
+    return true;
+}
+
+static void SetTransformFromLaunchPose(BEMatrix34& transform, const glm::vec3& origin, const glm::vec3& direction) {
+    const glm::mat4x3 currentMatrix = transform.getLEMatrix();
+    const glm::vec3 forward = HasFiniteDirection(direction) ? glm::normalize(direction) : NormalizeOrFallback(-glm::vec3(currentMatrix[2]), glm::vec3(0.0f, 0.0f, -1.0f));
+    const glm::vec3 zAxis = -forward;
+
+    glm::vec3 upHint = NormalizeOrFallback(glm::vec3(currentMatrix[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+    if (std::abs(glm::dot(upHint, zAxis)) > 0.999f) {
+        upHint = std::abs(zAxis.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+
+    glm::vec3 xAxis = glm::cross(upHint, zAxis);
+    if (!HasFiniteDirection(xAxis)) {
+        const glm::vec3 fallbackUp = std::abs(zAxis.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+        xAxis = glm::cross(fallbackUp, zAxis);
+    }
+
+    xAxis = NormalizeOrFallback(xAxis, glm::vec3(1.0f, 0.0f, 0.0f));
+    const glm::vec3 yAxis = NormalizeOrFallback(glm::cross(zAxis, xAxis), glm::vec3(0.0f, 1.0f, 0.0f));
+    transform.setLEMatrix(glm::mat4x3(xAxis, yAxis, zAxis, origin));
+}
+
+static void StorePendingShotOverride(const BowVisualizationState& launchState) {
+    if (!launchState.hasLaunchOrigin || !launchState.hasLaunchDirection) {
+        return;
+    }
+
+    PendingShotOverride nextOverride = {};
+    nextOverride.valid = true;
+    nextOverride.timestampMs = GetTickCount64();
+    nextOverride.launchSpeed = launchState.launchSpeed;
+    nextOverride.origin = launchState.launchOrigin;
+    nextOverride.direction = glm::normalize(launchState.launchDirection);
+    nextOverride.targetPos = launchState.hasTargetPos ? launchState.targetPos : (launchState.launchOrigin + nextOverride.direction * kLaunchTargetDistance);
+
+    std::scoped_lock lock(s_pendingShotOverrideMutex);
+    s_pendingShotOverride = nextOverride;
+
+    Log::print<ARROW_SHOT_CAPTURE>(
+        "[BowShot] Prepared override origin={} direction={} targetPos={} speed={:.3f} action={}",
+        nextOverride.origin,
+        nextOverride.direction,
+        nextOverride.targetPos,
+        nextOverride.launchSpeed,
+        GetBowParamActionKindName(launchState.actionKind)
+    );
+}
+
+static void ClearPendingShotOverride() {
+    std::scoped_lock lock(s_pendingShotOverrideMutex);
+    s_pendingShotOverride = {};
+}
+
+static bool TryGetPendingShotOverride(PendingShotOverride& outOverride, bool requireLoadParamsConfirmed) {
+    std::scoped_lock lock(s_pendingShotOverrideMutex);
+    if (!s_pendingShotOverride.valid) {
+        return false;
+    }
+
+    const uint64_t nowMs = GetTickCount64();
+    if (nowMs < s_pendingShotOverride.timestampMs || nowMs - s_pendingShotOverride.timestampMs > kPendingShotOverrideLifetimeMs) {
+        s_pendingShotOverride = {};
+        return false;
+    }
+
+    if (requireLoadParamsConfirmed && !s_pendingShotOverride.loadParamsConfirmed) {
+        return false;
+    }
+
+    outOverride = s_pendingShotOverride;
+    return true;
+}
+
+static void ConfirmPendingShotOverrideFromBool(const InlineParamBool& boolParam, uint32_t sourceReturnAddress) {
+    if (!IsShotLoadReturnAddress(sourceReturnAddress)) {
+        return;
+    }
+
+    const char* paramName = ResolveParamName(boolParam.keyPtr.getLE());
+    if (!ParamMatches(paramName, kParamIsShootByPlayer)) {
+        return;
+    }
+
+    std::scoped_lock lock(s_pendingShotOverrideMutex);
+    if (!s_pendingShotOverride.valid) {
+        return;
+    }
+
+    const uint64_t nowMs = GetTickCount64();
+    if (nowMs < s_pendingShotOverride.timestampMs || nowMs - s_pendingShotOverride.timestampMs > kPendingShotOverrideLifetimeMs) {
+        s_pendingShotOverride = {};
+        return;
+    }
+
+    if (boolParam.value.getLE() == 0) {
+        s_pendingShotOverride = {};
+        return;
+    }
+
+    s_pendingShotOverride.loadParamsConfirmed = true;
+    Log::print<ARROW_SHOT_CAPTURE>("[BowShot] Confirmed load-param override for player shot");
+}
+
+static bool TryOverrideShotLoadParamVec3(InlineParamVec3& vec3Param, uint32_t sourceReturnAddress) {
+    if (!IsShotLoadReturnAddress(sourceReturnAddress)) {
+        return false;
+    }
+
+    PendingShotOverride pendingShotOverride = {};
+    if (!TryGetPendingShotOverride(pendingShotOverride, true)) {
+        return false;
+    }
+
+    const char* paramName = ResolveParamName(vec3Param.keyPtr.getLE());
+    const glm::vec3 originalValue = vec3Param.value.getLE();
+    if (ParamMatches(paramName, kParamFirstSpeed)) {
+        float launchSpeed = glm::length(vec3Param.value.getLE());
+        if ((!std::isfinite(launchSpeed) || launchSpeed <= kMinimumArrowSpeed) && std::isfinite(pendingShotOverride.launchSpeed) && pendingShotOverride.launchSpeed > kMinimumArrowSpeed) {
+            launchSpeed = pendingShotOverride.launchSpeed;
+        }
+        if (!std::isfinite(launchSpeed) || launchSpeed <= kMinimumArrowSpeed) {
+            return false;
+        }
+
+        vec3Param.value = pendingShotOverride.direction * launchSpeed;
+        Log::print<ARROW_SHOT_CAPTURE>(
+            "[BowShot] Override {} {} -> {} (return=0x{:08X})",
+            paramName != nullptr ? paramName : "<unnamed>",
+            originalValue,
+            vec3Param.value.getLE(),
+            sourceReturnAddress
+        );
+        return true;
+    }
+
+    if (ParamMatches(paramName, kParamTargetPos) || ParamMatches(paramName, kParamHomingTargetPos)) {
+        vec3Param.value = pendingShotOverride.targetPos;
+        Log::print<ARROW_SHOT_CAPTURE>(
+            "[BowShot] Override {} {} -> {} (return=0x{:08X})",
+            paramName != nullptr ? paramName : "<unnamed>",
+            originalValue,
+            vec3Param.value.getLE(),
+            sourceReturnAddress
+        );
+        return true;
+    }
+
+    return false;
+}
+
+static bool TryOverridePendingChildParamPackVec3(uint32_t paramPackPtr, const BowVisualizationState& launchState) {
+    if (paramPackPtr == 0 || !launchState.hasLaunchOrigin || !launchState.hasLaunchDirection) {
+        return false;
+    }
+
+    uint32_t entryCount = 0;
+    CemuHooks::readMemoryBE(paramPackPtr + kInlineParamPackEntryCountOffset, &entryCount);
+    entryCount = std::min(entryCount, kInlineParamPackMaxEntries);
+    if (entryCount == 0) {
+        return false;
+    }
+
+    bool isPlayerShot = false;
+    for (uint32_t entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        const uint32_t entryPtr = paramPackPtr + (entryIndex * sizeof(InlineParamVec3));
+        uint32_t keyPtr = 0;
+        CemuHooks::readMemoryBE(entryPtr + offsetof(InlineParamBool, keyPtr), &keyPtr);
+        const char* paramName = ResolveParamName(keyPtr);
+        if (!ParamMatches(paramName, kParamIsShootByPlayer)) {
+            continue;
+        }
+
+        uint8_t boolValue = 0;
+        CemuHooks::readMemory(entryPtr + offsetof(InlineParamBool, value), &boolValue);
+        isPlayerShot = boolValue != 0;
+        break;
+    }
+
+    if (!isPlayerShot) {
+        return false;
+    }
+
+    bool modifiedAny = false;
+    for (uint32_t entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        const uint32_t entryPtr = paramPackPtr + (entryIndex * sizeof(InlineParamVec3));
+        uint32_t keyPtr = 0;
+        CemuHooks::readMemoryBE(entryPtr + offsetof(InlineParamVec3, keyPtr), &keyPtr);
+        const char* paramName = ResolveParamName(keyPtr);
+        if (paramName == nullptr) {
+            continue;
+        }
+
+        if (!ParamMatches(paramName, kParamFirstSpeed) && !ParamMatches(paramName, kParamTargetPos) && !ParamMatches(paramName, kParamHomingTargetPos)) {
+            continue;
+        }
+
+        InlineParamVec3 entry = {};
+        CemuHooks::readMemory(entryPtr, &entry);
+        const glm::vec3 originalValue = entry.value.getLE();
+
+        glm::vec3 replacementValue = originalValue;
+        if (ParamMatches(paramName, kParamFirstSpeed)) {
+            float launchSpeed = glm::length(originalValue);
+            if ((!std::isfinite(launchSpeed) || launchSpeed <= kMinimumArrowSpeed) && std::isfinite(launchState.launchSpeed) && launchState.launchSpeed > kMinimumArrowSpeed) {
+                launchSpeed = launchState.launchSpeed;
+            }
+            if (!std::isfinite(launchSpeed) || launchSpeed <= kMinimumArrowSpeed) {
+                continue;
+            }
+
+            replacementValue = glm::normalize(launchState.launchDirection) * launchSpeed;
+        }
+        else {
+            replacementValue = launchState.hasTargetPos ? launchState.targetPos : (launchState.launchOrigin + glm::normalize(launchState.launchDirection) * kLaunchTargetDistance);
+        }
+
+        if (!IsFiniteVec3(replacementValue)) {
+            continue;
+        }
+
+        entry.value = replacementValue;
+        CemuHooks::writeMemory(entryPtr, &entry);
+        Log::print<ARROW_SHOT_CAPTURE>(
+            "[BowShot] Override child param {} {} -> {} (pack=0x{:08X}, entry={})",
+            paramName,
+            originalValue,
+            replacementValue,
+            paramPackPtr,
+            entryIndex
+        );
+        modifiedAny = true;
+    }
+
+    return modifiedAny;
+}
+
+static float IntegrateSpeed(float currentSpeed, float accel, float targetSpeed, float vfrScale) {
+    const float nextSpeed = currentSpeed + (accel * vfrScale);
+    if (accel < -kPreviewSpeedEpsilon) {
+        return glm::max(nextSpeed, targetSpeed);
+    }
+    if (accel > kPreviewSpeedEpsilon) {
+        return glm::min(nextSpeed, targetSpeed);
+    }
+
+    return currentSpeed;
+}
+
+static float ComputeFallTargetSpeed(const BowVisualizationState& launchState, float currentSpeed) {
+    const float atRange = launchState.hasAtRange ? launchState.atRange : 0.0f;
+    const float fallSpeedRatioByRange = launchState.hasFallSpeedRatioByRange ? launchState.fallSpeedRatioByRange : kDefaultFallSpeedRatioByRange;
+
+    float fallTargetSpeed = launchState.fallAimSpeed + (((atRange / kPreviewFallSpeedRatioRangeBase) - 1.0f) * fallSpeedRatioByRange);
+    fallTargetSpeed = glm::clamp(fallTargetSpeed, 0.0f, launchState.aimSpeed);
+    if (IsNearZero(launchState.fallAccel)) {
+        fallTargetSpeed = currentSpeed;
+        if (IsNearZero(fallTargetSpeed)) {
+            fallTargetSpeed = std::abs(launchState.gravity);
+        }
+    }
+
+    return fallTargetSpeed;
+}
+
+static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std::array<PreviewPoint, kPresetDefaultMaxFrames + 1>& outPoints, uint32_t& outPointCount, int32_t& outFirstFallIndex) {
+    outPointCount = 0;
+    outFirstFallIndex = -1;
+    if (!launchState.hasLaunchOrigin || !launchState.hasLaunchDirection) {
+        return false;
+    }
+
+    float launchSpeed = launchState.launchSpeed;
+    if (!std::isfinite(launchSpeed) || launchSpeed <= kMinimumArrowSpeed) {
+        launchSpeed = glm::length(launchState.firstSpeed);
+    }
+    if (!std::isfinite(launchSpeed) || launchSpeed <= kMinimumArrowSpeed) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] BuildPreviewTrajectory FAILED: launchSpeed invalid ({:.6f})", launchSpeed);
+        return false;
+    }
+
+    const glm::vec3 relativeVel = launchState.hasRelativeVel && IsFiniteVec3(launchState.relativeVel) ? launchState.relativeVel : glm::vec3(0.0f);
+    const bool hasRelativeVelocity = glm::length2(relativeVel) > 0.000001f;
+    constexpr float vfrScale = kDefaultVfrScale;
+    const float atRange = launchState.hasAtRange && std::isfinite(launchState.atRange) ? launchState.atRange : 0.0f;
+
+    glm::vec3 position = launchState.launchOrigin;
+    glm::vec3 direction = glm::normalize(launchState.launchDirection);
+    glm::vec3 currentVelocity = glm::vec3(0.0f);
+    glm::vec3 gravityBias = glm::vec3(0.0f);
+    float currentSpeed = launchSpeed;
+    float currentAccel = launchState.accel;
+    float targetSpeed = launchState.aimSpeed;
+    PreviewPhase phase = PreviewPhase::Start;
+
+    outPoints[outPointCount++] = { position, PreviewPhase::Start };
+
+    for (uint32_t frame = 1; frame <= kPresetDefaultMaxFrames && outPointCount < outPoints.size(); frame++) {
+        if (phase == PreviewPhase::Start) {
+            currentSpeed = IntegrateSpeed(currentSpeed, currentAccel, targetSpeed, vfrScale);
+            const glm::vec3 baseVelocity = direction * currentSpeed;
+            const glm::vec3 combinedVelocity = hasRelativeVelocity ? (baseVelocity + relativeVel) : baseVelocity;
+            currentVelocity = ScaleVectorToLengthOrScaleRaw(combinedVelocity, kPreviewFirstFrameStep);
+            position += currentVelocity * vfrScale;
+            outPoints[outPointCount++] = { position, PreviewPhase::Start };
+            phase = PreviewPhase::Middle;
+            continue;
+        }
+
+        if (phase == PreviewPhase::Middle) {
+            const float distanceFromOrigin = glm::distance(position, launchState.launchOrigin);
+            const bool enterFallNextFrame = atRange <= kPreviewImmediateFallRange || distanceFromOrigin >= atRange;
+            currentSpeed = IntegrateSpeed(currentSpeed, currentAccel, targetSpeed, vfrScale);
+            const glm::vec3 baseVelocity = direction * currentSpeed;
+            currentVelocity = hasRelativeVelocity ? (baseVelocity + relativeVel) : baseVelocity;
+            position += currentVelocity * vfrScale;
+            outPoints[outPointCount++] = { position, PreviewPhase::Middle };
+            if (enterFallNextFrame) {
+                phase = PreviewPhase::Fall;
+                currentAccel = std::abs(launchState.fallAccel);
+                targetSpeed = ComputeFallTargetSpeed(launchState, currentSpeed);
+                gravityBias = glm::vec3(0.0f, launchState.gravity, 0.0f);
+                outFirstFallIndex = (int32_t)outPointCount;
+            }
+            continue;
+        }
+
+        currentSpeed = IntegrateSpeed(currentSpeed, currentAccel, targetSpeed, vfrScale);
+        glm::vec3 localVelocity = currentVelocity;
+        if (hasRelativeVelocity) {
+            localVelocity -= relativeVel;
+        }
+
+        const glm::vec3 scaledLocalVelocity = ScaleVectorToLengthOrScaleRaw(localVelocity, currentSpeed);
+        const glm::vec3 combinedVelocity = scaledLocalVelocity + gravityBias;
+        currentVelocity = hasRelativeVelocity ? (combinedVelocity + relativeVel) : combinedVelocity;
+        position += currentVelocity * vfrScale;
+        outPoints[outPointCount++] = { position, PreviewPhase::Fall };
+    }
+
+    return outPointCount >= 2;
+}
+
+static const char* GetBowParamActionKindName(BowParamActionKind actionKind) {
+    switch (actionKind) {
+        case BowParamActionKind::Move:
+            return "move";
+        case BowParamActionKind::Homing:
+            return "homing";
+        case BowParamActionKind::MoveWithStickOffset:
+            return "stick_offset";
+        case BowParamActionKind::MoveForLargeObject:
+            return "large_object";
+        case BowParamActionKind::Sky:
+            return "sky";
+        case BowParamActionKind::Unknown:
+        default:
+            return "unknown";
+    }
+}
+
+static bool TryBuildBowVisualizationState(BowVisualizationState& outState) {
+    outState = {};
+
+    LiveBowState liveBowState = {};
+    if (!TryReadLiveBowState(liveBowState)) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryBuildBowVisualizationState FAILED: TryReadLiveBowState returned false (see prior messages)");
+        return false;
+    }
+
+    outState.valid = true;
+    outState.weaponPtr = liveBowState.weaponPtr;
+    outState.drawAmount = liveBowState.drawAmount;
+    outState.actionKind = GetPreviewActionKind();
+
+    const glm::vec3 candidateTargetPos = liveBowState.targetPos;
+    const bool hasCandidateTargetPos = liveBowState.hasTargetPos;
+    PoseFallbackState fallbackPose = {};
+    TryBuildFallbackLaunchPose(liveBowState, hasCandidateTargetPos, candidateTargetPos, true, fallbackPose);
+
+    if (fallbackPose.valid) {
+        outState.launchOrigin = fallbackPose.origin;
+        outState.originSource = fallbackPose.originSource;
+        outState.hasLaunchOrigin = true;
+    }
+    else if (liveBowState.hasOrigin) {
+        outState.launchOrigin = liveBowState.origin;
+        outState.originSource = BowVisualizationOriginSource::WeaponAttackPos;
+        outState.hasLaunchOrigin = true;
+    }
+
+    if (fallbackPose.valid && fallbackPose.hasTargetPos) {
+        outState.targetPos = fallbackPose.targetPos;
+        outState.hasTargetPos = true;
+    }
+    else if (liveBowState.hasTargetPos) {
+        outState.targetPos = liveBowState.targetPos;
+        outState.hasTargetPos = true;
+    }
+
+    if (fallbackPose.valid && HasFiniteDirection(fallbackPose.direction)) {
+        outState.launchDirection = glm::normalize(fallbackPose.direction);
+        outState.directionSource = fallbackPose.directionSource;
+        outState.hasLaunchDirection = true;
+    }
+    else if (outState.hasTargetPos && outState.hasLaunchOrigin && TryResolveDirectionToTarget(outState.launchOrigin, outState.targetPos, outState.launchDirection)) {
+        outState.directionSource = BowVisualizationDirectionSource::TargetPos;
+        outState.hasLaunchDirection = true;
+    }
+
+    if (!outState.hasTargetPos && outState.hasLaunchOrigin && outState.hasLaunchDirection) {
+        outState.targetPos = outState.launchOrigin + outState.launchDirection * kLaunchTargetDistance;
+        outState.hasTargetPos = true;
+        outState.usedSyntheticTargetPos = true;
+    }
+
+    outState.launchSpeed = liveBowState.launchSpeed;
+    outState.firstSpeed = outState.hasLaunchDirection ? outState.launchDirection * outState.launchSpeed : glm::vec3(0.0f, 0.0f, -outState.launchSpeed);
+    outState.relativeVel = glm::vec3(0.0f);
+    outState.hasRelativeVel = false;
+    outState.accel = liveBowState.accel;
+    outState.aimSpeed = liveBowState.aimSpeed;
+    outState.fallAccel = liveBowState.fallAccel;
+    outState.fallAimSpeed = liveBowState.fallAimSpeed;
+    outState.gravity = liveBowState.gravity;
+    outState.hasAtRange = true;
+    outState.atRange = liveBowState.atRange;
+    outState.hasFallSpeedRatioByRange = true;
+    outState.fallSpeedRatioByRange = kDefaultFallSpeedRatioByRange;
+
+    if (!outState.hasLaunchOrigin || !outState.hasLaunchDirection) {
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] TryBuildBowVisualizationState FAILED: hasOrigin={}, hasDir={}, weapon=0x{:08X}, draw={:.3f}, action={}", outState.hasLaunchOrigin, outState.hasLaunchDirection, outState.weaponPtr, outState.drawAmount, GetBowParamActionKindName(outState.actionKind));
+    }
+    return outState.hasLaunchOrigin && outState.hasLaunchDirection;
+}
+
+struct AimingArcCache {
+    bool valid = false;
+    uint64_t cachedAtMs = 0;
+    std::array<PreviewPoint, kPresetDefaultMaxFrames + 1> points = {};
+    uint32_t pointCount = 0;
+    int32_t firstFallIndex = -1;
+    bool hasTargetPos = false;
+    glm::vec3 targetPos = glm::vec3(0.0f);
+};
+
+static AimingArcCache s_aimingArcCache = {};
+static constexpr uint64_t kAimingArcCacheLifetimeMs = 60000;
+
+static void DrawAimingArc(const AimingArcCache& cache) {
+    const uint32_t launchColor = DebugDrawColor(208, 255, 255, 144);
+    const uint32_t flightColor = DebugDrawColor(112, 242, 255, 132);
+    const uint32_t fallColor = DebugDrawColor(88, 196, 255, 120);
+    const uint32_t markerColor = DebugDrawColor(168, 239, 255, 156);
+    const uint32_t targetColor = DebugDrawColor(116, 156, 255, 120);
+    constexpr uint32_t kPreviewSampleDotStride = 8;
+    constexpr bool kPreviewXray = false;
+
+    auto getPhaseColor = [&](PreviewPhase phase) {
+        return phase == PreviewPhase::Start ? launchColor : (phase == PreviewPhase::Fall ? fallColor : flightColor);
+    };
+
+    auto getPhaseThickness = [&](PreviewPhase phase) {
+        return phase == PreviewPhase::Start ? 3.4f : 2.6f;
+    };
+
+    DebugDraw::instance().Dot(cache.points[0].position, 0.065f, markerColor, kPreviewXray);
+    if (cache.pointCount > 1) {
+        DebugDraw::instance().Dot(cache.points[1].position, 0.05f, launchColor, kPreviewXray);
+    }
+
+    if (cache.pointCount >= 2) {
+        std::array<glm::vec3, kPresetDefaultMaxFrames + 1> phasePoints = {};
+        uint32_t phasePointCount = 0;
+        PreviewPhase activePhase = cache.points[1].phase;
+        phasePoints[phasePointCount++] = cache.points[0].position;
+
+        for (uint32_t index = 1; index < cache.pointCount; ++index) {
+            const PreviewPhase phase = cache.points[index].phase;
+            if (phase != activePhase) {
+                if (phasePointCount >= 2) {
+                    DebugDraw::instance().Polyline(std::span<const glm::vec3>(phasePoints.data(), phasePointCount), getPhaseColor(activePhase), getPhaseThickness(activePhase), kPreviewXray);
+                }
+                phasePoints[0] = cache.points[index - 1].position;
+                phasePointCount = 1;
+                activePhase = phase;
+            }
+
+            phasePoints[phasePointCount++] = cache.points[index].position;
+        }
+
+        if (phasePointCount >= 2) {
+            DebugDraw::instance().Polyline(std::span<const glm::vec3>(phasePoints.data(), phasePointCount), getPhaseColor(activePhase), getPhaseThickness(activePhase), kPreviewXray);
+        }
+
+        for (uint32_t index = 1; index < cache.pointCount; ++index) {
+            const PreviewPhase phase = cache.points[index].phase;
+            const uint32_t color = getPhaseColor(phase);
+            if ((index % kPreviewSampleDotStride) == 0 || index == cache.pointCount - 1) {
+                DebugDraw::instance().Dot(cache.points[index].position, phase == PreviewPhase::Fall ? 0.032f : 0.028f, color, kPreviewXray);
+            }
+        }
+    }
+
+    const PreviewPhase finalPhase = cache.points[cache.pointCount - 1].phase;
+    DebugDraw::instance().Dot(cache.points[cache.pointCount - 1].position, 0.05f, getPhaseColor(finalPhase), kPreviewXray);
+    if (cache.firstFallIndex > 0 && (uint32_t)cache.firstFallIndex < cache.pointCount) {
+        DebugDraw::instance().Dot(cache.points[(uint32_t)cache.firstFallIndex].position, 0.06f, fallColor, kPreviewXray);
+    }
+    if (cache.hasTargetPos) {
+        DebugDraw::instance().Sphere(cache.targetPos, 0.16f, targetColor, 0, kPreviewXray);
+    }
+}
+
+void QueueBowAimingArcPreview(bool isBowAimingActive) {
+    if (isBowAimingActive) {
+        BowVisualizationState launchState = {};
+        if (TryBuildBowVisualizationState(launchState) && launchState.hasLaunchOrigin && launchState.hasLaunchDirection && launchState.actionKind == BowParamActionKind::Move) {
+            AimingArcCache cache = {};
+            if (BuildPreviewTrajectory(launchState, cache.points, cache.pointCount, cache.firstFallIndex)) {
+                cache.valid = true;
+                cache.cachedAtMs = GetTickCount64();
+                cache.hasTargetPos = launchState.hasTargetPos && !launchState.usedSyntheticTargetPos;
+                cache.targetPos = launchState.targetPos;
+                s_aimingArcCache = cache;
+                Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Rendering {} arc points (firstFall={}, draw={:.3f}, atRange={:.1f})", cache.pointCount, cache.firstFallIndex, launchState.drawAmount, launchState.atRange);
+            }
+            else {
+                Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview FAILED: BuildPreviewTrajectory (launchSpeed={:.3f})", launchState.launchSpeed);
+            }
+        }
+        else if (launchState.actionKind != BowParamActionKind::Move) {
+            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview SKIPPED: actionKind is {} (not Move)", GetBowParamActionKindName(launchState.actionKind));
+        }
+        else {
+            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview FAILED: TryBuildBowVisualizationState or pose missing (valid={}, hasOrigin={}, hasDir={})", launchState.valid, launchState.hasLaunchOrigin, launchState.hasLaunchDirection);
+        }
+    }
+
+    if (s_aimingArcCache.valid) {
+        const uint64_t nowMs = GetTickCount64();
+        if (isBowAimingActive || (nowMs >= s_aimingArcCache.cachedAtMs && nowMs - s_aimingArcCache.cachedAtMs < kAimingArcCacheLifetimeMs)) {
+            DrawAimingArc(s_aimingArcCache);
+            return;
+        }
+        s_aimingArcCache = {};
+    }
+}
+
+void CemuHooks::hook_LoadDynamicBool(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+    hCPU->sprNew.LR = hCPU->gpr[0];
+
+    const uint32_t sourceReturnAddress = hCPU->gpr[0];
+    InlineParamBool boolParam = {};
+    readMemory(hCPU->gpr[30], &boolParam);
+    ConfirmPendingShotOverrideFromBool(boolParam, sourceReturnAddress);
+    RecordBool(boolParam, sourceReturnAddress);
+}
+
+void CemuHooks::hook_LoadDynamicVec3(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = 0x030EC844;
+    const uint32_t sourceReturnAddress = ReadInlineParamPackAddVec3CallerReturnAddress(hCPU);
+
+    InlineParamVec3 vec3Param = {};
+    readMemory(hCPU->gpr[31], &vec3Param);
+    vec3Param.value.z = hCPU->fpr[0].fp0;
+    TryOverrideShotLoadParamVec3(vec3Param, sourceReturnAddress);
+    writeMemory(hCPU->gpr[31], &vec3Param);
+    CapturePreviewHookContext(hCPU, sourceReturnAddress);
+}
+
+void CemuHooks::hook_CaptureArrowShootDecision(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = kAiChangeChildAddress;
+
+    const uint32_t returnAddress = hCPU->sprNew.LR;
+    const uint32_t callsiteAddress = returnAddress >= 4 ? returnAddress - 4 : 0;
+    RecordArrowShootDecision(hCPU->gpr[3], callsiteAddress, returnAddress);
+
+    BowVisualizationState launchState = {};
+    if (TryBuildBowVisualizationState(launchState)) {
+        TryOverridePendingChildParamPackVec3(hCPU->gpr[5], launchState);
+    }
+}
+
+void CemuHooks::hook_OverrideArrowShotTransform(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = 0x03486CD4;
+
+    BEMatrix34 transform = {};
+    readMemory(hCPU->gpr[4], &transform);
+    ClearPendingShotOverride();
+
+    if (TryGetMatchingPlayerPreviewSnapshot(hCPU->gpr[30])) {
+        BowVisualizationState launchState = {};
+        if (TryBuildBowVisualizationState(launchState) && launchState.hasLaunchOrigin && launchState.hasLaunchDirection) {
+            StorePendingShotOverride(launchState);
+            SetTransformFromLaunchPose(transform, launchState.launchOrigin, launchState.launchDirection);
+            Log::print<ARROW_SHOT_CAPTURE>(
+                "[BowShot] Override transform origin={} direction={} previewAi=0x{:08X}",
+                launchState.launchOrigin,
+                launchState.launchDirection,
+                hCPU->gpr[30]
+            );
+            writeMemory(hCPU->gpr[4], &transform);
+        }
+    }
+}

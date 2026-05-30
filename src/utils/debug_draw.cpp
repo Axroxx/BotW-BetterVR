@@ -97,6 +97,10 @@ static float ResolveArcWidth(float duration) {
     return glm::clamp(duration * 0.03f, 0.025f, 0.06f);
 }
 
+static float ResolvePolylineRadius(float thickness) {
+    return glm::clamp(thickness * 0.008f, 0.012f, 0.04f);
+}
+
 static void AddRenderLine(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, uint32_t color) {
     renderData.lineVertices.push_back({ a, color });
     renderData.lineVertices.push_back({ b, color });
@@ -146,16 +150,19 @@ static void AddArcLines(DebugDrawRenderData& renderData, const glm::vec3& center
     }
 }
 
+static void AddTriangle(DebugDrawRenderData& renderData, const DebugDrawTriangleVertex& a, const DebugDrawTriangleVertex& b, const DebugDrawTriangleVertex& c, bool xray = false) {
+    auto& triangleVertices = xray ? renderData.xrayTriangleVertices : renderData.triangleVertices;
+    triangleVertices.push_back(a);
+    triangleVertices.push_back(b);
+    triangleVertices.push_back(c);
+}
+
 static void AddTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, uint32_t color) {
-    renderData.triangleVertices.push_back({ a, color });
-    renderData.triangleVertices.push_back({ b, color });
-    renderData.triangleVertices.push_back({ c, color });
+    AddTriangle(renderData, DebugDrawTriangleVertex{ a, color }, DebugDrawTriangleVertex{ b, color }, DebugDrawTriangleVertex{ c, color });
 }
 
 static void AddXRayTriangle(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, uint32_t color) {
-    renderData.xrayTriangleVertices.push_back({ a, color });
-    renderData.xrayTriangleVertices.push_back({ b, color });
-    renderData.xrayTriangleVertices.push_back({ c, color });
+    AddTriangle(renderData, DebugDrawTriangleVertex{ a, color }, DebugDrawTriangleVertex{ b, color }, DebugDrawTriangleVertex{ c, color }, true);
 }
 
 static void AddQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, uint32_t color) {
@@ -166,6 +173,179 @@ static void AddQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const g
 static void AddXRayQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, uint32_t color) {
     AddXRayTriangle(renderData, a, b, c, color);
     AddXRayTriangle(renderData, a, c, d, color);
+}
+
+static glm::vec3 ComputePolylineTangent(const glm::vec3* points, uint32_t pointCount, uint32_t index) {
+    if (pointCount < 2) {
+        return glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    const glm::vec3 prev = index > 0 ? points[index] - points[index - 1] : glm::vec3(0.0f);
+    const glm::vec3 next = index + 1 < pointCount ? points[index + 1] - points[index] : glm::vec3(0.0f);
+    const float prevLengthSq = glm::length2(prev);
+    const float nextLengthSq = glm::length2(next);
+    if (prevLengthSq > 0.000001f && nextLengthSq > 0.000001f) {
+        const glm::vec3 combined = glm::normalize(prev) + glm::normalize(next);
+        if (glm::length2(combined) > 0.000001f) {
+            return glm::normalize(combined);
+        }
+    }
+
+    if (nextLengthSq > 0.000001f) {
+        return glm::normalize(next);
+    }
+
+    if (prevLengthSq > 0.000001f) {
+        return glm::normalize(prev);
+    }
+
+    return glm::vec3(0.0f, 0.0f, 1.0f);
+}
+
+static glm::vec3 ComputeTubeFrameNormal(const glm::vec3& tangent, const glm::vec3& previousNormal) {
+    glm::vec3 normal = previousNormal - tangent * glm::dot(previousNormal, tangent);
+    if (glm::length2(normal) > 0.000001f) {
+        return glm::normalize(normal);
+    }
+
+    normal = glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), tangent);
+    if (glm::length2(normal) > 0.000001f) {
+        return glm::normalize(normal);
+    }
+
+    normal = glm::cross(glm::vec3(0.0f, 0.0f, 1.0f), tangent);
+    if (glm::length2(normal) > 0.000001f) {
+        return glm::normalize(normal);
+    }
+
+    normal = glm::cross(glm::vec3(1.0f, 0.0f, 0.0f), tangent);
+    if (glm::length2(normal) > 0.000001f) {
+        return glm::normalize(normal);
+    }
+
+    return glm::vec3(1.0f, 0.0f, 0.0f);
+}
+
+static uint32_t ShadeTubeColor(uint32_t color, const glm::vec3& normal) {
+    const glm::vec3 lightDir = glm::normalize(glm::vec3(-0.32f, 0.84f, 0.44f));
+    const glm::vec3 fillDir = glm::normalize(glm::vec3(0.58f, 0.18f, -0.79f));
+    const float keyLight = glm::max(glm::dot(normal, lightDir), 0.0f);
+    const float fillLight = glm::max(glm::dot(normal, fillDir), 0.0f);
+    const float skyLight = glm::max(normal.y, 0.0f);
+    const float shade = glm::clamp(0.42f + (keyLight * 0.34f) + (fillLight * 0.12f) + (skyLight * 0.16f), 0.34f, 1.04f);
+    return ScaleColor(color, shade);
+}
+
+static void AddShadedQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& normalA, const glm::vec3& normalB, const glm::vec3& normalC, const glm::vec3& normalD, uint32_t color, bool xray) {
+    AddTriangle(
+        renderData,
+        DebugDrawTriangleVertex{ a, ShadeTubeColor(color, normalA) },
+        DebugDrawTriangleVertex{ b, ShadeTubeColor(color, normalB) },
+        DebugDrawTriangleVertex{ c, ShadeTubeColor(color, normalC) },
+        xray
+    );
+    AddTriangle(
+        renderData,
+        DebugDrawTriangleVertex{ a, ShadeTubeColor(color, normalA) },
+        DebugDrawTriangleVertex{ c, ShadeTubeColor(color, normalC) },
+        DebugDrawTriangleVertex{ d, ShadeTubeColor(color, normalD) },
+        xray
+    );
+}
+
+static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* points, uint32_t pointCount, float radius, uint32_t color, bool xray) {
+    if (points == nullptr || pointCount < 2 || radius <= 0.0f) {
+        return;
+    }
+
+    static constexpr int kTubeSideCount = 8;
+    std::array<glm::vec3, kTubeSideCount> previousRingPositions = {};
+    std::array<glm::vec3, kTubeSideCount> previousRingNormals = {};
+    std::array<glm::vec3, kTubeSideCount> currentRingPositions = {};
+    std::array<glm::vec3, kTubeSideCount> currentRingNormals = {};
+    std::array<glm::vec3, kTubeSideCount> firstRingPositions = {};
+    std::array<glm::vec3, kTubeSideCount> lastRingPositions = {};
+
+    glm::vec3 previousFrameNormal = ComputeTubeFrameNormal(ComputePolylineTangent(points, pointCount, 0), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::vec3 firstTangent = glm::vec3(0.0f, 0.0f, 1.0f);
+    glm::vec3 lastTangent = firstTangent;
+    bool hasFirstRing = false;
+    bool hasLastRing = false;
+
+    for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+        const glm::vec3 tangent = ComputePolylineTangent(points, pointCount, pointIndex);
+        const glm::vec3 ringNormal = ComputeTubeFrameNormal(tangent, previousFrameNormal);
+        const glm::vec3 ringBitangent = glm::normalize(glm::cross(tangent, ringNormal));
+        previousFrameNormal = ringNormal;
+
+        auto& ringPositions = pointIndex == 0 ? previousRingPositions : currentRingPositions;
+        auto& ringNormals = pointIndex == 0 ? previousRingNormals : currentRingNormals;
+        for (int side = 0; side < kTubeSideCount; ++side) {
+            const float angle = (glm::two_pi<float>() * (float)side) / (float)kTubeSideCount;
+            const glm::vec3 radial = (ringNormal * std::cos(angle)) + (ringBitangent * std::sin(angle));
+            ringPositions[side] = points[pointIndex] + radial * radius;
+            ringNormals[side] = radial;
+        }
+
+        if (pointIndex == 0) {
+            firstRingPositions = previousRingPositions;
+            firstTangent = tangent;
+            lastTangent = tangent;
+            hasFirstRing = true;
+            continue;
+        }
+
+        for (int side = 0; side < kTubeSideCount; ++side) {
+            const int nextSide = (side + 1) % kTubeSideCount;
+            AddShadedQuad(
+                renderData,
+                previousRingPositions[side],
+                previousRingPositions[nextSide],
+                currentRingPositions[nextSide],
+                currentRingPositions[side],
+                previousRingNormals[side],
+                previousRingNormals[nextSide],
+                currentRingNormals[nextSide],
+                currentRingNormals[side],
+                color,
+                xray
+            );
+        }
+
+        previousRingPositions = currentRingPositions;
+        previousRingNormals = currentRingNormals;
+        lastRingPositions = previousRingPositions;
+        lastTangent = tangent;
+        hasLastRing = true;
+    }
+
+    if (hasFirstRing) {
+        const uint32_t capColor = ShadeTubeColor(color, -firstTangent);
+        for (int side = 0; side < kTubeSideCount; ++side) {
+            const int nextSide = (side + 1) % kTubeSideCount;
+            AddTriangle(
+                renderData,
+                DebugDrawTriangleVertex{ points[0], capColor },
+                DebugDrawTriangleVertex{ firstRingPositions[nextSide], capColor },
+                DebugDrawTriangleVertex{ firstRingPositions[side], capColor },
+                xray
+            );
+        }
+    }
+
+    if (hasLastRing) {
+        const uint32_t capColor = ShadeTubeColor(color, lastTangent);
+        for (int side = 0; side < kTubeSideCount; ++side) {
+            const int nextSide = (side + 1) % kTubeSideCount;
+            AddTriangle(
+                renderData,
+                DebugDrawTriangleVertex{ points[pointCount - 1], capColor },
+                DebugDrawTriangleVertex{ lastRingPositions[side], capColor },
+                DebugDrawTriangleVertex{ lastRingPositions[nextSide], capColor },
+                xray
+            );
+        }
+    }
 }
 
 static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corners, uint32_t color, bool xray) {
@@ -187,53 +367,6 @@ static void AddSolidBox(DebugDrawRenderData& renderData, const glm::vec3* corner
         }
         else {
             AddQuad(renderData, corners[face[0]], corners[face[1]], corners[face[2]], corners[face[3]], faceColor);
-        }
-    }
-}
-
-static void AddArcRibbon(DebugDrawRenderData& renderData, const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, int segments, uint32_t color, bool xray, const glm::vec3& cameraPos) {
-    if (segments < 2 || duration <= 0.0f) {
-        return;
-    }
-
-    auto evaluatePoint = [&](float t) {
-        return start + initialVelocity * t + acceleration * (0.5f * t * t);
-    };
-
-    const float arcWidth = ResolveArcWidth(duration);
-    const uint32_t ribbonColor = ScaleColor(color, 0.95f, 0.45f);
-
-    for (int i = 0; i < segments; ++i) {
-        const float t0 = (duration * (float)i) / (float)segments;
-        const float t1 = (duration * (float)(i + 1)) / (float)segments;
-        const glm::vec3 p0 = evaluatePoint(t0);
-        const glm::vec3 p1 = evaluatePoint(t1);
-        glm::vec3 tangent = p1 - p0;
-        if (glm::length2(tangent) <= 0.000001f) {
-            continue;
-        }
-
-        tangent = glm::normalize(tangent);
-        const glm::vec3 midPoint = (p0 + p1) * 0.5f;
-        const glm::vec3 toCamera = glm::normalize(cameraPos - midPoint);
-        const glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
-        glm::vec3 right = glm::cross(tangent, toCamera);
-        if (glm::length2(right) <= 0.000001f) {
-            right = glm::cross(tangent, worldUp);
-            if (glm::length2(right) <= 0.000001f) {
-                right = glm::cross(tangent, glm::vec3(1.0f, 0.0f, 0.0f));
-                if (glm::length2(right) <= 0.000001f) {
-                    continue;
-                }
-            }
-        }
-
-        right = glm::normalize(right) * arcWidth;
-        if (xray) {
-            AddXRayQuad(renderData, p0 - right, p0 + right, p1 + right, p1 - right, ribbonColor);
-        }
-        else {
-            AddQuad(renderData, p0 - right, p0 + right, p1 + right, p1 - right, ribbonColor);
         }
     }
 }
@@ -296,6 +429,18 @@ void DebugDraw::Circle(const glm::vec3& position, float radius, uint32_t color, 
     primitive.segments = segments;
     primitive.xray = xray;
     m_primitives.push_back(primitive);
+}
+
+void DebugDraw::Polyline(std::span<const glm::vec3> points, uint32_t color, float thickness, bool xray) {
+    if (points.size() < 2) {
+        return;
+    }
+
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::POLYLINE, color, thickness };
+    primitive.xray = xray;
+    primitive.points.assign(points.begin(), points.end());
+    m_primitives.push_back(std::move(primitive));
 }
 
 void DebugDraw::Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color, int segments, bool xray) {
@@ -526,25 +671,32 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                 break;
             }
 
+            case PrimitiveType::POLYLINE: {
+                if (prim.points.size() < 2) {
+                    break;
+                }
+
+                AddPolylineTube(renderData, prim.points.data(), (uint32_t)prim.points.size(), ResolvePolylineRadius(prim.thickness), prim.color, prim.xray);
+                break;
+            }
+
             case PrimitiveType::ARC: {
                 const int segments = ResolveArcSegments(prim.duration, prim.segments);
                 if (segments < 2 || prim.duration <= 0.0f) {
                     break;
                 }
 
-                AddArcRibbon(renderData, prim.a, prim.b, prim.c, prim.duration, segments, prim.color, prim.xray, renderData.cameraPos);
-
                 auto evaluatePoint = [&](float t) {
                     return prim.a + prim.b * t + prim.c * (0.5f * t * t);
                 };
 
-                glm::vec3 previousPoint = evaluatePoint(0.0f);
+                std::array<glm::vec3, 97> arcPoints = {};
+                arcPoints[0] = evaluatePoint(0.0f);
                 for (int i = 1; i <= segments; ++i) {
                     const float t = (prim.duration * (float)i) / (float)segments;
-                    const glm::vec3 point = evaluatePoint(t);
-                    AddLine(renderData, previousPoint, point, prim.color, prim.xray);
-                    previousPoint = point;
+                    arcPoints[i] = evaluatePoint(t);
                 }
+                AddPolylineTube(renderData, arcPoints.data(), (uint32_t)segments + 1, ResolveArcWidth(prim.duration), prim.color, prim.xray);
                 break;
             }
 

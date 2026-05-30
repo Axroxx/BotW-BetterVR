@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <cstdint>
 #include <mutex>
+#include <span>
 #include <vector>
 
 constexpr uint32_t DebugDrawColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
@@ -47,6 +48,7 @@ public:
     void PhysicsBody(const glm::vec3& center, float radius, float halfHeight, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0, bool xray = false);
     // World-space ring on the XZ plane using the game's Y-up convention.
     void Circle(const glm::vec3& position, float radius = 1.0f, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, int segments = 0, bool xray = false);
+    void Polyline(std::span<const glm::vec3> points, uint32_t color = DebugDrawColor(255, 220, 64, 220), float thickness = 1.0f, bool xray = false);
     void Arc(const glm::vec3& start, const glm::vec3& initialVelocity, const glm::vec3& acceleration, float duration, uint32_t color = DebugDrawColor(255, 220, 64, 200), int segments = 0, bool xray = false);
     void Box(const glm::vec3& min, const glm::vec3& max, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, bool xray = false);
     void Box(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, uint32_t color = DebugDrawColor(0, 255, 0), float thickness = 1.0f, bool xray = false);
@@ -70,6 +72,7 @@ private:
         CAPSULE,
         PHYSICS_BODY,
         CIRCLE,
+        POLYLINE,
         ARC,
         AABB,
         ORIENTED_BOX,
@@ -88,6 +91,7 @@ private:
         // CAPSULE: a = center, radius used, duration = halfHeight, segments used
         // PHYSICS_BODY: a = center, radius used, duration = halfHeight, segments used
         // CIRCLE: a = center, radius/segments used
+        // POLYLINE: points/thickness used
         // ARC: a = start, b = initial velocity, c = acceleration, duration/segments used
         // AABB: a = min, b = max
         // ORIENTED_BOX: a = center, b = halfExtents, rotation used
@@ -97,6 +101,7 @@ private:
         glm::vec3 c = {};
         glm::quat rotation = glm::identity<glm::quat>();
         glm::mat4 inverseVP = glm::mat4(1.0f);
+        std::vector<glm::vec3> points;
         float radius = 1.0f;
         float duration = 0.0f;
         int segments = 0;

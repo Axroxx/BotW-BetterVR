@@ -97,6 +97,9 @@ inline glm::fquat ToGLM(const XrQuaternionf& quat) {
     return glm::fquat(quat.w, quat.x, quat.y, quat.z);
 }
 
+static bool IsAllFinite(const glm::vec3& value) {
+    return glm::all(glm::isfinite(value));
+}
 
 inline XrVector2f ToXR(const glm::fvec2& vec) {
     return { vec.x, vec.y };

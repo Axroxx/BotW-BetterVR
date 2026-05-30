@@ -714,6 +714,7 @@ namespace ImGuiMenus {
     void SetWeaponSensitivityOverlayVisible(OpenXR::EyeSide side, bool visible) {
         WeaponAttackDebugger::s_showWeaponSensitivityOverlay[side] = visible;
     }
+
 }
 
 void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool* changed) {
@@ -885,11 +886,14 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
 }
 
 void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
-    if (auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get(); entityDebugger != nullptr) {
+    auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get();
+    if (entityDebugger != nullptr) {
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
         ImGui::SeparatorText("World-Space Overlay");
         entityDebugger->DrawWorldSpaceOverlaySettings(changed);
+    }
 
+    if (entityDebugger != nullptr) {
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
         ImGui::SeparatorText("Entity Debugger");
         entityDebugger->DrawEntityInspectorContent();

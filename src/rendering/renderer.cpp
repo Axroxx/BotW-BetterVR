@@ -3,6 +3,7 @@
 #include "renderer.h"
 #include "instance.h"
 #include "texture.h"
+#include "hooking/bow.h"
 #include "utils/d3d12_utils.h"
 #include "utils/render_utils.h"
 #include "hooking/imgui_menus.h"
@@ -111,6 +112,7 @@ void RND_Renderer::EndFrame() {
         frameIdx = 1;
     }
 
+    QueueBowAimingArcPreview(Layer2D::IsBowAimingActive());
     DebugDrawRenderData debugDrawData = frameIdx != -1 ? DebugDraw::instance().TakeRenderData(frameIdx) : DebugDraw::instance().TakeRenderData();
 
     if (frameIdx != -1) {
@@ -508,7 +510,6 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
 
     auto inputState = VRManager::instance().XR->m_input.load();
     const bool wasBowAimingSet = IsBowAimingActive();
-    SetBowAimingActive(false);
     const bool isBowAiming = wasBowAimingSet && inputState.shared.in_game;
 
     if (GetSettings().DoesUIFollowGaze() || isBowAiming) {

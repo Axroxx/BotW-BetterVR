@@ -1,6 +1,6 @@
-#include "pch.h"
 #include "entity_debugger.h"
 #include "instance.h"
+#include "pch.h"
 #include "utils/mod_settings.h"
 
 #include "utils/debug_draw.h"
@@ -10,6 +10,7 @@ std::unordered_map<uint32_t, std::pair<std::string, uint32_t>> s_knownActors;
 glm::fvec3 CemuHooks::s_playerPos = {};
 uint32_t CemuHooks::s_playerMtxAddress = 0;
 uint32_t CemuHooks::s_cameraMtxAddress = 0;
+
 
 void CemuHooks::hook_UpdateActorList(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
@@ -47,29 +48,117 @@ void CemuHooks::hook_UpdateActorList(PPCInterpreter_t* hCPU) {
     //     // writeMemoryBE(hCPU->gpr[6] + offsetof(ActorWiiU, velocity.y), &velocityY);
     //     s_currActorPtrs.emplace_back(hCPU->gpr[6]);
     // }
-     if (strcmp(actorName, "GameROMPlayer") == 0) {
-         BEMatrix34 mtx = {};
-         uint32_t actorMtxPtr = hCPU->gpr[6] + offsetof(ActorWiiU, mtx);
-         readMemory(actorMtxPtr, &mtx);
-         s_playerPos = mtx.getPos().getLE();
-         s_playerMtxAddress = actorMtxPtr;
-         s_playerAddress = hCPU->gpr[6];
-         //uint32_t vtableAddr = getMemory<BEType<uint32_t>>(hCPU->gpr[6] + offsetof(ActorWiiU, vtable)).getLE();
-         //Log::print<INFO>("VTABLE = {:08X}", vtableAddr);
-     }
-     else if (strcmp(actorName, "GameRomCamera") == 0) {
-         uint32_t actorMtxPtr = hCPU->gpr[6] + offsetof(ActorWiiU, mtx);
-         s_cameraMtxAddress = actorMtxPtr;
-     }
+    if (strcmp(actorName, "GameROMPlayer") == 0) {
+        BEMatrix34 mtx = {};
+        uint32_t actorMtxPtr = hCPU->gpr[6] + offsetof(ActorWiiU, mtx);
+        readMemory(actorMtxPtr, &mtx);
+        s_playerPos = mtx.getPos().getLE();
+        s_playerMtxAddress = actorMtxPtr;
+        s_playerAddress = hCPU->gpr[6];
+        //uint32_t vtableAddr = getMemory<BEType<uint32_t>>(hCPU->gpr[6] + offsetof(ActorWiiU, vtable)).getLE();
+        //Log::print<INFO>("VTABLE = {:08X}", vtableAddr);
+    }
+    else if (strcmp(actorName, "GameRomCamera") == 0) {
+        uint32_t actorMtxPtr = hCPU->gpr[6] + offsetof(ActorWiiU, mtx);
+        s_cameraMtxAddress = actorMtxPtr;
+    }
 }
 // ksys::phys::RigidBodyFromShape::create to create a RigidBody from a shape
 // use Actor::getRigidBodyByName
 
 std::unordered_map<uint32_t, std::pair<std::string, uint32_t>> s_alreadyAddedActors;
 
+#ifdef _DEBUG
+struct ArrowTrail {
+    std::vector<glm::vec3> points;
+    int framesRemaining = 180 * 20;
+};
+static std::unordered_map<uint32_t, ArrowTrail> s_activeArrowTrails;
+static std::vector<ArrowTrail> s_persistedArrowTrails;
+static constexpr float kArrowTrailSeedSpeedSq = 0.0001f;
+static constexpr float kArrowTrailSeedDistance = 0.05f;
+
+static void UpdateArrowTrails() {
+    std::unordered_set<uint32_t> currentFrameArrowIds;
+
+    for (const auto& [actorId, actorInfo] : s_knownActors) {
+        const std::string& actorName = actorInfo.first;
+        if (actorName.find("Arrow") != std::string::npos && actorName.find("Quiver") == std::string::npos) {
+            uint32_t actorPtr = actorInfo.second;
+            BEMatrix34 mtx = CemuHooks::getMemory<BEMatrix34>(actorPtr + offsetof(ActorWiiU, mtx));
+            BEVec3 velocity = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, velocity));
+            glm::vec3 currentPos = mtx.getPos().getLE();
+            glm::vec3 currentVelocity = velocity.getLE();
+
+            if (glm::all(glm::isfinite(currentPos)) && glm::all(glm::isfinite(currentVelocity))) {
+                currentFrameArrowIds.insert(actorId);
+                ArrowTrail& activeTrail = s_activeArrowTrails[actorId];
+                const float speedSq = glm::length2(currentVelocity);
+
+                if (activeTrail.points.empty() && speedSq >= kArrowTrailSeedSpeedSq) {
+                    activeTrail.points.push_back(currentPos - glm::normalize(currentVelocity) * kArrowTrailSeedDistance);
+                }
+
+                if (activeTrail.points.empty() || glm::distance2(activeTrail.points.back(), currentPos) > 0.0001f) {
+                    activeTrail.points.push_back(currentPos);
+                }
+            }
+        }
+    }
+
+    for (auto it = s_activeArrowTrails.begin(); it != s_activeArrowTrails.end();) {
+        uint32_t actorId = it->first;
+        if (!currentFrameArrowIds.contains(actorId)) {
+            if (it->second.points.size() >= 2) {
+                s_persistedArrowTrails.push_back(std::move(it->second));
+            }
+            it = s_activeArrowTrails.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
+
+    for (const auto& trail : s_activeArrowTrails | std::views::values) {
+        if (trail.points.size() >= 2) {
+            for (size_t i = 1; i < trail.points.size(); ++i) {
+                DebugDraw::instance().Line(trail.points[i - 1], trail.points[i], DebugDrawColor(255, 64, 220, 255), 4.0f, false);
+            }
+            DebugDraw::instance().Dot(trail.points.back(), 0.2f, DebugDrawColor(255, 64, 220, 255), false);
+        }
+        else if (trail.points.size() == 1) {
+            DebugDraw::instance().Dot(trail.points.front(), 0.28f, DebugDrawColor(255, 64, 220, 255), false);
+        }
+    }
+
+    for (auto it = s_persistedArrowTrails.begin(); it != s_persistedArrowTrails.end();) {
+        it->framesRemaining--;
+        if (it->framesRemaining <= 0) {
+            it = s_persistedArrowTrails.erase(it);
+        }
+        else {
+            const float age = 1.0f - (float)it->framesRemaining / (float)(180 * 20);
+            const uint8_t alpha = (uint8_t)glm::clamp((int)std::lround(255.0f * (1.0f - age)), 0, 255);
+            const uint32_t fadeColor = DebugDrawColor(255, 64, 220, alpha);
+
+            for (size_t i = 1; i < it->points.size(); ++i) {
+                DebugDraw::instance().Line(it->points[i - 1], it->points[i], fadeColor, 4.0f, false);
+            }
+
+            for (size_t i = 0; i < it->points.size(); i += 8) {
+                DebugDraw::instance().Dot(it->points[i], 0.03f * 4.0f, fadeColor, false);
+            }
+            if (!it->points.empty()) {
+                DebugDraw::instance().Dot(it->points.back(), 0.04f * 4.0f, fadeColor, false);
+            }
+            ++it;
+        }
+    }
+}
+#endif
+
 void EntityDebugger::UpdateEntityMemory() {
     std::scoped_lock lock(g_actorListMutex);
-
     // remove actors in s_alreadyAddedActors that are no longer in s_knownActors
     for (const auto& hash : s_alreadyAddedActors | std::views::keys) {
         if (!s_knownActors.contains(hash)) {
@@ -203,7 +292,7 @@ void EntityDebugger::UpdateEntityMemory() {
                 DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 1), 1.0f);
             }
             else {
-                DebugDraw::instance().Dot(pos, 0.15f, IM_COL32(255, 255, 255, 255/1));
+                DebugDraw::instance().Dot(pos, 0.15f, IM_COL32(255, 255, 255, 255 / 1));
             }
         }
 
@@ -239,6 +328,10 @@ void EntityDebugger::UpdateEntityMemory() {
         // addField.operator()<float>("lodDrawDistanceMultiplier", offsetof(ActorWiiU, lodDrawDistanceMultiplier));
     }
 
+#ifdef _DEBUG
+    UpdateArrowTrails();
+#endif
+
     // other systems might've added memory to the overlay, so hence this is a separate loop
     for (auto& entity : m_entities | std::views::values) {
         if (!entity.isEntity)
@@ -268,8 +361,8 @@ void EntityDebugger::UpdateEntityMemory() {
                 else if constexpr (std::is_same_v<T, uint8_t>) {
                     CemuHooks::setMemory(value.value_address, arg);
                 }
-            }, value.value);
-
+            },
+                       value.value);
         }
     }
 }
@@ -381,9 +474,15 @@ void EntityDebugger::DrawEntityInspectorContent() {
                     else if constexpr (std::is_same_v<T, BEMatrix34>) {
                         if (value.expanded) {
                             auto mtx = std::get<BEMatrix34>(value.value).getLEMatrix();
-                            ImGui::Indent(); bool row0Changed = ImGui::DragFloat4("Row 0", &mtx[0].x, 10.0f, 0, 0, nullptr, ImGuiSliderFlags_NoRoundToFormat); ImGui::Unindent();
-                            ImGui::Indent(); bool row1Changed = ImGui::DragFloat4("Row 1", &mtx[1].x, 10.0f, 0, 0, nullptr, ImGuiSliderFlags_NoRoundToFormat); ImGui::Unindent();
-                            ImGui::Indent(); bool row2Changed = ImGui::DragFloat4("Row 2", &mtx[2].x, 10.0f, 0, 0, nullptr, ImGuiSliderFlags_NoRoundToFormat); ImGui::Unindent();
+                            ImGui::Indent();
+                            bool row0Changed = ImGui::DragFloat4("Row 0", &mtx[0].x, 10.0f, 0, 0, nullptr, ImGuiSliderFlags_NoRoundToFormat);
+                            ImGui::Unindent();
+                            ImGui::Indent();
+                            bool row1Changed = ImGui::DragFloat4("Row 1", &mtx[1].x, 10.0f, 0, 0, nullptr, ImGuiSliderFlags_NoRoundToFormat);
+                            ImGui::Unindent();
+                            ImGui::Indent();
+                            bool row2Changed = ImGui::DragFloat4("Row 2", &mtx[2].x, 10.0f, 0, 0, nullptr, ImGuiSliderFlags_NoRoundToFormat);
+                            ImGui::Unindent();
                             if (row0Changed || row1Changed || row2Changed) {
                                 std::get<BEMatrix34>(value.value).setLEMatrix(mtx);
                             }
@@ -419,9 +518,10 @@ void EntityDebugger::DrawEntityInspectorContent() {
                     }
                     else if constexpr (std::is_same_v<T, std::string>) {
                         std::string val = std::get<std::string>(value.value);
-                        ImGui::Text( val.c_str());
+                        ImGui::Text(val.c_str());
                     }
-                }, value.value);
+                },
+                           value.value);
 
                 ImGui::EndDisabled();
 
@@ -475,33 +575,36 @@ void EntityDebugger::RemoveEntity(uint32_t actorId) {
 void EntityDebugger::RemoveEntityValue(uint32_t actorId, const std::string& valueName) {
     if (const auto it = m_entities.find(actorId); it != m_entities.end()) {
         it->second.values.erase(std::ranges::remove_if(it->second.values, [&](const EntityValue& val) {
-            return val.value_name == valueName;
-        }).begin(), it->second.values.end());
+                                    return val.value_name == valueName;
+                                }).begin(),
+                                it->second.values.end());
     }
 }
 std::array<bool, 256> s_pressedKeyState = {};
 std::array<bool, ImGuiKey_NamedKey_COUNT> s_pressedNamedKeyState = {};
 
-#define IS_ALPHANUMERIC_KEY_DOWN_AND_WASNT_PREVIOUSLY_DOWN(key, isShiftPressed) { \
-    bool isKeyDown = GetAsyncKeyState(key) & 0x8000; \
-    bool wasKeyDown = s_pressedKeyState[key]; \
-    s_pressedKeyState[key] = isKeyDown; \
-    if (isKeyDown && !wasKeyDown) { \
-        ImGui::GetIO().AddInputCharacter(isShiftPressed ? key : tolower(key)); \
-    } \
-}
+#define IS_ALPHANUMERIC_KEY_DOWN_AND_WASNT_PREVIOUSLY_DOWN(key, isShiftPressed)    \
+    {                                                                              \
+        bool isKeyDown = GetAsyncKeyState(key) & 0x8000;                           \
+        bool wasKeyDown = s_pressedKeyState[key];                                  \
+        s_pressedKeyState[key] = isKeyDown;                                        \
+        if (isKeyDown && !wasKeyDown) {                                            \
+            ImGui::GetIO().AddInputCharacter(isShiftPressed ? key : tolower(key)); \
+        }                                                                          \
+    }
 
-#define IS_KEY_DOWN_AND_WASNT_PREVIOUSLY_DOWN(key, imGuiKey) { \
-    bool wasKeyDown = s_pressedNamedKeyState[imGuiKey - ImGuiKey_NamedKey_BEGIN]; \
-    bool isKeyDown = GetAsyncKeyState(key) & 0x8000; \
-    s_pressedNamedKeyState[imGuiKey - ImGuiKey_NamedKey_BEGIN] = isKeyDown; \
-    if (isKeyDown && !wasKeyDown) { \
-        ImGui::GetIO().AddKeyEvent(imGuiKey, true); \
-    } \
-    else if (!isKeyDown && wasKeyDown) { \
-        ImGui::GetIO().AddKeyEvent(imGuiKey, false); \
-    } \
-}
+#define IS_KEY_DOWN_AND_WASNT_PREVIOUSLY_DOWN(key, imGuiKey)                          \
+    {                                                                                 \
+        bool wasKeyDown = s_pressedNamedKeyState[imGuiKey - ImGuiKey_NamedKey_BEGIN]; \
+        bool isKeyDown = GetAsyncKeyState(key) & 0x8000;                              \
+        s_pressedNamedKeyState[imGuiKey - ImGuiKey_NamedKey_BEGIN] = isKeyDown;       \
+        if (isKeyDown && !wasKeyDown) {                                               \
+            ImGui::GetIO().AddKeyEvent(imGuiKey, true);                               \
+        }                                                                             \
+        else if (!isKeyDown && wasKeyDown) {                                          \
+            ImGui::GetIO().AddKeyEvent(imGuiKey, false);                              \
+        }                                                                             \
+    }
 
 void EntityDebugger::UpdateKeyboardControls() {
     // capture keyboard input

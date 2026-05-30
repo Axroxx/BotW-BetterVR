@@ -285,6 +285,18 @@ bctr
 
 0x0344DCF8 = bla ApplyRoomscaleAfterPlayerVelocity
 
+; align the real player-fired arrow launch transform to the headset pose
+0x02706270 = bla import.coreinit.hook_OverrideArrowShotTransform
+
+; capture whether AI__Arrow::handleStateShoot selected normal, homing, or sky shooting
+0x0270640C = bla import.coreinit.hook_CaptureArrowShootDecision
+0x027064D8 = bla import.coreinit.hook_CaptureArrowShootDecision
+0x02706518 = bla import.coreinit.hook_CaptureArrowShootDecision
+
+; keep the bow arc / player-shot override synced with live Arrow param loads
+0x030EC840 = ba import.coreinit.hook_LoadDynamicVec3
+0x030EC8C0 = bla import.coreinit.hook_LoadDynamicBool
+
 0x03489710 = ContinueAfterLogSetRigidBodyVelocity:
 0x0344DCFC = ContinueAfterApplyRoomscaleAfterPlayerVelocity:
 0x0344B864 = SyncPhysicsFieldAfterSetPosition:

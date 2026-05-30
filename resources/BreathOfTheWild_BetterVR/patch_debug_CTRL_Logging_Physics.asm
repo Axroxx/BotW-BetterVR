@@ -38,11 +38,7 @@ bctr
 ; IDA: 0x02D66B58 = mr r4, r29
 ;0x02D66B58 = bla import.coreinit.hook_TestPlayerSetMtxTeleport
 
-; hooks arrow shooting parameters (and other dynamically loaded bools/values inside AI Actions)
-0x020E3924 = ba import.coreinit.hook_LoadArrowFallSpeedRatioByRange
-0x030EC7B4 = ba import.coreinit.hook_LoadDynamicFloat
-0x030EC840 = ba import.coreinit.hook_LoadDynamicVec3
-0x030EC8C0 = bla import.coreinit.hook_LoadDynamicBool
+; hooks arrow shooting parameters moved to the normal entity-controller patch so the standalone viewer/export does not depend on debug-only ASM
 
 ; swap TargetPos and IsShootByPlayer to be able to mutate the TargetPos value AFTER we know that the arrow is shot by the player
 
