@@ -129,9 +129,28 @@ static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
     return newPos;
 }
 
-static std::pair<glm::vec3, glm::fquat> BuildGameplayCameraPose(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot, OpenXR::EyeSide side) {
-    glm::fvec3 basePos = ResolveGameplayAnchorPosition(gameplayPos);
+static glm::fquat ResolveCameraBaseYaw(const glm::fquat& gameplayRot, bool allowEventCameraRotationOverride = false) {
     glm::fquat baseYaw = RenderUtils::swingTwistY(gameplayRot).second;
+
+    if (!allowEventCameraRotationOverride || !CemuHooks::IsFirstPerson()) {
+        return baseYaw;
+    }
+
+    BEMatrix34 playerMtx = {};
+    CemuHooks::readMemory(CemuHooks::s_playerMtxAddress, &playerMtx);
+
+    if (auto settings = CemuHooks::GetFirstPersonSettingsForActiveEvent()) {
+        if (settings->ignoreCameraRotation) {
+            glm::fquat playerRot = playerMtx.getRotLE();
+            return RenderUtils::swingTwistY(playerRot).second * glm::angleAxis(glm::radians(180.0f), glm::fvec3(0.0f, 1.0f, 0.0f));
+        }
+    }
+
+    return baseYaw;
+}
+
+static std::pair<glm::vec3, glm::fquat> BuildCameraPoseFromBase(const glm::fvec3& basePos, const glm::fquat& gameplayRot, OpenXR::EyeSide side, bool allowEventCameraRotationOverride = false) {
+    glm::fquat baseYaw = ResolveCameraBaseYaw(gameplayRot, allowEventCameraRotationOverride);
 
     auto eyePoseOpt = TryGetAppliedEyePose(side);
     if (!eyePoseOpt.has_value()) {
@@ -150,9 +169,13 @@ static void UpdateDebugEyeViewsFromGameplayPose(const glm::fvec3& gameplayPos, c
     }
 }
 
+static std::pair<glm::vec3, glm::fquat> BuildGameplayCameraPose(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot, OpenXR::EyeSide side) {
+    return BuildCameraPoseFromBase(ResolveGameplayAnchorPosition(gameplayPos), gameplayRot, side);
+}
+
 static void UpdateGameplayReferenceCameraMtx(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot) {
     glm::fvec3 basePos = ResolveGameplayAnchorPosition(gameplayPos);
-    glm::fquat baseYaw = RenderUtils::swingTwistY(gameplayRot).second;
+    glm::fquat baseYaw = ResolveCameraBaseYaw(gameplayRot);
     CemuHooks::s_lastCameraMtx = glm::translate(glm::identity<glm::fmat4>(), basePos) * glm::mat4(baseYaw);
 }
 
@@ -574,8 +597,14 @@ void CemuHooks::hook_ModifyProjectionUsingCamera(PPCInterpreter_t* hCPU) {
         readMemory(cameraPtr, &camera);
 
         Log::print<RENDERING>("[{}] ModifyProjectionUsingCamera at {:08X}: {}", side, cameraPtr, camera);
-        auto [gameplayPos, gameplayRot] = ResolveGameplayBasePose(camera);
-        auto [newPos, newRot] = BuildGameplayCameraPose(gameplayPos, gameplayRot, side);
+
+        // the divine beast outside rendering actually use a separate camera that is at a different position
+        // so don't use generic camera position, and instead recalculate it
+
+        glm::mat4x3 viewMatrix = camera.mtx.getLEMatrix();
+        glm::mat4 worldGame = glm::inverse(glm::mat4(viewMatrix));
+        glm::vec3 basePos = glm::vec3(worldGame[3]);
+        auto [newPos, newRot] = BuildCameraPoseFromBase(basePos, s_wsCameraRotation, side, true);
 
         glm::mat4 newWorldVR = glm::translate(glm::mat4(1.0f), newPos) * glm::mat4_cast(newRot);
         glm::mat4 newViewVR = glm::inverse(newWorldVR);
