@@ -297,6 +297,10 @@ bctr
 0x030EC840 = ba import.coreinit.hook_LoadDynamicVec3
 0x030EC8C0 = bla import.coreinit.hook_LoadDynamicBool
 
+; capture FPS-scaled arrow speed from f0 for bow arc vfrScale
+; hooks the FPS++ nop at 0x03793384 (right after lfs f0, averageFPS1Inv@l)
+0x03793384 = bla import.coreinit.hook_ArrowFpsScale
+
 0x03489710 = ContinueAfterLogSetRigidBodyVelocity:
 0x0344DCFC = ContinueAfterApplyRoomscaleAfterPlayerVelocity:
 0x0344B864 = SyncPhysicsFieldAfterSetPosition:

@@ -69,6 +69,10 @@ static uint8_t GetColorChannel(uint32_t color, int shift) {
     return (uint8_t)((color >> shift) & 0xFFu);
 }
 
+static float GetColorAlpha01(uint32_t color) {
+    return (float)GetColorChannel(color, 24) / 255.0f;
+}
+
 static uint32_t ScaleColor(uint32_t color, float rgbScale, float alphaScale = 1.0f) {
     const uint8_t r = (uint8_t)glm::clamp((int)std::lround((float)GetColorChannel(color, 0) * rgbScale), 0, 255);
     const uint8_t g = (uint8_t)glm::clamp((int)std::lround((float)GetColorChannel(color, 8) * rgbScale), 0, 255);
@@ -236,21 +240,25 @@ static uint32_t ShadeTubeColor(uint32_t color, const glm::vec3& normal) {
     return ScaleColor(color, shade);
 }
 
+static void AddShadedQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& normalA, const glm::vec3& normalB, const glm::vec3& normalC, const glm::vec3& normalD, uint32_t previousColor, uint32_t currentColor, bool xray) {
+    AddTriangle(
+        renderData,
+        DebugDrawTriangleVertex{ a, ShadeTubeColor(previousColor, normalA) },
+        DebugDrawTriangleVertex{ b, ShadeTubeColor(previousColor, normalB) },
+        DebugDrawTriangleVertex{ c, ShadeTubeColor(currentColor, normalC) },
+        xray
+    );
+    AddTriangle(
+        renderData,
+        DebugDrawTriangleVertex{ a, ShadeTubeColor(previousColor, normalA) },
+        DebugDrawTriangleVertex{ c, ShadeTubeColor(currentColor, normalC) },
+        DebugDrawTriangleVertex{ d, ShadeTubeColor(currentColor, normalD) },
+        xray
+    );
+}
+
 static void AddShadedQuad(DebugDrawRenderData& renderData, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d, const glm::vec3& normalA, const glm::vec3& normalB, const glm::vec3& normalC, const glm::vec3& normalD, uint32_t color, bool xray) {
-    AddTriangle(
-        renderData,
-        DebugDrawTriangleVertex{ a, ShadeTubeColor(color, normalA) },
-        DebugDrawTriangleVertex{ b, ShadeTubeColor(color, normalB) },
-        DebugDrawTriangleVertex{ c, ShadeTubeColor(color, normalC) },
-        xray
-    );
-    AddTriangle(
-        renderData,
-        DebugDrawTriangleVertex{ a, ShadeTubeColor(color, normalA) },
-        DebugDrawTriangleVertex{ c, ShadeTubeColor(color, normalC) },
-        DebugDrawTriangleVertex{ d, ShadeTubeColor(color, normalD) },
-        xray
-    );
+    AddShadedQuad(renderData, a, b, c, d, normalA, normalB, normalC, normalD, color, color, xray);
 }
 
 static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* points, uint32_t pointCount, float radius, uint32_t color, bool xray) {
@@ -263,14 +271,7 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
     std::array<glm::vec3, kTubeSideCount> previousRingNormals = {};
     std::array<glm::vec3, kTubeSideCount> currentRingPositions = {};
     std::array<glm::vec3, kTubeSideCount> currentRingNormals = {};
-    std::array<glm::vec3, kTubeSideCount> firstRingPositions = {};
-    std::array<glm::vec3, kTubeSideCount> lastRingPositions = {};
-
     glm::vec3 previousFrameNormal = ComputeTubeFrameNormal(ComputePolylineTangent(points, pointCount, 0), glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::vec3 firstTangent = glm::vec3(0.0f, 0.0f, 1.0f);
-    glm::vec3 lastTangent = firstTangent;
-    bool hasFirstRing = false;
-    bool hasLastRing = false;
 
     for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
         const glm::vec3 tangent = ComputePolylineTangent(points, pointCount, pointIndex);
@@ -288,10 +289,6 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
         }
 
         if (pointIndex == 0) {
-            firstRingPositions = previousRingPositions;
-            firstTangent = tangent;
-            lastTangent = tangent;
-            hasFirstRing = true;
             continue;
         }
 
@@ -314,37 +311,72 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
 
         previousRingPositions = currentRingPositions;
         previousRingNormals = currentRingNormals;
-        lastRingPositions = previousRingPositions;
-        lastTangent = tangent;
-        hasLastRing = true;
+    }
+}
+
+static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* points, uint32_t pointCount, float radius, const uint32_t* colors, bool xray) {
+    if (points == nullptr || pointCount < 2 || radius <= 0.0f || colors == nullptr) {
+        return;
     }
 
-    if (hasFirstRing) {
-        const uint32_t capColor = ShadeTubeColor(color, -firstTangent);
+    static constexpr int kTubeSideCount = 8;
+    std::array<glm::vec3, kTubeSideCount> previousRingPositions = {};
+    std::array<glm::vec3, kTubeSideCount> previousRingNormals = {};
+    std::array<glm::vec3, kTubeSideCount> currentRingPositions = {};
+    std::array<glm::vec3, kTubeSideCount> currentRingNormals = {};
+    glm::vec3 previousFrameNormal = ComputeTubeFrameNormal(ComputePolylineTangent(points, pointCount, 0), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+        const glm::vec3 tangent = ComputePolylineTangent(points, pointCount, pointIndex);
+        const glm::vec3 ringNormal = ComputeTubeFrameNormal(tangent, previousFrameNormal);
+        const glm::vec3 ringBitangent = glm::normalize(glm::cross(tangent, ringNormal));
+        previousFrameNormal = ringNormal;
+
+        auto& ringPositions = pointIndex == 0 ? previousRingPositions : currentRingPositions;
+        auto& ringNormals = pointIndex == 0 ? previousRingNormals : currentRingNormals;
+        for (int side = 0; side < kTubeSideCount; ++side) {
+            const float angle = (glm::two_pi<float>() * (float)side) / (float)kTubeSideCount;
+            const glm::vec3 radial = (ringNormal * std::cos(angle)) + (ringBitangent * std::sin(angle));
+            ringPositions[side] = points[pointIndex] + radial * radius;
+            ringNormals[side] = radial;
+        }
+
+        if (pointIndex == 0) {
+            continue;
+        }
+
+        const uint32_t previousColor = colors[pointIndex - 1];
+        const uint32_t currentColor = colors[pointIndex];
+        const float previousRadiusScale = glm::smoothstep(0.0f, 1.0f, GetColorAlpha01(previousColor));
+        const float currentRadiusScale = glm::smoothstep(0.0f, 1.0f, GetColorAlpha01(currentColor));
+        const float previousRadius = glm::max(radius * previousRadiusScale, radius * 0.04f);
+        const float currentRadius = glm::max(radius * currentRadiusScale, radius * 0.04f);
+
+        for (int side = 0; side < kTubeSideCount; ++side) {
+            previousRingPositions[side] = points[pointIndex - 1] + previousRingNormals[side] * previousRadius;
+            currentRingPositions[side] = points[pointIndex] + currentRingNormals[side] * currentRadius;
+        }
+
         for (int side = 0; side < kTubeSideCount; ++side) {
             const int nextSide = (side + 1) % kTubeSideCount;
-            AddTriangle(
+            AddShadedQuad(
                 renderData,
-                DebugDrawTriangleVertex{ points[0], capColor },
-                DebugDrawTriangleVertex{ firstRingPositions[nextSide], capColor },
-                DebugDrawTriangleVertex{ firstRingPositions[side], capColor },
+                previousRingPositions[side],
+                previousRingPositions[nextSide],
+                currentRingPositions[nextSide],
+                currentRingPositions[side],
+                previousRingNormals[side],
+                previousRingNormals[nextSide],
+                currentRingNormals[nextSide],
+                currentRingNormals[side],
+                previousColor,
+                currentColor,
                 xray
             );
         }
-    }
 
-    if (hasLastRing) {
-        const uint32_t capColor = ShadeTubeColor(color, lastTangent);
-        for (int side = 0; side < kTubeSideCount; ++side) {
-            const int nextSide = (side + 1) % kTubeSideCount;
-            AddTriangle(
-                renderData,
-                DebugDrawTriangleVertex{ points[pointCount - 1], capColor },
-                DebugDrawTriangleVertex{ lastRingPositions[side], capColor },
-                DebugDrawTriangleVertex{ lastRingPositions[nextSide], capColor },
-                xray
-            );
-        }
+        previousRingPositions = currentRingPositions;
+        previousRingNormals = currentRingNormals;
     }
 }
 
@@ -440,6 +472,19 @@ void DebugDraw::Polyline(std::span<const glm::vec3> points, uint32_t color, floa
     DebugPrimitive primitive = { PrimitiveType::POLYLINE, color, thickness };
     primitive.xray = xray;
     primitive.points.assign(points.begin(), points.end());
+    m_primitives.push_back(std::move(primitive));
+}
+
+void DebugDraw::Polyline(std::span<const glm::vec3> points, std::span<const uint32_t> colors, float thickness, bool xray) {
+    if (points.size() < 2 || colors.size() < 2) {
+        return;
+    }
+
+    std::lock_guard lk(m_mutex);
+    DebugPrimitive primitive = { PrimitiveType::POLYLINE, 0, thickness };
+    primitive.xray = xray;
+    primitive.points.assign(points.begin(), points.end());
+    primitive.pointColors.assign(colors.begin(), colors.end());
     m_primitives.push_back(std::move(primitive));
 }
 
@@ -676,7 +721,12 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
                     break;
                 }
 
-                AddPolylineTube(renderData, prim.points.data(), (uint32_t)prim.points.size(), ResolvePolylineRadius(prim.thickness), prim.color, prim.xray);
+                if (!prim.pointColors.empty() && prim.pointColors.size() >= prim.points.size()) {
+                    AddPolylineTube(renderData, prim.points.data(), (uint32_t)prim.points.size(), ResolvePolylineRadius(prim.thickness), prim.pointColors.data(), prim.xray);
+                }
+                else {
+                    AddPolylineTube(renderData, prim.points.data(), (uint32_t)prim.points.size(), ResolvePolylineRadius(prim.thickness), prim.color, prim.xray);
+                }
                 break;
             }
 

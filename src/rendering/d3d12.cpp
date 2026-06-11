@@ -622,7 +622,7 @@ void RND_D3D12::DebugDrawPipeline::RecreatePipeline() {
     baseDesc.RasterizerState = {
         .FillMode = D3D12_FILL_MODE_SOLID,
         .CullMode = D3D12_CULL_MODE_NONE,
-        .FrontCounterClockwise = false,
+        .FrontCounterClockwise = true,
         .DepthBias = D3D12_DEFAULT_DEPTH_BIAS,
         .DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
         .SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,

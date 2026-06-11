@@ -161,16 +161,16 @@ static std::pair<glm::vec3, glm::fquat> BuildCameraPoseFromBase(const glm::fvec3
     return { basePos + (baseYaw * eyePos), baseYaw * eyeRot };
 }
 
+static std::pair<glm::vec3, glm::fquat> BuildGameplayCameraPose(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot, OpenXR::EyeSide side) {
+    return BuildCameraPoseFromBase(ResolveGameplayAnchorPosition(gameplayPos), gameplayRot, side);
+}
+
 static void UpdateDebugEyeViewsFromGameplayPose(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot) {
     for (uint32_t eyeIndex = 0; eyeIndex < 2; ++eyeIndex) {
         auto [eyePos, eyeRot] = BuildGameplayCameraPose(gameplayPos, gameplayRot, (OpenXR::EyeSide)eyeIndex);
         glm::mat4 eyeWorld = glm::translate(glm::mat4(1.0f), eyePos) * glm::mat4_cast(eyeRot);
         DebugDraw::instance().UpdateEyeView(eyeIndex, glm::inverse(eyeWorld));
     }
-}
-
-static std::pair<glm::vec3, glm::fquat> BuildGameplayCameraPose(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot, OpenXR::EyeSide side) {
-    return BuildCameraPoseFromBase(ResolveGameplayAnchorPosition(gameplayPos), gameplayRot, side);
 }
 
 static void UpdateGameplayReferenceCameraMtx(const glm::fvec3& gameplayPos, const glm::fquat& gameplayRot) {

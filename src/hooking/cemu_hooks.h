@@ -95,6 +95,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_LoadDynamicBool", &hook_LoadDynamicBool);
         osLib_registerHLEFunction("coreinit", "hook_OverrideArrowShotTransform", &hook_OverrideArrowShotTransform);
         osLib_registerHLEFunction("coreinit", "hook_CaptureArrowShootDecision", &hook_CaptureArrowShootDecision);
+        osLib_registerHLEFunction("coreinit", "hook_ArrowFpsScale", &hook_ArrowFpsScale);
         osLib_registerHLEFunction("coreinit", "hook_VisualizeRayCastHits", &hook_VisualizeRayCastHits);
     };
     ~CemuHooks() {
@@ -260,6 +261,7 @@ private:
     static void hook_LoadDynamicBool(PPCInterpreter_t* hCPU);
     static void hook_OverrideArrowShotTransform(PPCInterpreter_t* hCPU);
     static void hook_CaptureArrowShootDecision(PPCInterpreter_t* hCPU);
+    static void hook_ArrowFpsScale(PPCInterpreter_t* hCPU);
 
 public:
     template <typename T>

@@ -98,6 +98,7 @@ static std::mutex s_captureMutex;
 static BowParamSnapshot s_previewSnapshot = {};
 static BowParamActionKind s_lastArrowShootDecisionKind = BowParamActionKind::Unknown;
 static uint64_t s_lastArrowShootDecisionTimestampMs = 0;
+static std::atomic<float> s_arrowVfrScale{1.0f};
 
 static BowParamSnapshot& EnsurePreviewSnapshotLocked();
 static BowParamActionKind ResolveArrowShootDecisionKind(uint32_t callsiteAddress);
@@ -228,6 +229,7 @@ static void RecordBool(const InlineParamBool& boolParam, uint32_t sourceReturnAd
 }
 
 static constexpr float kPreviewOriginForwardOffset = 0.05f;
+static constexpr float kPreviewArcControllerOriginForwardOffset = 0.18f * 5.0;
 static constexpr float kPreviewOriginMaxSnapDistanceSq = 1.0f;
 static constexpr float kPreviewAimDistance = 100.0f;
 static constexpr float kLaunchTargetDistance = 100.0f;
@@ -1026,7 +1028,7 @@ static float ComputeFallTargetSpeed(const BowVisualizationState& launchState, fl
     return fallTargetSpeed;
 }
 
-static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std::array<PreviewPoint, kPresetDefaultMaxFrames + 1>& outPoints, uint32_t& outPointCount, int32_t& outFirstFallIndex) {
+static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std::array<PreviewPoint, kPresetDefaultMaxFrames + 2>& outPoints, uint32_t& outPointCount, int32_t& outFirstFallIndex) {
     outPointCount = 0;
     outFirstFallIndex = -1;
     if (!launchState.hasLaunchOrigin || !launchState.hasLaunchDirection) {
@@ -1044,7 +1046,7 @@ static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std
 
     const glm::vec3 relativeVel = launchState.hasRelativeVel && IsFiniteVec3(launchState.relativeVel) ? launchState.relativeVel : glm::vec3(0.0f);
     const bool hasRelativeVelocity = glm::length2(relativeVel) > 0.000001f;
-    constexpr float vfrScale = kDefaultVfrScale;
+    const float vfrScale = s_arrowVfrScale.load(std::memory_order_relaxed);
     const float atRange = launchState.hasAtRange && std::isfinite(launchState.atRange) ? launchState.atRange : 0.0f;
 
     glm::vec3 position = launchState.launchOrigin;
@@ -1056,7 +1058,7 @@ static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std
     float targetSpeed = launchState.aimSpeed;
     PreviewPhase phase = PreviewPhase::Start;
 
-    outPoints[outPointCount++] = { position, PreviewPhase::Start };
+    outPoints[outPointCount++] = { position, PreviewPhase::Middle };
 
     for (uint32_t frame = 1; frame <= kPresetDefaultMaxFrames && outPointCount < outPoints.size(); frame++) {
         if (phase == PreviewPhase::Start) {
@@ -1199,8 +1201,7 @@ static bool TryBuildBowVisualizationState(BowVisualizationState& outState) {
 
 struct AimingArcCache {
     bool valid = false;
-    uint64_t cachedAtMs = 0;
-    std::array<PreviewPoint, kPresetDefaultMaxFrames + 1> points = {};
+    std::array<PreviewPoint, kPresetDefaultMaxFrames + 2> points = {};
     uint32_t pointCount = 0;
     int32_t firstFallIndex = -1;
     bool hasTargetPos = false;
@@ -1208,105 +1209,125 @@ struct AimingArcCache {
 };
 
 static AimingArcCache s_aimingArcCache = {};
-static constexpr uint64_t kAimingArcCacheLifetimeMs = 60000;
+
+static uint32_t LerpColor(uint32_t a, uint32_t b, float t) {
+    const uint8_t r = (uint8_t)glm::mix((float)(a & 0xFF), (float)(b & 0xFF), t);
+    const uint8_t g = (uint8_t)glm::mix((float)((a >> 8) & 0xFF), (float)((b >> 8) & 0xFF), t);
+    const uint8_t bl = (uint8_t)glm::mix((float)((a >> 16) & 0xFF), (float)((b >> 16) & 0xFF), t);
+    const uint8_t al = (uint8_t)glm::mix((float)((a >> 24) & 0xFF), (float)((b >> 24) & 0xFF), t);
+    return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)bl << 16) | ((uint32_t)al << 24);
+}
+
+static float ComputeArcDistanceFraction(const std::array<PreviewPoint, kPresetDefaultMaxFrames + 2>& points, uint32_t pointCount, uint32_t pointIndex) {
+    if (pointCount < 2 || pointIndex >= pointCount) {
+        return 0.0f;
+    }
+
+    float totalDistance = 0.0f;
+    float pointDistance = 0.0f;
+    for (uint32_t i = 1; i < pointCount; ++i) {
+        const float segmentLength = glm::distance(points[i - 1].position, points[i].position);
+        totalDistance += segmentLength;
+        if (i <= pointIndex) {
+            pointDistance += segmentLength;
+        }
+    }
+
+    if (totalDistance <= 0.000001f) {
+        return 0.0f;
+    }
+
+    return glm::clamp(pointDistance / totalDistance, 0.0f, 1.0f);
+}
+
+static uint32_t ArcGradientColor(float t, float fallFraction) {
+    const uint32_t blue = DebugDrawColor(60, 176, 255, 245);
+    const uint32_t red = DebugDrawColor(255, 52, 36, 245);
+    const uint32_t deepRed = DebugDrawColor(200, 22, 10, 245);
+
+    const float fadeIn = glm::smoothstep(0.0f, 0.008f, t);
+
+    uint32_t color;
+    if (fallFraction <= 0.0f || t < fallFraction) {
+        color = blue;
+    }
+    else if (t > fallFraction + 0.08f) {
+        const float redProgress = (t - fallFraction - 0.08f) / (1.0f - fallFraction - 0.08f);
+        color = LerpColor(red, deepRed, glm::smoothstep(0.0f, 0.7f, redProgress));
+    }
+    else {
+        const float trans = glm::smoothstep(fallFraction, fallFraction + 0.08f, t);
+        color = LerpColor(blue, red, trans);
+    }
+
+    const uint8_t a = (uint8_t)((float)((color >> 24) & 0xFF) * fadeIn);
+    return (color & 0x00FFFFFF) | ((uint32_t)a << 24);
+}
 
 static void DrawAimingArc(const AimingArcCache& cache) {
-    const uint32_t launchColor = DebugDrawColor(208, 255, 255, 144);
-    const uint32_t flightColor = DebugDrawColor(112, 242, 255, 132);
-    const uint32_t fallColor = DebugDrawColor(88, 196, 255, 120);
-    const uint32_t markerColor = DebugDrawColor(168, 239, 255, 156);
-    const uint32_t targetColor = DebugDrawColor(116, 156, 255, 120);
-    constexpr uint32_t kPreviewSampleDotStride = 8;
+    const uint32_t targetColor = DebugDrawColor(100, 180, 255, 100);
+    const uint32_t fallMarkerColor = DebugDrawColor(255, 52, 36, 200);
+    constexpr float kThickness = 3.2f;
     constexpr bool kPreviewXray = false;
 
-    auto getPhaseColor = [&](PreviewPhase phase) {
-        return phase == PreviewPhase::Start ? launchColor : (phase == PreviewPhase::Fall ? fallColor : flightColor);
-    };
-
-    auto getPhaseThickness = [&](PreviewPhase phase) {
-        return phase == PreviewPhase::Start ? 3.4f : 2.6f;
-    };
-
-    DebugDraw::instance().Dot(cache.points[0].position, 0.065f, markerColor, kPreviewXray);
-    if (cache.pointCount > 1) {
-        DebugDraw::instance().Dot(cache.points[1].position, 0.05f, launchColor, kPreviewXray);
-    }
-
     if (cache.pointCount >= 2) {
-        std::array<glm::vec3, kPresetDefaultMaxFrames + 1> phasePoints = {};
-        uint32_t phasePointCount = 0;
-        PreviewPhase activePhase = cache.points[1].phase;
-        phasePoints[phasePointCount++] = cache.points[0].position;
-
-        for (uint32_t index = 1; index < cache.pointCount; ++index) {
-            const PreviewPhase phase = cache.points[index].phase;
-            if (phase != activePhase) {
-                if (phasePointCount >= 2) {
-                    DebugDraw::instance().Polyline(std::span<const glm::vec3>(phasePoints.data(), phasePointCount), getPhaseColor(activePhase), getPhaseThickness(activePhase), kPreviewXray);
-                }
-                phasePoints[0] = cache.points[index - 1].position;
-                phasePointCount = 1;
-                activePhase = phase;
-            }
-
-            phasePoints[phasePointCount++] = cache.points[index].position;
+        std::array<glm::vec3, kPresetDefaultMaxFrames + 2> positions = {};
+        std::array<uint32_t, kPresetDefaultMaxFrames + 2> colors = {};
+        const float fallFraction = cache.firstFallIndex >= 0 ? ComputeArcDistanceFraction(cache.points, cache.pointCount, std::min((uint32_t)cache.firstFallIndex, cache.pointCount - 1)) : -1.0f;
+        for (uint32_t i = 0; i < cache.pointCount; ++i) {
+            positions[i] = cache.points[i].position;
+            colors[i] = ArcGradientColor(ComputeArcDistanceFraction(cache.points, cache.pointCount, i), fallFraction);
         }
+        DebugDraw::instance().Polyline(
+            std::span<const glm::vec3>(positions.data(), cache.pointCount),
+            std::span<const uint32_t>(colors.data(), cache.pointCount),
+            kThickness,
+            kPreviewXray
+        );
 
-        if (phasePointCount >= 2) {
-            DebugDraw::instance().Polyline(std::span<const glm::vec3>(phasePoints.data(), phasePointCount), getPhaseColor(activePhase), getPhaseThickness(activePhase), kPreviewXray);
-        }
-
-        for (uint32_t index = 1; index < cache.pointCount; ++index) {
-            const PreviewPhase phase = cache.points[index].phase;
-            const uint32_t color = getPhaseColor(phase);
-            if ((index % kPreviewSampleDotStride) == 0 || index == cache.pointCount - 1) {
-                DebugDraw::instance().Dot(cache.points[index].position, phase == PreviewPhase::Fall ? 0.032f : 0.028f, color, kPreviewXray);
-            }
+        if (cache.firstFallIndex >= 0 && (uint32_t)cache.firstFallIndex < cache.pointCount) {
+            DebugDraw::instance().Sphere(cache.points[cache.firstFallIndex].position, 0.12f, fallMarkerColor, 0, kPreviewXray);
         }
     }
 
-    const PreviewPhase finalPhase = cache.points[cache.pointCount - 1].phase;
-    DebugDraw::instance().Dot(cache.points[cache.pointCount - 1].position, 0.05f, getPhaseColor(finalPhase), kPreviewXray);
-    if (cache.firstFallIndex > 0 && (uint32_t)cache.firstFallIndex < cache.pointCount) {
-        DebugDraw::instance().Dot(cache.points[(uint32_t)cache.firstFallIndex].position, 0.06f, fallColor, kPreviewXray);
-    }
     if (cache.hasTargetPos) {
         DebugDraw::instance().Sphere(cache.targetPos, 0.16f, targetColor, 0, kPreviewXray);
     }
 }
 
 void QueueBowAimingArcPreview(bool isBowAimingActive) {
-    if (isBowAimingActive) {
-        BowVisualizationState launchState = {};
-        if (TryBuildBowVisualizationState(launchState) && launchState.hasLaunchOrigin && launchState.hasLaunchDirection && launchState.actionKind == BowParamActionKind::Move) {
-            AimingArcCache cache = {};
-            if (BuildPreviewTrajectory(launchState, cache.points, cache.pointCount, cache.firstFallIndex)) {
-                cache.valid = true;
-                cache.cachedAtMs = GetTickCount64();
-                cache.hasTargetPos = launchState.hasTargetPos && !launchState.usedSyntheticTargetPos;
-                cache.targetPos = launchState.targetPos;
-                s_aimingArcCache = cache;
-                Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Rendering {} arc points (firstFall={}, draw={:.3f}, atRange={:.1f})", cache.pointCount, cache.firstFallIndex, launchState.drawAmount, launchState.atRange);
-            }
-            else {
-                Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview FAILED: BuildPreviewTrajectory (launchSpeed={:.3f})", launchState.launchSpeed);
-            }
-        }
-        else if (launchState.actionKind != BowParamActionKind::Move) {
-            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview SKIPPED: actionKind is {} (not Move)", GetBowParamActionKindName(launchState.actionKind));
+    const bool hasHeldBow = GetHeldLeftBowWeaponPtr() != 0;
+    if (!isBowAimingActive || !hasHeldBow) {
+        s_aimingArcCache = {};
+        return;
+    }
+
+    BowVisualizationState launchState = {};
+    if (TryBuildBowVisualizationState(launchState) && launchState.hasLaunchOrigin && launchState.hasLaunchDirection && launchState.actionKind == BowParamActionKind::Move) {
+        AimingArcCache cache = {};
+        if (BuildPreviewTrajectory(launchState, cache.points, cache.pointCount, cache.firstFallIndex)) {
+            cache.valid = true;
+            cache.hasTargetPos = launchState.hasTargetPos && !launchState.usedSyntheticTargetPos;
+            cache.targetPos = launchState.targetPos;
+            s_aimingArcCache = cache;
+            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Rendering {} arc points (firstFall={}, draw={:.3f}, atRange={:.1f})", cache.pointCount, cache.firstFallIndex, launchState.drawAmount, launchState.atRange);
         }
         else {
-            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview FAILED: TryBuildBowVisualizationState or pose missing (valid={}, hasOrigin={}, hasDir={})", launchState.valid, launchState.hasLaunchOrigin, launchState.hasLaunchDirection);
+            s_aimingArcCache = {};
+            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview FAILED: BuildPreviewTrajectory (launchSpeed={:.3f})", launchState.launchSpeed);
         }
+    }
+    else if (launchState.actionKind != BowParamActionKind::Move) {
+        s_aimingArcCache = {};
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview SKIPPED: actionKind is {} (not Move)", GetBowParamActionKindName(launchState.actionKind));
+    }
+    else {
+        s_aimingArcCache = {};
+        Log::print<ARROW_SHOT_CAPTURE>("[BowViz] QueueBowAimingArcPreview FAILED: TryBuildBowVisualizationState or pose missing (valid={}, hasOrigin={}, hasDir={})", launchState.valid, launchState.hasLaunchOrigin, launchState.hasLaunchDirection);
     }
 
     if (s_aimingArcCache.valid) {
-        const uint64_t nowMs = GetTickCount64();
-        if (isBowAimingActive || (nowMs >= s_aimingArcCache.cachedAtMs && nowMs - s_aimingArcCache.cachedAtMs < kAimingArcCacheLifetimeMs)) {
-            DrawAimingArc(s_aimingArcCache);
-            return;
-        }
-        s_aimingArcCache = {};
+        DrawAimingArc(s_aimingArcCache);
     }
 }
 
@@ -1366,5 +1387,18 @@ void CemuHooks::hook_OverrideArrowShotTransform(PPCInterpreter_t* hCPU) {
             );
             writeMemory(hCPU->gpr[4], &transform);
         }
+    }
+}
+
+void CemuHooks::hook_ArrowFpsScale(PPCInterpreter_t* hCPU) {
+    const float fpr0 = hCPU->fpr[0].fp0;
+
+    float storeValue = fpr0;
+    writeMemoryBE(hCPU->gpr[30] + 0x1C, &storeValue);
+
+    hCPU->instructionPointer = 0x03793388;
+
+    if (std::isfinite(fpr0) && fpr0 > 0.0f && fpr0 <= 2.0f) {
+        s_arrowVfrScale.store(fpr0, std::memory_order_relaxed);
     }
 }
