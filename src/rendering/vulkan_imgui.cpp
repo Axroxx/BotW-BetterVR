@@ -25,8 +25,8 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     ImFontConfig fontCfg{};
-    fontCfg.OversampleH = 8;
-    fontCfg.OversampleV = 8;
+    fontCfg.OversampleH = 2;
+    fontCfg.OversampleV = 2;
     fontCfg.FontDataOwnedByAtlas = false;
     ImFont* textFont = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(roboto_compressed_data, roboto_compressed_size, 16.0f, &fontCfg);
 
@@ -35,8 +35,8 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     iconCfg.PixelSnapH = true;
     iconCfg.GlyphMinAdvanceX = 16.0f;
     iconCfg.GlyphOffset = ImVec2(0.0f, 2.0f);
-    iconCfg.OversampleH = 8;
-    iconCfg.OversampleV = 8;
+    iconCfg.OversampleH = 2;
+    iconCfg.OversampleV = 2;
     iconCfg.FontDataOwnedByAtlas = false;
     static const ImWchar icon_ranges[] = { ICON_MIN_KI, ICON_MAX_16_KI, 0 };
     iconCfg.GlyphRanges = icon_ranges;
