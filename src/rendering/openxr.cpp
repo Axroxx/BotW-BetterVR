@@ -68,7 +68,7 @@ OpenXR::OpenXR() {
     xrInstanceCreateInfo.enabledExtensionNames = enabledExtensions.data();
     xrInstanceCreateInfo.enabledApiLayerCount = 0;
     xrInstanceCreateInfo.enabledApiLayerNames = NULL;
-    xrInstanceCreateInfo.applicationInfo = { "BetterVR", 1, "Cemu", 1, XR_API_VERSION_1_0 };
+    xrInstanceCreateInfo.applicationInfo = { "BetterVR", 1, "Cemu", 1, XR_API_VERSION_1_1 };
     {
         XrResult result = XR_ERROR_RUNTIME_FAILURE;
         for (int i = 0; i < 3; i++) {
@@ -297,131 +297,37 @@ void OpenXR::CreateActions() {
     }
 
     {
-        std::array suggestedBindings = {
-            // === gameplay suggestions ===
-            XrActionSuggestedBinding{ .action = m_inGameGripPoseAction, .binding = GetXRPath("/user/hand/left/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameGripPoseAction, .binding = GetXRPath("/user/hand/right/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameAimPoseAction, .binding = GetXRPath("/user/hand/left/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameAimPoseAction, .binding = GetXRPath("/user/hand/right/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_crouch_scopeAction, .binding = GetXRPath("/user/hand/left/input/menu/click") },
+        ControllerActionBindings bindings;
+        bindings.inGameGripPoseAction = m_inGameGripPoseAction;
+        bindings.inGameAimPoseAction = m_inGameAimPoseAction;
+        bindings.inMenuGripPoseAction = m_inMenuGripPoseAction;
+        bindings.inMenuAimPoseAction = m_inMenuAimPoseAction;
+        bindings.moveAction = m_moveAction;
+        bindings.cameraAction = m_cameraAction;
+        bindings.grab_interactAction = m_grab_interactAction;
+        bindings.jumpAction = m_jumpAction;
+        bindings.run_interactAction = m_run_interactAction;
+        bindings.useRune_dpadMenu_Action = m_useRune_dpadMenu_Action;
+        bindings.inGame_modMenuAction = m_inGame_modMenuAction;
+        bindings.useLeftItemAction = m_useLeftItemAction;
+        bindings.useRightItemAction = m_useRightItemAction;
+        bindings.crouch_scopeAction = m_crouch_scopeAction;
+        bindings.inGame_inventory_mapAction = m_inGame_inventory_mapAction;
+        bindings.rumbleAction = m_rumbleAction;
+        bindings.scrollAction = m_scrollAction;
+        bindings.navigateAction = m_navigateAction;
+        bindings.selectAction = m_selectAction;
+        bindings.backAction = m_backAction;
+        bindings.sortAction = m_sortAction;
+        bindings.holdAction = m_holdAction;
+        bindings.leftGripAction = m_leftGripAction;
+        bindings.rightGripAction = m_rightGripAction;
+        bindings.leftTriggerAction = m_leftTriggerAction;
+        bindings.rightTriggerAction = m_rightTriggerAction;
+        bindings.inMenu_modMenuAction = m_inMenu_modMenuAction;
+        bindings.inMenu_inventory_mapAction = m_inMenu_inventory_mapAction;
 
-            XrActionSuggestedBinding{ .action = m_grab_interactAction, .binding = GetXRPath("/user/hand/left/input/select/click") },
-            XrActionSuggestedBinding{ .action = m_grab_interactAction, .binding = GetXRPath("/user/hand/right/input/select/click") },
-
-            // === menu suggestions ===
-            //XrActionSuggestedBinding{ .action = m_inMenu_mapAction, .binding = GetXRPath("/user/hand/right/input/menu/click") },
-            //XrActionSuggestedBinding{ .action = m_selectAction, .binding = GetXRPath("/user/hand/right/input/select/click") },
-            XrActionSuggestedBinding{ .action = m_backAction, .binding = GetXRPath("/user/hand/right/input/menu/click") },
-            XrActionSuggestedBinding{ .action = m_sortAction, .binding = GetXRPath("/user/hand/left/input/select/click") },
-            XrActionSuggestedBinding{ .action = m_holdAction, .binding = GetXRPath("/user/hand/left/input/menu/click") }
-        };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetXRPath("/interaction_profiles/khr/simple_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(m_instance, &suggestedBindingsInfo), "Failed to suggest simple controller profile bindings!");
-    }
-
-    {
-        std::array suggestedBindings = {
-            // === gameplay suggestions ===
-            XrActionSuggestedBinding{ .action = m_inGameGripPoseAction, .binding = GetXRPath("/user/hand/left/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameGripPoseAction, .binding = GetXRPath("/user/hand/right/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameAimPoseAction, .binding = GetXRPath("/user/hand/left/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameAimPoseAction, .binding = GetXRPath("/user/hand/right/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_moveAction, .binding = GetXRPath("/user/hand/left/input/thumbstick") },
-            XrActionSuggestedBinding{ .action = m_cameraAction, .binding = GetXRPath("/user/hand/right/input/thumbstick") },
-
-            XrActionSuggestedBinding{ .action = m_grab_interactAction, .binding = GetXRPath("/user/hand/left/input/squeeze/value") },
-            XrActionSuggestedBinding{ .action = m_grab_interactAction, .binding = GetXRPath("/user/hand/right/input/squeeze/value") },
-            XrActionSuggestedBinding{ .action = m_jumpAction, .binding = GetXRPath("/user/hand/right/input/b/click") },
-            XrActionSuggestedBinding{ .action = m_run_interactAction, .binding = GetXRPath("/user/hand/right/input/a/click") },
-            XrActionSuggestedBinding{ .action = m_useRune_dpadMenu_Action, .binding = GetXRPath("/user/hand/left/input/y/click") },
-            XrActionSuggestedBinding{ .action = m_inGame_modMenuAction, .binding = GetXRPath("/user/hand/left/input/x/click") },
-
-            XrActionSuggestedBinding{ .action = m_useLeftItemAction, .binding = GetXRPath("/user/hand/left/input/trigger/value") },
-            XrActionSuggestedBinding{ .action = m_useRightItemAction, .binding = GetXRPath("/user/hand/right/input/trigger/value") },
-
-            XrActionSuggestedBinding{ .action = m_crouch_scopeAction, .binding = GetXRPath("/user/hand/left/input/thumbstick/click") },
-            XrActionSuggestedBinding{ .action = m_inGame_inventory_mapAction, .binding = GetXRPath("/user/hand/right/input/thumbstick/click") },
-
-            XrActionSuggestedBinding{ .action = m_rumbleAction, .binding = GetXRPath("/user/hand/left/output/haptic") },
-            XrActionSuggestedBinding{ .action = m_rumbleAction, .binding = GetXRPath("/user/hand/right/output/haptic") },
-
-            // === menu suggestions ===
-            XrActionSuggestedBinding{ .action = m_inMenuGripPoseAction, .binding = GetXRPath("/user/hand/left/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inMenuGripPoseAction, .binding = GetXRPath("/user/hand/right/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inMenuAimPoseAction, .binding = GetXRPath("/user/hand/left/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_inMenuAimPoseAction, .binding = GetXRPath("/user/hand/right/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_scrollAction, .binding = GetXRPath("/user/hand/right/input/thumbstick") },
-            XrActionSuggestedBinding{ .action = m_navigateAction, .binding = GetXRPath("/user/hand/left/input/thumbstick") },
-            XrActionSuggestedBinding{ .action = m_selectAction, .binding = GetXRPath("/user/hand/right/input/a/click") },
-            XrActionSuggestedBinding{ .action = m_backAction, .binding = GetXRPath("/user/hand/right/input/b/click") },
-            XrActionSuggestedBinding{ .action = m_sortAction, .binding = GetXRPath("/user/hand/left/input/y/click") },
-            XrActionSuggestedBinding{ .action = m_holdAction, .binding = GetXRPath("/user/hand/left/input/x/click") },
-            XrActionSuggestedBinding{ .action = m_leftGripAction, .binding = GetXRPath("/user/hand/left/input/squeeze/value") },
-            XrActionSuggestedBinding{ .action = m_rightGripAction, .binding = GetXRPath("/user/hand/right/input/squeeze/value") },
-            XrActionSuggestedBinding{ .action = m_leftTriggerAction, .binding = GetXRPath("/user/hand/left/input/trigger/value") },
-            XrActionSuggestedBinding{ .action = m_rightTriggerAction, .binding = GetXRPath("/user/hand/right/input/trigger/value") },
-            XrActionSuggestedBinding{ .action = m_inMenu_inventory_mapAction, .binding = GetXRPath("/user/hand/right/input/thumbstick/click") },
-            XrActionSuggestedBinding{ .action = m_inMenu_modMenuAction, .binding = GetXRPath("/user/hand/left/input/x/click") },
-        };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetXRPath("/interaction_profiles/oculus/touch_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(m_instance, &suggestedBindingsInfo), "Failed to suggest Oculus Touch Controller Profile bindings!");
-    }
-
-    {
-        std::array suggestedBindings = {
-            // === gameplay suggestions ===
-            XrActionSuggestedBinding{ .action = m_inGameGripPoseAction, .binding = GetXRPath("/user/hand/left/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameGripPoseAction, .binding = GetXRPath("/user/hand/right/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameAimPoseAction, .binding = GetXRPath("/user/hand/left/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_inGameAimPoseAction, .binding = GetXRPath("/user/hand/right/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_moveAction, .binding = GetXRPath("/user/hand/left/input/thumbstick") },
-            XrActionSuggestedBinding{ .action = m_cameraAction, .binding = GetXRPath("/user/hand/right/input/thumbstick") },
-
-            XrActionSuggestedBinding{ .action = m_grab_interactAction, .binding = GetXRPath("/user/hand/left/input/squeeze/force") },
-            XrActionSuggestedBinding{ .action = m_grab_interactAction, .binding = GetXRPath("/user/hand/right/input/squeeze/force") },
-            XrActionSuggestedBinding{ .action = m_jumpAction, .binding = GetXRPath("/user/hand/right/input/b/click") },
-            XrActionSuggestedBinding{ .action = m_run_interactAction, .binding = GetXRPath("/user/hand/right/input/a/click") },
-            XrActionSuggestedBinding{ .action = m_useRune_dpadMenu_Action, .binding = GetXRPath("/user/hand/left/input/b/click") },
-            XrActionSuggestedBinding{ .action = m_inGame_modMenuAction, .binding = GetXRPath("/user/hand/left/input/a/click") },
-
-            XrActionSuggestedBinding{ .action = m_useLeftItemAction, .binding = GetXRPath("/user/hand/left/input/trigger/value") },
-            XrActionSuggestedBinding{ .action = m_useRightItemAction, .binding = GetXRPath("/user/hand/right/input/trigger/value") },
-
-            XrActionSuggestedBinding{ .action = m_crouch_scopeAction, .binding = GetXRPath("/user/hand/left/input/thumbstick/click") },
-            XrActionSuggestedBinding{ .action = m_inGame_inventory_mapAction, .binding = GetXRPath("/user/hand/right/input/thumbstick/click") },
-
-            XrActionSuggestedBinding{ .action = m_rumbleAction, .binding = GetXRPath("/user/hand/left/output/haptic") },
-            XrActionSuggestedBinding{ .action = m_rumbleAction, .binding = GetXRPath("/user/hand/right/output/haptic") },
-
-            // === menu suggestions ===
-            XrActionSuggestedBinding{ .action = m_inMenuGripPoseAction, .binding = GetXRPath("/user/hand/left/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inMenuGripPoseAction, .binding = GetXRPath("/user/hand/right/input/grip/pose") },
-            XrActionSuggestedBinding{ .action = m_inMenuAimPoseAction, .binding = GetXRPath("/user/hand/left/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_inMenuAimPoseAction, .binding = GetXRPath("/user/hand/right/input/aim/pose") },
-            XrActionSuggestedBinding{ .action = m_scrollAction, .binding = GetXRPath("/user/hand/right/input/thumbstick") },
-            XrActionSuggestedBinding{ .action = m_navigateAction, .binding = GetXRPath("/user/hand/left/input/thumbstick") },
-            XrActionSuggestedBinding{ .action = m_selectAction, .binding = GetXRPath("/user/hand/right/input/a/click") },
-            XrActionSuggestedBinding{ .action = m_backAction, .binding = GetXRPath("/user/hand/right/input/b/click") },
-            XrActionSuggestedBinding{ .action = m_sortAction, .binding = GetXRPath("/user/hand/left/input/b/click") },
-            XrActionSuggestedBinding{ .action = m_holdAction, .binding = GetXRPath("/user/hand/left/input/a/click") },
-            XrActionSuggestedBinding{ .action = m_leftGripAction, .binding = GetXRPath("/user/hand/left/input/squeeze/force") },
-            XrActionSuggestedBinding{ .action = m_rightGripAction, .binding = GetXRPath("/user/hand/right/input/squeeze/force") },
-            XrActionSuggestedBinding{ .action = m_leftTriggerAction, .binding = GetXRPath("/user/hand/left/input/trigger/value") },
-            XrActionSuggestedBinding{ .action = m_rightTriggerAction, .binding = GetXRPath("/user/hand/right/input/trigger/value") },
-            XrActionSuggestedBinding{ .action = m_inMenu_inventory_mapAction, .binding = GetXRPath("/user/hand/right/input/thumbstick/click") },
-            XrActionSuggestedBinding{ .action = m_inMenu_modMenuAction, .binding = GetXRPath("/user/hand/left/input/a/click") },
-        };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetXRPath("/interaction_profiles/valve/index_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(m_instance, &suggestedBindingsInfo), "Failed to suggest Valve Index Controller Profile bindings!");
+        SuggestControllerBindings(m_instance, bindings);
     }
 
     XrSessionActionSetsAttachInfo attachInfo = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
@@ -455,6 +361,8 @@ void OpenXR::CreateActions() {
     // initialize rumble manager
     m_rumbleManager = std::make_unique<RumbleManager>(m_session, m_rumbleAction);
     m_rumbleManager.get()->initializeXrPathsAndStartTime(m_instance);
+
+    m_capabilities.activeControllerType = DetectActiveControllerType(m_instance, m_session);
 }
 
 void CheckButtonState(bool buttonPressed, ButtonState& buttonState) {

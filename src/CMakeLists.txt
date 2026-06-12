@@ -16,6 +16,7 @@ target_sources(BetterVR_Layer PUBLIC
     ${CMAKE_SOURCE_DIR}/src/utils/game_utils.h
     ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/logger.h
+    ${CMAKE_SOURCE_DIR}/src/utils/controller_bindings.h
     ${CMAKE_SOURCE_DIR}/src/utils/mod_settings.h
     ${CMAKE_SOURCE_DIR}/src/utils/profiler.h
     ${CMAKE_SOURCE_DIR}/src/utils/debug_draw.h

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hooking/rumble.h"
+#include "utils/controller_bindings.h"
 
 class OpenXR {
     friend class RND_Renderer;
@@ -22,6 +23,7 @@ public:
         bool supportsMutatableFOV;
         bool isOculusLinkRuntime;
         bool isMetaSimulator;
+        ControllerType activeControllerType = ControllerType::Unknown;
     } m_capabilities = {};
 
     struct InputState {

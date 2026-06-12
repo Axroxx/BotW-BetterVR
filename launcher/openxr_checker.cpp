@@ -71,7 +71,7 @@ OpenXRProbeResult ProbeOpenXR() {
     OpenXRProbeResult result{};
 
     XrInstanceCreateInfo createInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
-    createInfo.applicationInfo = { "BetterVR", 1, "Cemu", 1, XR_API_VERSION_1_0 };
+    createInfo.applicationInfo = { "BetterVR", 1, "Cemu", 1, XR_API_VERSION_1_1 };
 
     XrInstance instance = XR_NULL_HANDLE;
     const XrResult createResult = xrCreateInstance(&createInfo, &instance);

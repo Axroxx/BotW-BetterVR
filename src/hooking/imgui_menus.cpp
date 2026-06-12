@@ -1133,6 +1133,21 @@ void RND_Renderer::ImGuiOverlay::DrawCustomAttackSensitivityTab(const ImVec2& wi
     ImGui::EndTabItem();
 }
 
+static const char* GetControllerModMenuPrompt() {
+    auto& caps = VRManager::instance().XR->m_capabilities;
+    switch (caps.activeControllerType) {
+    case ControllerType::OculusTouch:
+    case ControllerType::Pico4:
+    case ControllerType::HPReverbG2:
+    case ControllerType::ViveCosmos:
+        return "Hold the " ICON_KI_BUTTON_X " button on your left controller for 1 second to open the mod menu.";
+    case ControllerType::ValveIndex:
+        return "Hold the " ICON_KI_BUTTON_A " button on your left controller for 1 second to open the mod menu.";
+    default:
+        return "Hold the " ICON_KI_BUTTON_START " button on your gamepad for 1 second to open the mod menu.";
+    }
+}
+
 static void DrawTutorialPromptAndControllerVerification(bool isMenuOpen) {
     auto& settings = GetSettings();
 
@@ -1160,13 +1175,12 @@ static void DrawTutorialPromptAndControllerVerification(bool isMenuOpen) {
             ImGui::Text("To get started, open the BetterVR menu to configure various settings and to see the controller guide.");
             ImGui::Text("This is where you can adjust the camera mode, player height, and other options to suit your preferences.");
             ImGui::Spacing();
-            ImGui::Text("You can always access this menu by holding the " ICON_KI_BUTTON_X " for 1 second.");
-            ImGui::Text("(Alternatively, for Valve Index Controllers, hold " ICON_KI_BUTTON_A ". For regular game controllers, hold " ICON_KI_BUTTON_START " instead)");
+            ImGui::Text("%s", GetControllerModMenuPrompt());
             ImGui::Text("");
             ImGui::Text("TO CONTINUE: Try holding the button and open the menu");
         }
         else {
-            ImGui::Text("Hold " ICON_KI_BUTTON_X " (or " ICON_KI_BUTTON_A " for Valve Index Controllers or " ICON_KI_BUTTON_START " for Xbox/PlayStation and similar controllers) to open mod settings");
+            ImGui::Text("%s", GetControllerModMenuPrompt());
         }
     }
     ImGui::End();
