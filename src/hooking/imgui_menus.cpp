@@ -816,6 +816,11 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
         DrawSettingRow(windowWidth, "Stick Direction Threshold", [&]() {
             settings.axisThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 0.9f);
         });
+
+        ImGui::Spacing();
+        DrawSettingRow(windowWidth, "Walking Direction", [&]() {
+            settings.walkingDirection.AddComboToGUI(changed, ModSettings::toDisplayString);
+        });
     }
     else {
         ImGui::Text("");

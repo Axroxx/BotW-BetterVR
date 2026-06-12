@@ -548,6 +548,11 @@ enum class PerformanceOverlayMode : int32_t {
     WINDOW_AND_VR_WITH_PROFILER = 3,
 };
 
+enum class WalkingDirection : int32_t {
+    CAMERA = 0,
+    CONTROLLER = 1,
+};
+
 enum class SwingSensitivity : int32_t {
     SWING_EASY = 0,
     SWING_NORMAL = 1,
@@ -683,6 +688,28 @@ struct ModSettings {
         }
     }
 
+    static const char* toString(WalkingDirection walkingDirection) {
+        switch (walkingDirection) {
+            case WalkingDirection::CAMERA:
+                return "CAMERA";
+            case WalkingDirection::CONTROLLER:
+                return "CONTROLLER";
+            default:
+                return "";
+        }
+    }
+
+    static const char* toDisplayString(WalkingDirection walkingDirection) {
+        switch (walkingDirection) {
+            case WalkingDirection::CAMERA:
+                return "Camera / Headset";
+            case WalkingDirection::CONTROLLER:
+                return "Controller";
+            default:
+                return "";
+        }
+    }
+
     static const char* toString(SwingSensitivity sensitivity) {
         switch (sensitivity) {
             case SwingSensitivity::SWING_EASY:
@@ -742,6 +769,7 @@ struct ModSettings {
     // Input settings
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
     FloatSetting<float> stickDeadzone = FloatSetting<float>("StickDeadzone", kDefaultStickDeadzone, 0.0f, 1.0f);
+    EnumSetting<WalkingDirection> walkingDirection = EnumSetting<WalkingDirection>("WalkingDirection", WalkingDirection::CAMERA, ModSettings::toString, { WalkingDirection::CAMERA, WalkingDirection::CONTROLLER });
     EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_EASY, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_CUSTOM });
     FloatSetting<float> customStabSpeedThreshold = FloatSetting<float>("CustomStabSpeedThreshold", 0.05f, 0.01f, 0.50f);
     FloatSetting<float> customStabAccThreshold = FloatSetting<float>("CustomStabAccThreshold", 7.0f, 1.0f, 15.0f);
@@ -786,6 +814,7 @@ struct ModSettings {
             &bootDirectlyTitleId,
             &axisThreshold,
             &stickDeadzone,
+            &walkingDirection,
             &swingSensitivity,
             &customStabSpeedThreshold,
             &customStabAccThreshold,
@@ -846,6 +875,7 @@ struct ModSettings {
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
+    WalkingDirection GetWalkingDirection() const { return walkingDirection; }
     float GetWeaponDamageOutputScale() const { return GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM ? customDamageOutputScale : 1.0f; }
 
     bool IsDebuggingToolsEnabled() const;
@@ -874,6 +904,7 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Stick Direction Threshold: {}\n", float(axisThreshold));
         std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
         std::format_to(std::back_inserter(buffer), " - Weapon Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
+        std::format_to(std::back_inserter(buffer), " - Walking Direction: {}\n", toDisplayString(GetWalkingDirection()));
         return buffer;
     }
 };

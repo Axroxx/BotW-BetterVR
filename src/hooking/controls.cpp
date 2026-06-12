@@ -1024,6 +1024,26 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
     applyDeadzone(leftStickSource.currentState);
     applyDeadzone(rightStickSource.currentState);
 
+    if (gameState.in_game && CemuHooks::IsFirstPerson() && GetSettings().GetWalkingDirection() == WalkingDirection::CONTROLLER) {
+        const auto headsetPose = renderer->GetMiddlePose();
+        const auto& leftPoseLoc = inputs.shared.poseLocation[OpenXR::EyeSide::LEFT];
+        if (headsetPose.has_value() && (leftPoseLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+            const glm::fquat headsetQuat = glm::quat_cast(glm::fmat3(*headsetPose));
+            const glm::fquat controllerQuat = ToGLM(leftPoseLoc.pose.orientation);
+            const glm::fvec3 headsetFwd = headsetQuat * glm::fvec3(0.0f, 0.0f, -1.0f);
+            const glm::fvec3 controllerFwd = controllerQuat * glm::fvec3(0.0f, 0.0f, -1.0f);
+            const float headsetAngle = std::atan2(headsetFwd.x, headsetFwd.z);
+            const float controllerAngle = std::atan2(controllerFwd.x, controllerFwd.z);
+            const float rotationAngle = controllerAngle - headsetAngle;
+            const float cosA = std::cos(rotationAngle);
+            const float sinA = std::sin(rotationAngle);
+            const float newX = leftStickSource.currentState.x * cosA - leftStickSource.currentState.y * sinA;
+            const float newY = leftStickSource.currentState.x * sinA + leftStickSource.currentState.y * cosA;
+            leftStickSource.currentState.x = newX;
+            leftStickSource.currentState.y = newY;
+        }
+    }
+
     //Delay to wait before allowing specific inputs again
     constexpr std::chrono::milliseconds delay{ 400 };
     const auto now = std::chrono::steady_clock::now();
