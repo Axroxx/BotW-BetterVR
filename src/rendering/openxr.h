@@ -23,6 +23,9 @@ public:
         bool supportsMutatableFOV;
         bool isOculusLinkRuntime;
         bool isMetaSimulator;
+        bool supportsPicoController;
+        bool supportsCosmosController;
+        bool supportsHPMixedRealityController;
         ControllerType activeControllerType = ControllerType::Unknown;
     } m_capabilities = {};
 

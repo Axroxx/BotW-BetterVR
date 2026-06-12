@@ -47,7 +47,7 @@ static XrPath GetPath(XrInstance instance, const char* str) {
     return path;
 }
 
-inline void SuggestControllerBindings(XrInstance instance, const ControllerActionBindings& a) {
+inline void SuggestControllerBindings(XrInstance instance, const ControllerActionBindings& a, bool enablePicoBindings = true, bool enableCosmosBindings = true, bool enableHPMixedRealityBindings = true) {
     {
         std::array suggestedBindings = {
             // === gameplay suggestions ===
@@ -174,7 +174,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
         checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest Valve Index Controller Profile bindings!");
     }
 
-    {
+    if (enablePicoBindings) {
         std::array suggestedBindings = {
             // === gameplay suggestions ===
             XrActionSuggestedBinding{ .action = a.inGameGripPoseAction, .binding = GetPath(instance, "/user/hand/left/input/grip/pose") },
@@ -225,7 +225,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
         checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest Pico 4 Controller Profile bindings!");
     }
 
-    {
+    if (enableHPMixedRealityBindings) {
         std::array suggestedBindings = {
             // === gameplay suggestions ===
             XrActionSuggestedBinding{ .action = a.inGameGripPoseAction, .binding = GetPath(instance, "/user/hand/left/input/grip/pose") },
@@ -276,7 +276,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
         checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest HP Reverb G2 Controller Profile bindings!");
     }
 
-    {
+    if (enableCosmosBindings) {
         std::array suggestedBindings = {
             // === gameplay suggestions ===
             XrActionSuggestedBinding{ .action = a.inGameGripPoseAction, .binding = GetPath(instance, "/user/hand/left/input/grip/pose") },

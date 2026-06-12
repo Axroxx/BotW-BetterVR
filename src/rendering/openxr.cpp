@@ -42,6 +42,15 @@ OpenXR::OpenXR() {
             debugUtilsSupported = Log::isLogTypeEnabled<XR_DEBUGUTILS>();
 #endif
         }
+        else if (strcmp(extensionProperties.extensionName, XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME) == 0) {
+            m_capabilities.supportsPicoController = true;
+        }
+        else if (strcmp(extensionProperties.extensionName, XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME) == 0) {
+            m_capabilities.supportsCosmosController = true;
+        }
+        else if (strcmp(extensionProperties.extensionName, XR_EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME) == 0) {
+            m_capabilities.supportsHPMixedRealityController = true;
+        }
     }
 
     if (!d3d12Supported) {
@@ -61,6 +70,9 @@ OpenXR::OpenXR() {
 
     std::vector<const char*> enabledExtensions = { XR_KHR_D3D12_ENABLE_EXTENSION_NAME, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME };
     if (debugUtilsSupported) enabledExtensions.emplace_back(XR_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (m_capabilities.supportsPicoController) enabledExtensions.emplace_back(XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME);
+    if (m_capabilities.supportsCosmosController) enabledExtensions.emplace_back(XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME);
+    if (m_capabilities.supportsHPMixedRealityController) enabledExtensions.emplace_back(XR_EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME);
 
     XrInstanceCreateInfo xrInstanceCreateInfo = { XR_TYPE_INSTANCE_CREATE_INFO };
     xrInstanceCreateInfo.createFlags = 0;
@@ -68,7 +80,7 @@ OpenXR::OpenXR() {
     xrInstanceCreateInfo.enabledExtensionNames = enabledExtensions.data();
     xrInstanceCreateInfo.enabledApiLayerCount = 0;
     xrInstanceCreateInfo.enabledApiLayerNames = NULL;
-    xrInstanceCreateInfo.applicationInfo = { "BetterVR", 1, "Cemu", 1, XR_API_VERSION_1_1 };
+    xrInstanceCreateInfo.applicationInfo = { "BetterVR", 1, "Cemu", 1, XR_API_VERSION_1_0 };
     {
         XrResult result = XR_ERROR_RUNTIME_FAILURE;
         for (int i = 0; i < 3; i++) {
@@ -327,7 +339,7 @@ void OpenXR::CreateActions() {
         bindings.inMenu_modMenuAction = m_inMenu_modMenuAction;
         bindings.inMenu_inventory_mapAction = m_inMenu_inventory_mapAction;
 
-        SuggestControllerBindings(m_instance, bindings);
+        SuggestControllerBindings(m_instance, bindings, m_capabilities.supportsPicoController, m_capabilities.supportsCosmosController, m_capabilities.supportsHPMixedRealityController);
     }
 
     XrSessionActionSetsAttachInfo attachInfo = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
