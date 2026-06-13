@@ -498,7 +498,21 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
     newDeviceMatrix[2][2] = (newDeviceMatrix[2][2] + newDeviceMatrix[3][2] * zOffset) * zScale;
     newDeviceMatrix[2][3] = newDeviceMatrix[2][3] * zScale + newDeviceMatrix[3][3] * zOffset;
 
-    DebugDraw::instance().UpdateEyeProjection(side, glm::transpose(newDeviceMatrix));
+    {
+        auto* rendererForDebugDraw = VRManager::instance().XR->GetRenderer();
+        if (rendererForDebugDraw != nullptr) {
+            auto rawFov = rendererForDebugDraw->GetFOV(side);
+            if (rawFov.has_value()) {
+                glm::fmat4 debugProjMatrix = RenderUtils::CalculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), rawFov.value());
+                glm::fmat4 debugDeviceMatrix = debugProjMatrix;
+                debugDeviceMatrix[2][0] *= zScale;
+                debugDeviceMatrix[2][1] *= zScale;
+                debugDeviceMatrix[2][2] = (debugDeviceMatrix[2][2] + debugDeviceMatrix[3][2] * zOffset) * zScale;
+                debugDeviceMatrix[2][3] = debugDeviceMatrix[2][3] * zScale + debugDeviceMatrix[3][3] * zOffset;
+                DebugDraw::instance().UpdateEyeProjection(side, glm::transpose(debugDeviceMatrix));
+            }
+        }
+    }
     perspectiveProjection.deviceMatrix = newDeviceMatrix;
 
     perspectiveProjection.dirty = false;
