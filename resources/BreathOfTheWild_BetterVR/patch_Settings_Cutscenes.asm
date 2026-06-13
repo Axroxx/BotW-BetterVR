@@ -78,7 +78,7 @@ data_TableOfCutsceneEventsSettings:
 .string "Demo013_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Cucco angry demo
 .string "Demo014_0,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; name: Yiga assassin calling others demo
 .string "Demo016_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Dungeon appearing demo on pedestal activation
-.string "Demo017_0,FP_ON,PAN_ON,HND_OFF,CTRL_OFF" ; name: Hidden Korok found Demo
+.string "Demo017_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Hidden Korok found Demo
 .string "Demo018_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Rescue Demo
 .string "Demo019_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Retry Demo
 .string "Demo020_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Taking off from flight range demo
@@ -105,7 +105,7 @@ data_TableOfCutsceneEventsSettings:
 .string "Demo037_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Lost Woods ZoneOut
 .string "Demo038_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Lost Woods: For lost stray safety position
 .string "Demo039_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Divine Beast: Map Download
-.string "Demo040_0,FP_ON,PAN_ON,HND_OFF,CTRL_OFF" ; name: Enemy Base Chest Unlock
+.string "Demo040_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Enemy Base Chest Unlock
 .string "Demo041_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Terminal access processing subflow
 .string "Demo042_0,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Slate menu - First time open
 .string "Demo042_1,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Slate menu - First time close
@@ -157,8 +157,8 @@ data_TableOfCutsceneEventsSettings:
 .string "Demo346_5,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Detected by sentry demo | detection sentries when you try to run up the mountain to the divine beast in the mountain area https://youtu.be/UH2mAfvC2HI?t=8955
 .string "Demo346_6,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Cannon hitting Vah Rudania demo
 .string "Demo346_9,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Vah Rudania before scream demo
-.string "Demo347_0,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; name: Assassin Boss Â· confrontation
-.string "Demo347_1,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Assassin Boss Â· Kill
+.string "Demo347_0,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; name: Assassin Boss · confrontation
+.string "Demo347_1,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Assassin Boss · Kill
 .string "Demo347_2,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; name: [Vah Naboris Challenge] Generating barrier with Thunder Helm demo
 .string "Demo347_3,FP_OFF,PAN_ON,HND_OFF,CTRL_OFF" ; name: [Vah Naboris Challenge] Last attack on Vah Naboris demo | https://youtu.be/UH2mAfvC2HI?t=11649
 .string "Demo347_4,FP_ON,PAN_OFF,HND_OFF,CTRL_OFF" ; name: Introducing the gods of thunder The demonstrating animals before demo
