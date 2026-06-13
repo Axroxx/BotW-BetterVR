@@ -1036,3 +1036,139 @@ void CemuHooks::hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU) {
     DebugDraw::instance().Line(rayStart, raycastHitPos, IM_COL32(255, 0, 255, 255));
     DebugDraw::instance().Line(raycastHitPos, rayEnd, IM_COL32(128, 0, 128, 128));
 }
+
+static bool TryGetThrowDirection(glm::fvec3& outDirection) {
+    if (CemuHooks::IsThirdPerson() || CemuHooks::GetFramesSinceLastCameraUpdate() > 4) {
+        return false;
+    }
+
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return false;
+    }
+
+    auto middlePoseOpt = renderer->GetMiddlePose();
+    if (!middlePoseOpt.has_value()) {
+        return false;
+    }
+
+    glm::mat4 cameraWorld = CemuHooks::s_lastCameraMtx * middlePoseOpt.value();
+    // Throw seems to want the inverse of the camera's forward direction
+    glm::fvec3 direction = glm::mat3(cameraWorld) * glm::fvec3(0.0f, 0.0f, -1.0f);
+    if (!glm::all(glm::isfinite(direction)) || glm::dot(direction, direction) <= 1.0e-6f) {
+        return false;
+    }
+
+    outDirection = glm::normalize(direction);
+    return true;
+}
+
+static bool TryGetGuardDirection(glm::fvec3& outDirection) {
+    if (CemuHooks::IsThirdPerson() || CemuHooks::GetFramesSinceLastCameraUpdate() > 4) {
+        return false;
+    }
+
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return false;
+    }
+
+    auto middlePoseOpt = renderer->GetMiddlePose();
+    if (!middlePoseOpt.has_value()) {
+        return false;
+    }
+
+    glm::mat4 cameraWorld = CemuHooks::s_lastCameraMtx * middlePoseOpt.value();
+    glm::fquat cameraRot = glm::quat_cast(cameraWorld);
+    auto [_, yawOnly] = RenderUtils::swingTwistY(cameraRot);
+    glm::fvec3 direction = yawOnly * glm::fvec3(0.0f, 0.0f, -1.0f);
+    direction.y = 0.0f;
+    if (!glm::all(glm::isfinite(direction)) || glm::dot(direction, direction) <= 1.0e-6f) {
+        return false;
+    }
+
+    outDirection = glm::normalize(direction);
+    return true;
+}
+
+void CemuHooks::hook_OverrideThrowDirection(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = 0x02C91744;
+
+    glm::fvec3 throwDir = glm::fvec3(0.0f, 0.0f, 1.0f);
+    if (!TryGetThrowDirection(throwDir)) {
+        if (hCPU->gpr[31] != 0) {
+            BEMatrix34 mtxCopy = {};
+            readMemory(hCPU->gpr[31] + 0x1568, &mtxCopy);
+            throwDir = glm::fvec3(mtxCopy.z_x.getLE(), mtxCopy.z_y.getLE(), mtxCopy.z_z.getLE());
+        }
+
+        if (!glm::all(glm::isfinite(throwDir)) || glm::dot(throwDir, throwDir) <= 1.0e-6f) {
+            throwDir = glm::fvec3(0.0f, 0.0f, 1.0f);
+        }
+        else {
+            throwDir = glm::normalize(throwDir);
+        }
+    }
+
+    float dirX = throwDir.x;
+    float dirY = throwDir.y;
+    float dirZ = throwDir.z;
+    const float dirYSq = dirY * dirY;
+    const float dirXYSq = dirX * dirX + dirYSq;
+    const uint32_t stackBase = hCPU->gpr[1];
+
+    // Emulate the replaced preamble so ThrowSomething keeps using its original normalization path.
+    hCPU->fpr[10].fp0 = dirX;
+    hCPU->fpr[12].fp0 = dirZ;
+    hCPU->fpr[13].fp0 = dirYSq;
+    hCPU->fpr[0].fp0 = dirXYSq;
+
+    float dirXStore = dirX;
+    float dirYStore = dirY;
+    writeMemoryBE(stackBase + 0x14, &dirXStore);
+    writeMemoryBE(stackBase + 0x18, &dirYStore);
+}
+
+void CemuHooks::hook_OverrideGuardDirection(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = 0x02C16ECC;
+
+    const uint32_t stackBase = hCPU->gpr[1];
+    uint32_t actorPtr = 0;
+    readMemoryBE(stackBase + 0x24, &actorPtr);
+
+    glm::fvec3 guardDir = glm::fvec3(0.0f, 0.0f, 1.0f);
+    const bool shouldUseVrDirection = actorPtr != 0 && actorPtr == s_playerAddress && TryGetGuardDirection(guardDir);
+    if (!shouldUseVrDirection && actorPtr != 0) {
+        BEMatrix34 actorMtx = {};
+        readMemory(actorPtr + offsetof(ActorWiiU, mtx), &actorMtx);
+        guardDir = glm::fvec3(actorMtx.z_x.getLE(), actorMtx.z_y.getLE(), actorMtx.z_z.getLE());
+    }
+
+    if (!glm::all(glm::isfinite(guardDir)) || glm::dot(guardDir, guardDir) <= 1.0e-6f) {
+        guardDir = glm::fvec3(0.0f, 0.0f, 1.0f);
+    }
+    else if (shouldUseVrDirection) {
+        guardDir = glm::normalize(guardDir);
+    }
+
+    float dirX = guardDir.x;
+    float dirY = guardDir.y;
+    float dirZ = guardDir.z;
+    uint32_t dirXBits = 0;
+    uint32_t dirYBits = 0;
+    memcpy(&dirXBits, &dirX, sizeof(dirXBits));
+    memcpy(&dirYBits, &dirY, sizeof(dirYBits));
+
+    hCPU->gpr[12] = dirXBits;
+    hCPU->gpr[0] = dirYBits;
+    hCPU->fpr[12].fp0 = dirX;
+    hCPU->fpr[6].fp0 = dirY;
+    hCPU->fpr[8].fp0 = dirZ;
+
+    float dirXStore = dirX;
+    float dirYStore = dirY;
+    float dirZStore = dirZ;
+    writeMemoryBE(stackBase + 0xE0, &dirXStore);
+    writeMemoryBE(stackBase + 0xE4, &dirYStore);
+    writeMemoryBE(stackBase + 0xE8, &dirZStore);
+}

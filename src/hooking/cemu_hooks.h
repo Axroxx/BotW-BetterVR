@@ -56,7 +56,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_PlayerNormalChangeState", &hook_PlayerNormalChangeState);
         osLib_registerHLEFunction("coreinit", "hook_ShouldSkipEventCamera", &hook_ShouldSkipEventCamera);
         osLib_registerHLEFunction("coreinit", "hook_OverwriteFloatParam", &hook_OverwriteFloatParam);
-        osLib_registerHLEFunction("coreinit", "hook_PlayerLadderFix", &hook_PlayerLadderFix);
+        osLib_registerHLEFunction("coreinit", "hook_StoreLadderState", &hook_StoreLadderState);
         osLib_registerHLEFunction("coreinit", "hook_PlayerIsRiding", &hook_PlayerIsRiding);
         osLib_registerHLEFunction("coreinit", "hook_PlayerIsRidingSandSeal", &hook_PlayerIsRidingSandSeal);
         osLib_registerHLEFunction("coreinit", "hook_FixStaminaGaugeScreenPosition", &hook_FixStaminaGaugeScreenPosition);
@@ -68,6 +68,8 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_CalculateModelOpacity", &hook_CalculateModelOpacity);
         osLib_registerHLEFunction("coreinit", "hook_ModifyBoneMatrix", &hook_ModifyBoneMatrix);
         osLib_registerHLEFunction("coreinit", "hook_ChangeWeaponMtx", &hook_ChangeWeaponMtx);
+        osLib_registerHLEFunction("coreinit", "hook_OverrideThrowDirection", &hook_OverrideThrowDirection);
+        osLib_registerHLEFunction("coreinit", "hook_OverrideGuardDirection", &hook_OverrideGuardDirection);
 
         // First-Person Weapon Hooks
         osLib_registerHLEFunction("coreinit", "hook_EquipWeapon", &hook_EquipWeapon);
@@ -116,7 +118,6 @@ public:
     static uint32_t s_cameraMtxAddress;
     static glm::fvec3 s_playerPos;
     static glm::mat4 s_lastCameraMtx;
-
     // If the user is unable to control the camera, we can guess that they're in a cutscene
     struct HybridEventSettings {
         bool firstPerson;                  // use Link's perspective, ignore the animated event camera
@@ -221,7 +222,7 @@ private:
     static void hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU);
     static void hook_ShouldSkipEventCamera(PPCInterpreter_t* hCPU);
     static void hook_OverwriteFloatParam(PPCInterpreter_t* hCPU);
-    static void hook_PlayerLadderFix(PPCInterpreter_t* hCPU);
+    static void hook_StoreLadderState(PPCInterpreter_t* hCPU);
     static void hook_VisualizeRayCastHits(PPCInterpreter_t* hCPU);
     static void hook_FixLadder(PPCInterpreter_t* hCPU);
     static void hook_PlayerIsRiding(PPCInterpreter_t* hCPU);
@@ -233,6 +234,8 @@ private:
     static void hook_CalculateModelOpacity(PPCInterpreter_t* hCPU);
     static void hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU);
     static void hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU);
+    static void hook_OverrideThrowDirection(PPCInterpreter_t* hCPU);
+    static void hook_OverrideGuardDirection(PPCInterpreter_t* hCPU);
     static void hook_FixStaminaGaugeScreenPosition(PPCInterpreter_t* hCPU);
     static void hook_FixExtraStaminaGaugeIconPositions(PPCInterpreter_t* hCPU);
 

@@ -331,7 +331,7 @@ void CemuHooks::hook_PlayerIsRidingSandSeal(PPCInterpreter_t* hCPU) {
     }
 }
 
-void CemuHooks::hook_PlayerLadderFix(PPCInterpreter_t* hCPU) {
+void CemuHooks::hook_StoreLadderState(PPCInterpreter_t* hCPU) {
     hCPU->gpr[0] = hCPU->sprNew.LR;
     hCPU->instructionPointer = 0x02D07CEC;
 
