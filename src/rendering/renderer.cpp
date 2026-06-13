@@ -4,11 +4,52 @@
 #include "instance.h"
 #include "texture.h"
 #include "hooking/bow.h"
+#include "hooking/cemu_hooks.h"
 #include "utils/d3d12_utils.h"
 #include "utils/render_utils.h"
 #include "hooking/imgui_menus.h"
 
 std::atomic_bool RND_Renderer::Layer2D::s_isBowAimingActive = false;
+
+bool RND_Renderer::IsCurrent3DPresentationAllowed(const RenderFrame& frame) const {
+    if (!CemuHooks::IsInGame()) {
+        return false;
+    }
+    if (CemuHooks::UseBlackBarsDuringEvents()) {
+        return false;
+    }
+    if (CemuHooks::IsScreenOpen(ScreenId::PauseMenuInfo_00)) {
+        return false;
+    }
+    return (frame.issueFlags & CaptureIssue_MonoCapture) == 0;
+}
+
+bool RND_Renderer::IsStable3DReuseAllowed(const RenderFrame& frame) const {
+    const bool isMonoFallbackFrame = (frame.issueFlags & CaptureIssue_MonoCapture) != 0;
+    if (!isMonoFallbackFrame && !CemuHooks::IsInGame()) {
+        return false;
+    }
+    if (CemuHooks::UseBlackBarsDuringEvents()) {
+        return false;
+    }
+    return !CemuHooks::IsAnyFadeScreenVisible();
+}
+
+long RND_Renderer::SelectNewestHudReadyFrame() const {
+    long selectedFrameIdx = -1;
+    uint64_t newestOrdinal = 0;
+    for (long frameIdx = 0; frameIdx < (long)m_renderFrames.size(); ++frameIdx) {
+        const auto& frame = m_renderFrames[frameIdx];
+        if (!frame.Is2DComplete()) {
+            continue;
+        }
+        if (selectedFrameIdx == -1 || frame.lastActivityOrdinal > newestOrdinal) {
+            selectedFrameIdx = frameIdx;
+            newestOrdinal = frame.lastActivityOrdinal;
+        }
+    }
+    return selectedFrameIdx;
+}
 
 RND_Renderer::RND_Renderer(XrSession xrSession): m_session(xrSession) {
     XrSessionBeginInfo m_sessionCreateInfo = { XR_TYPE_SESSION_BEGIN_INFO };
@@ -73,16 +114,10 @@ void RND_Renderer::StartFrame() {
 
     VRManager::instance().D3D12->StartFrame();
     VRManager::instance().XR->UpdateSpaces(m_frameState.predictedDisplayTime);
-    this->UpdateViews(m_frameState.predictedDisplayTime);
-
-    // todo: update this as late as possible
-
-    // todo: should we really not update actions if the camera is middle pose is not available?
-    auto headsetRotation = VRManager::instance().XR->GetRenderer()->GetMiddlePose();
-    if (headsetRotation.has_value()) {
-        // todo: update this as late as possible
-        VRManager::instance().XR->UpdateActions(m_frameState.predictedDisplayTime, headsetRotation.value(), VRManager::instance().Hooks->IsShowingMenu());
-    }
+    m_frameViewsPending = true;
+    m_frameInputsPending = true;
+    m_frameViewLatchFailed = false;
+    m_frameInputLatchFailed = false;
 }
 
 
@@ -93,65 +128,110 @@ void RND_Renderer::EndFrame() {
     std::vector<XrCompositionLayerBaseHeader*> compositionLayers;
 
     m_presented2DLastFrame = false;
+    m_lastPresented3D = false;
 
     XrCompositionLayerProjection layer3D = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
     std::array<XrCompositionLayerProjectionView, 2> layer3DViews = {};
     std::vector<XrCompositionLayerQuad> layer2DQuads;
 
-    long frameIdx = -1;
-    if (m_renderFrames[0].Is3DComplete() && m_renderFrames[0].Is2DComplete()) {
-        frameIdx = 0;
-    }
-    else if (m_renderFrames[1].Is3DComplete() && m_renderFrames[1].Is2DComplete()) {
-        frameIdx = 1;
-    }
-    else if (m_renderFrames[0].Is2DComplete()) {
-        frameIdx = 0;
-    }
-    else if (m_renderFrames[1].Is2DComplete()) {
-        frameIdx = 1;
-    }
+    const long hudFrameIdx = SelectNewestHudReadyFrame();
 
     QueueBowAimingArcPreview(Layer2D::IsBowAimingActive());
-    DebugDrawRenderData debugDrawData = frameIdx != -1 ? DebugDraw::instance().TakeRenderData(frameIdx) : DebugDraw::instance().TakeRenderData();
+    DebugDrawRenderData debugDrawData = hudFrameIdx != -1 ? DebugDraw::instance().TakeRenderData(hudFrameIdx) : DebugDraw::instance().TakeRenderData();
 
-    if (frameIdx != -1) {
+    const bool isFadeVisible = CemuHooks::IsAnyFadeScreenVisible();
+    m_isFadeActive.store(isFadeVisible, std::memory_order_relaxed);
+    SetCustomFadeColor(glm::fvec3(0.0f));
+    SetCustomFadeAmount(CemuHooks::GetRoomscaleFadeAmount());
 
-        if (m_layer2D) {
-            m_layer2D->StartRendering();
-            m_layer2D->Render(frameIdx);
-            layer2DQuads = m_layer2D->FinishRendering(m_frameState.predictedDisplayTime, frameIdx);
-            m_presented2DLastFrame = true;
+    bool reusedStable3D = false;
+    long presented3DFrameIdx = -1;
+    const std::array<XrView, 2>* presented3DViews = nullptr;
+
+    if (hudFrameIdx != -1) {
+        RenderFrame& hudFrame = m_renderFrames[hudFrameIdx];
+
+        bool currentFrameViewLatchFailed = false;
+        if (hudFrame.Is3DComplete() && !hudFrame.views.has_value()) {
+            currentFrameViewLatchFailed = !EnsureFrameViewsLatched();
         }
 
-        // check whether there's a fade screen that we have to apply for the 3D layer
-        SharedTexture* fadeTexture = m_layer2D ? m_layer2D->GetSharedTextures()[frameIdx].get() : nullptr;
-        m_isFadeActive.store(CemuHooks::IsAnyFadeScreenVisible(), std::memory_order_relaxed);
-        SetCustomFadeColor(glm::fvec3(0.0f));
-        SetCustomFadeAmount(CemuHooks::GetRoomscaleFadeAmount());
+        if (hudFrame.Is3DComplete() && !hudFrame.views.has_value() && currentFrameViewLatchFailed) {
+            if (hudFrame.AddIssue(CaptureIssue_MissingPoseSnapshot)) {
+                NoteFatalSlotInvalidation();
+            }
+        }
 
-        if (m_layer3D) {
-            if (m_renderFrames[frameIdx].Is3DComplete()) {
+        if (m_layer3D != nullptr) {
+            if (hudFrame.Is3DComplete() && !hudFrame.HasFatalIssue() && hudFrame.views.has_value() && IsCurrent3DPresentationAllowed(hudFrame)) {
+                presented3DFrameIdx = hudFrameIdx;
+                presented3DViews = &hudFrame.views.value();
+            }
+            else if (m_stable3D.valid && IsStable3DReuseAllowed(hudFrame)) {
+                presented3DFrameIdx = m_stable3D.frameIdx;
+                presented3DViews = &m_stable3D.views;
+                reusedStable3D = true;
+            }
+        }
+
+        const bool shouldRender2D = m_layer2D != nullptr;
+        const bool shouldRender3D = presented3DFrameIdx != -1 && presented3DViews != nullptr;
+
+        if (shouldRender2D) {
+            m_layer2D->PrepareRendering();
+        }
+        if (shouldRender3D) {
+            m_layer3D->PrepareRendering(OpenXR::EyeSide::LEFT);
+            m_layer3D->PrepareRendering(OpenXR::EyeSide::RIGHT);
+        }
+
+        if (shouldRender2D || shouldRender3D) {
+            if (shouldRender2D) {
+                m_layer2D->StartRendering();
+            }
+            if (shouldRender3D) {
                 m_layer3D->StartRendering();
                 m_layer3D->PrepareDebugDraw(debugDrawData);
-                m_layer3D->Render(OpenXR::EyeSide::LEFT, frameIdx, fadeTexture, debugDrawData);
-                m_layer3D->Render(OpenXR::EyeSide::RIGHT, frameIdx, fadeTexture, debugDrawData);
-                layer3DViews = m_layer3D->FinishRendering(frameIdx);
-                layer3D.layerFlags = 0;
-                layer3D.space = VRManager::instance().XR->m_stageSpace;
-                layer3D.viewCount = (uint32_t)layer3DViews.size();
-                layer3D.views = layer3DViews.data();
-                if (CemuHooks::IsInGame()) {
-                    m_renderFrames[frameIdx].presented3D = true;
-                    compositionLayers.emplace_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer3D));
+            }
+
+            SharedTexture* fadeTexture = shouldRender2D ? m_layer2D->GetSharedTextures()[hudFrameIdx].get() : nullptr;
+            RND_D3D12::CommandContext<false> renderFrame(VRManager::instance().D3D12.get(), [this, shouldRender2D, shouldRender3D, hudFrameIdx, presented3DFrameIdx, presented3DViews, fadeTexture, &debugDrawData](RND_D3D12::CommandContext<false>* context) {
+                D3D12_SET_NAME(context->GetRecordList(), L"RenderXRFrame");
+
+                if (shouldRender2D) {
+                    m_layer2D->RecordRender(context, hudFrameIdx);
                 }
-                else {
-                    m_renderFrames[frameIdx].presented3D = false;
+                if (shouldRender3D) {
+                    m_layer3D->RecordRender(context, OpenXR::EyeSide::LEFT, presented3DFrameIdx, *presented3DViews, fadeTexture, debugDrawData);
+                    m_layer3D->RecordRender(context, OpenXR::EyeSide::RIGHT, presented3DFrameIdx, *presented3DViews, fadeTexture, debugDrawData);
                 }
+            });
+        }
+
+        if (shouldRender2D) {
+            layer2DQuads = m_layer2D->FinishRendering(m_frameState.predictedDisplayTime, hudFrameIdx);
+            m_presented2DLastFrame = !layer2DQuads.empty();
+        }
+
+        if (shouldRender3D) {
+            layer3DViews = m_layer3D->FinishRendering(*presented3DViews);
+            layer3D.layerFlags = 0;
+            layer3D.space = VRManager::instance().XR->m_stageSpace;
+            layer3D.viewCount = (uint32_t)layer3DViews.size();
+            layer3D.views = layer3DViews.data();
+            compositionLayers.emplace_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer3D));
+            m_lastPresented3D = true;
+
+            if (reusedStable3D) {
+                ++m_stable3DReusedCount;
             }
             else {
-                m_renderFrames[frameIdx].presented3D = false;
+                ++m_current3DPresentedCount;
+                PromoteStable3D(hudFrameIdx);
             }
+        }
+        else if (m_layer3D != nullptr) {
+            ++m_3DSuppressedCount;
         }
 
         // add 2D layer after 3D layer so that it appears on top
@@ -159,7 +239,7 @@ void RND_Renderer::EndFrame() {
             compositionLayers.emplace_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
         }
 
-        m_renderFrames[frameIdx].Reset();
+        hudFrame.Reset();
     }
 
     // decrement camera capture counter since its active only for a few frames
@@ -176,10 +256,15 @@ void RND_Renderer::EndFrame() {
     frameEndInfo.layers = compositionLayers.data();
 
     if (s_endFrameCount % 500 == 0) {
-        Log::print<INTEROP>("EndFrame #{}: frameIdx={}, layers={}, 3D={}, 2D={}",
-            s_endFrameCount, frameIdx, compositionLayers.size(),
-            (frameIdx != -1 && m_renderFrames[frameIdx].presented3D) ? "yes" : "no",
-            m_presented2DLastFrame ? "yes" : "no");
+        Log::print<INTEROP>("EndFrame #{}: hudFrame={}, layers={}, 3D={}, 2D={}, current3D={}, reused3D={}, suppressed3D={}, dupDrops={}, fatalSlots={}",
+            s_endFrameCount, hudFrameIdx, compositionLayers.size(),
+            m_lastPresented3D ? "yes" : "no",
+            m_presented2DLastFrame ? "yes" : "no",
+            m_current3DPresentedCount,
+            m_stable3DReusedCount,
+            m_3DSuppressedCount,
+            m_duplicateCaptureDrops,
+            m_fatalSlotInvalidations);
     }
 
     XrResult xrResult = xrEndFrame(m_session, &frameEndInfo);
@@ -188,6 +273,102 @@ void RND_Renderer::EndFrame() {
     }
 
     VRManager::instance().D3D12->EndFrame();
+}
+
+bool RND_Renderer::EnsureFrameViewsLatched() const {
+    if (!m_frameViewsPending) {
+        return !m_frameViewLatchFailed && m_currViews.has_value();
+    }
+
+    auto* self = const_cast<RND_Renderer*>(this);
+    self->m_frameViewsPending = false;
+    self->m_frameViewLatchFailed = false;
+
+    if (!self->UpdateViews(self->m_frameState.predictedDisplayTime).has_value()) {
+        self->m_frameViewLatchFailed = true;
+        return false;
+    }
+
+    for (auto& frame : self->m_renderFrames) {
+        if (!frame.views.has_value() && frame.IsStereoRecord() && frame.activeStereoGeneration != 0 && frame.acceptedCaptureMask != CaptureMask_None) {
+            frame.views = self->m_currViews;
+        }
+    }
+
+    return true;
+}
+
+bool RND_Renderer::EnsureFrameInputLatched() {
+    if (!m_frameInputsPending) {
+        return !m_frameInputLatchFailed;
+    }
+
+    m_frameInputsPending = false;
+    m_frameInputLatchFailed = false;
+
+    if (!EnsureFrameViewsLatched() || !m_currViews.has_value()) {
+        m_frameInputLatchFailed = true;
+        return false;
+    }
+
+    const XrPosef& leftPose = m_currViews->at(OpenXR::EyeSide::LEFT).pose;
+    const XrPosef& rightPose = m_currViews->at(OpenXR::EyeSide::RIGHT).pose;
+    glm::quat middleOrientation = glm::slerp(ToGLM(leftPose.orientation), ToGLM(rightPose.orientation), 0.5f);
+
+    if (!VRManager::instance().XR->UpdateActions(m_frameState.predictedDisplayTime, middleOrientation, CemuHooks::IsShowingMenu()).has_value()) {
+        m_frameInputLatchFailed = true;
+        return false;
+    }
+
+    return true;
+}
+
+void RND_Renderer::BeginStereoCaptureGeneration(long frameIdx) {
+    checkAssert(frameIdx >= 0 && frameIdx < (long)m_renderFrames.size(), "Stereo capture frame index is out of range!");
+    const bool preserveMonoCapture = (m_renderFrames[frameIdx].issueFlags & CaptureIssue_MonoCapture) != 0;
+    if (!preserveMonoCapture) {
+        InvalidateStable3DForFrame(frameIdx);
+    }
+    RenderFrame& frame = m_renderFrames[frameIdx];
+    frame.BeginStereoCapture(m_nextStereoGeneration++);
+    if (preserveMonoCapture) {
+        frame.AddIssue(CaptureIssue_MonoCapture);
+    }
+    frame.lastActivityOrdinal = NextCaptureActivityOrdinal();
+}
+
+void RND_Renderer::BeginHudCaptureGeneration(long frameIdx) {
+    checkAssert(frameIdx >= 0 && frameIdx < (long)m_renderFrames.size(), "HUD capture frame index is out of range!");
+    RenderFrame& frame = m_renderFrames[frameIdx];
+    const bool preserveMonoCapture = (frame.issueFlags & CaptureIssue_MonoCapture) != 0;
+    if (frame.recordKind == CaptureRecordKind::None) {
+        frame.BeginHudCapture();
+        if (preserveMonoCapture) {
+            frame.AddIssue(CaptureIssue_MonoCapture);
+        }
+    }
+    frame.lastActivityOrdinal = NextCaptureActivityOrdinal();
+}
+
+void RND_Renderer::InvalidateStable3DForFrame(long frameIdx) {
+    if (m_stable3D.valid && m_stable3D.frameIdx == frameIdx) {
+        m_stable3D.valid = false;
+        m_stable3D.frameIdx = -1;
+        m_stable3D.stereoGeneration = 0;
+    }
+}
+
+void RND_Renderer::PromoteStable3D(long frameIdx) {
+    checkAssert(frameIdx >= 0 && frameIdx < (long)m_renderFrames.size(), "Stable 3D frame index is out of range!");
+    const RenderFrame& frame = m_renderFrames[frameIdx];
+    if (!frame.Is3DComplete() || !frame.views.has_value() || frame.HasFatalIssue()) {
+        return;
+    }
+
+    m_stable3D.frameIdx = frameIdx;
+    m_stable3D.stereoGeneration = frame.activeStereoGeneration;
+    m_stable3D.valid = true;
+    m_stable3D.views = frame.views.value();
 }
 
 RND_Renderer::Layer3D::Layer3D(VkExtent2D inputRes, VkExtent2D outputRes) {
@@ -291,13 +472,9 @@ void RND_Renderer::Layer3D::StartRendering() {
     // checkAssert((this->m_textures[OpenXR::EyeSide::LEFT][0] == nullptr && this->m_textures[OpenXR::EyeSide::RIGHT][0] == nullptr) || (this->m_textures[OpenXR::EyeSide::LEFT][0] != nullptr && this->m_textures[OpenXR::EyeSide::RIGHT][0] != nullptr), "Both textures must be either null or not null");
     // checkAssert((this->m_depthTextures[OpenXR::EyeSide::LEFT][0] == nullptr && this->m_depthTextures[OpenXR::EyeSide::RIGHT][0] == nullptr) || (this->m_depthTextures[OpenXR::EyeSide::LEFT][0] != nullptr && this->m_depthTextures[OpenXR::EyeSide::RIGHT][0] != nullptr), "Both depth textures must be either null or not null");
 
-    this->m_swapchains[OpenXR::EyeSide::LEFT]->PrepareRendering();
     this->m_swapchains[OpenXR::EyeSide::LEFT]->StartRendering();
-    this->m_depthSwapchains[OpenXR::EyeSide::LEFT]->PrepareRendering();
     this->m_depthSwapchains[OpenXR::EyeSide::LEFT]->StartRendering();
-    this->m_swapchains[OpenXR::EyeSide::RIGHT]->PrepareRendering();
     this->m_swapchains[OpenXR::EyeSide::RIGHT]->StartRendering();
-    this->m_depthSwapchains[OpenXR::EyeSide::RIGHT]->PrepareRendering();
     this->m_depthSwapchains[OpenXR::EyeSide::RIGHT]->StartRendering();
 }
 
@@ -309,54 +486,52 @@ void RND_Renderer::Layer3D::PrepareDebugDraw(const DebugDrawRenderData& debugDra
     m_debugDrawPipeline->UploadRenderData(debugDrawData);
 }
 
-void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData) {
+void RND_Renderer::Layer3D::RecordRender(RND_D3D12::CommandContext<false>* context, OpenXR::EyeSide side, long frameIdx, const std::array<XrView, 2>& views, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData) {
     BetterVRProfiler::Scope profile(BetterVRProfiler::Section::Layer3DRender);
 
-    RND_D3D12::CommandContext<false> renderSharedTexture(VRManager::instance().D3D12.get(), [this, side, frameIdx, fadeTexture, &debugDrawData](RND_D3D12::CommandContext<false>* context) {
-        D3D12_SET_NAME(context->GetRecordList(), L"RenderSharedTexture");
-        auto& texture = m_textures[side][frameIdx];
-        auto& depthTexture = m_depthTextures[side][frameIdx];
-        checkAssert(fadeTexture != nullptr, "Layer3D fade texture is missing!");
+    checkAssert(context != nullptr, "Layer3D render context is missing!");
 
-        m_presentPipelines[side]->SetUvTransform(RenderUtils::GetPresentationUvTransform(
-            VRManager::instance().XR->GetRenderer()->GetFOV(side, frameIdx),
-            VRManager::instance().XR->GetRenderer()->m_gameRenderAspectRatio
-        ));
+    auto& texture = m_textures[side][frameIdx];
+    auto& depthTexture = m_depthTextures[side][frameIdx];
+    checkAssert(fadeTexture != nullptr, "Layer3D fade texture is missing!");
 
-        context->WaitFor(texture.get(), texture->GetD3D12WaitValue());
-        context->WaitFor(depthTexture.get(), depthTexture->GetD3D12WaitValue());
+    m_presentPipelines[side]->SetUvTransform(RenderUtils::GetPresentationUvTransform(
+        views[side].fov,
+        VRManager::instance().XR->GetRenderer()->m_gameRenderAspectRatio
+    ));
 
-        // swapchains are already in D3D12_RESOURCE_STATE_RENDER_TARGET and depth in D3D12_RESOURCE_STATE_DEPTH_WRITE according to OpenXR spec
-        m_presentPipelines[side]->BindAttachment(0, texture->d3d12GetTexture());
-        m_presentPipelines[side]->BindAttachment(1, depthTexture->d3d12GetTexture(), DXGI_FORMAT_R32_FLOAT);
-        m_presentPipelines[side]->BindAttachment(2, fadeTexture->d3d12GetTexture());
-        m_presentPipelines[side]->BindTarget(0, m_swapchains[side]->GetTexture(), m_swapchains[side]->GetFormat());
-        m_presentPipelines[side]->BindDepthTarget(m_depthSwapchains[side]->GetTexture(), m_depthSwapchains[side]->GetFormat());
-        m_presentPipelines[side]->Render(context->GetRecordList(), m_swapchains[side]->GetTexture());
+    context->WaitFor(texture.get(), texture->GetD3D12WaitValue());
+    context->WaitFor(depthTexture.get(), depthTexture->GetD3D12WaitValue());
 
-        if (m_debugDrawPipeline != nullptr && debugDrawData.hasViewProjections[side]) {
-            m_debugDrawPipeline->Render(
-                side,
-                context->GetRecordList(),
-                depthTexture->d3d12GetTexture(),
-                m_swapchains[side]->GetTexture(),
-                m_swapchains[side]->GetFormat(),
-                m_depthSwapchains[side]->GetTexture(),
-                m_depthSwapchains[side]->GetFormat(),
-                debugDrawData,
-                debugDrawData.viewProjections[side]
-            );
-        }
+    // swapchains are already in D3D12_RESOURCE_STATE_RENDER_TARGET and depth in D3D12_RESOURCE_STATE_DEPTH_WRITE according to OpenXR spec
+    m_presentPipelines[side]->BindAttachment(0, texture->d3d12GetTexture());
+    m_presentPipelines[side]->BindAttachment(1, depthTexture->d3d12GetTexture(), DXGI_FORMAT_R32_FLOAT);
+    m_presentPipelines[side]->BindAttachment(2, fadeTexture->d3d12GetTexture());
+    m_presentPipelines[side]->BindTarget(0, m_swapchains[side]->GetTexture(), m_swapchains[side]->GetFormat());
+    m_presentPipelines[side]->BindDepthTarget(m_depthSwapchains[side]->GetTexture(), m_depthSwapchains[side]->GetFormat());
+    m_presentPipelines[side]->Render(context->GetRecordList(), m_swapchains[side]->GetTexture());
 
-        // no transition needed here as OpenXR requires the swapchain to be returned in RENDER_TARGET/DEPTH_WRITE too
+    if (m_debugDrawPipeline != nullptr && debugDrawData.hasViewProjections[side]) {
+        m_debugDrawPipeline->Render(
+            side,
+            context->GetRecordList(),
+            depthTexture->d3d12GetTexture(),
+            m_swapchains[side]->GetTexture(),
+            m_swapchains[side]->GetFormat(),
+            m_depthSwapchains[side]->GetTexture(),
+            m_depthSwapchains[side]->GetFormat(),
+            debugDrawData,
+            debugDrawData.viewProjections[side]
+        );
+    }
 
-        context->Signal(texture.get(), texture->GetD3D12SignalValue());
-        context->Signal(depthTexture.get(), depthTexture->GetD3D12SignalValue());
-    });
+    // no transition needed here as OpenXR requires the swapchain to be returned in RENDER_TARGET/DEPTH_WRITE too
+    context->Signal(texture.get(), texture->GetD3D12SignalValue());
+    context->Signal(depthTexture.get(), depthTexture->GetD3D12SignalValue());
     // Log::print("[D3D12 - 3D Layer] Rendering finished");
 }
 
-const std::array<XrCompositionLayerProjectionView, 2>& RND_Renderer::Layer3D::FinishRendering(long frameIdx) {
+const std::array<XrCompositionLayerProjectionView, 2>& RND_Renderer::Layer3D::FinishRendering(const std::array<XrView, 2>& views) {
     this->m_swapchains[EyeSide::LEFT]->FinishRendering();
     this->m_depthSwapchains[EyeSide::LEFT]->FinishRendering();
     this->m_swapchains[EyeSide::RIGHT]->FinishRendering();
@@ -366,8 +541,8 @@ const std::array<XrCompositionLayerProjectionView, 2>& RND_Renderer::Layer3D::Fi
     m_projectionViews[EyeSide::LEFT] = {
         .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
         .next = &m_projectionViewsDepthInfo[EyeSide::LEFT],
-        .pose = VRManager::instance().XR->GetRenderer()->GetPose(EyeSide::LEFT, frameIdx).value(),
-        .fov = VRManager::instance().XR->GetRenderer()->GetFOV(EyeSide::LEFT, frameIdx).value(),
+        .pose = views[EyeSide::LEFT].pose,
+        .fov = views[EyeSide::LEFT].fov,
         .subImage = {
             .swapchain = this->m_swapchains[EyeSide::LEFT]->GetHandle(),
             .imageRect = {
@@ -399,8 +574,8 @@ const std::array<XrCompositionLayerProjectionView, 2>& RND_Renderer::Layer3D::Fi
     m_projectionViews[EyeSide::RIGHT] = {
         .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
         .next = &m_projectionViewsDepthInfo[EyeSide::RIGHT],
-        .pose = VRManager::instance().XR->GetRenderer()->GetPose(EyeSide::RIGHT, frameIdx).value(),
-        .fov = VRManager::instance().XR->GetRenderer()->GetFOV(EyeSide::RIGHT, frameIdx).value(),
+        .pose = views[EyeSide::RIGHT].pose,
+        .fov = views[EyeSide::RIGHT].fov,
         .subImage = {
             .swapchain = this->m_swapchains[EyeSide::RIGHT]->GetHandle(),
             .imageRect = {
@@ -476,27 +651,28 @@ SharedTexture* RND_Renderer::Layer2D::CopyColorToLayer(VkCommandBuffer copyCmdBu
 }
 
 void RND_Renderer::Layer2D::StartRendering() const {
-    m_swapchain->PrepareRendering();
     m_swapchain->StartRendering();
 }
 
-void RND_Renderer::Layer2D::Render(long frameIdx) {
+void RND_Renderer::Layer2D::PrepareRendering() const {
+    m_swapchain->PrepareRendering();
+}
+
+void RND_Renderer::Layer2D::RecordRender(RND_D3D12::CommandContext<false>* context, long frameIdx) {
     BetterVRProfiler::Scope profile(BetterVRProfiler::Section::Layer2DRender);
 
-    RND_D3D12::CommandContext<false> renderSharedTexture(VRManager::instance().D3D12.get(), [this, frameIdx](RND_D3D12::CommandContext<false>* context) {
-        D3D12_SET_NAME(context->GetRecordList(), L"RenderSharedTexture");
+    checkAssert(context != nullptr, "Layer2D render context is missing!");
 
-        // wait for both since we only have one 2D swap buffer to render to
-        // fixme: Why do we signal to the global command list instead of the local one?!
-        auto& texture = m_textures[frameIdx];
-        context->WaitFor(texture.get(), texture->GetD3D12WaitValue());
+    // wait for both since we only have one 2D swap buffer to render to
+    // fixme: Why do we signal to the global command list instead of the local one?!
+    auto& texture = m_textures[frameIdx];
+    context->WaitFor(texture.get(), texture->GetD3D12WaitValue());
 
-        m_presentPipeline->BindAttachment(0, texture->d3d12GetTexture());
-        m_presentPipeline->BindTarget(0, m_swapchain->GetTexture(), m_swapchain->GetFormat());
-        m_presentPipeline->Render(context->GetRecordList(), m_swapchain->GetTexture());
+    m_presentPipeline->BindAttachment(0, texture->d3d12GetTexture());
+    m_presentPipeline->BindTarget(0, m_swapchain->GetTexture(), m_swapchain->GetFormat());
+    m_presentPipeline->Render(context->GetRecordList(), m_swapchain->GetTexture());
 
-        context->Signal(texture.get(), texture->GetD3D12SignalValue());
-    });
+    context->Signal(texture.get(), texture->GetD3D12SignalValue());
 }
 
 std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTime predictedDisplayTime, long frameIdx) {

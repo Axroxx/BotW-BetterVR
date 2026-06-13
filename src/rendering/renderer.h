@@ -14,13 +14,45 @@ public:
     explicit RND_Renderer(XrSession xrSession);
     ~RND_Renderer();
 
+    enum CaptureMaskBits : uint32_t {
+        CaptureMask_None = 0,
+        CaptureMask_ColorLeft = 1u << 0,
+        CaptureMask_ColorRight = 1u << 1,
+        CaptureMask_DepthLeft = 1u << 2,
+        CaptureMask_DepthRight = 1u << 3,
+        CaptureMask_Hud = 1u << 4,
+    };
+
+    enum CaptureIssueBits : uint32_t {
+        CaptureIssue_None = 0,
+        CaptureIssue_Duplicate = 1u << 0,
+        CaptureIssue_CompetingSource = 1u << 1,
+        CaptureIssue_MonoCapture = 1u << 2,
+        CaptureIssue_MissingPoseSnapshot = 1u << 3,
+        CaptureIssue_UnexpectedSequence = 1u << 4,
+    };
+
+    static constexpr uint32_t CaptureIssue_FatalMask =
+        CaptureIssue_CompetingSource |
+        CaptureIssue_MonoCapture |
+        CaptureIssue_MissingPoseSnapshot;
+
+    enum class CaptureRecordKind : uint8_t {
+        None,
+        HudOnly,
+        Stereo3D,
+    };
+
     struct RenderFrame {
         std::optional<std::array<XrView, 2>> views;
-        std::atomic_bool copiedColor[2] = { false, false };
-        std::atomic_bool copiedDepth[2] = { false, false };
-        std::atomic_bool copied2D = false;
-        std::atomic_bool presented3D = false;
-        std::atomic_uint8_t cameraIsCapturing3DFramebuffer = 0;
+        CaptureRecordKind recordKind = CaptureRecordKind::None;
+        uint64_t activeStereoGeneration = 0;
+        uint64_t lastActivityOrdinal = 0;
+        uint32_t acceptedCaptureMask = CaptureMask_None;
+        uint32_t issueFlags = CaptureIssue_None;
+        std::array<VkImage, 2> acceptedColorImages = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+        std::array<VkImage, 2> acceptedDepthImages = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+        VkImage acceptedHudImage = VK_NULL_HANDLE;
 
         std::unique_ptr<VulkanTexture> mainFramebuffer;
         std::unique_ptr<VulkanTexture> hudFramebuffer;
@@ -34,53 +66,108 @@ public:
 
         bool ranMotionAnalysis[2] = { false, false };
 
-        bool Is3DComplete() const { return copiedColor[0] && copiedColor[1] && copiedDepth[0] && copiedDepth[1]; }
-        bool Is2DComplete() const { return copied2D; }
+        bool IsStereoRecord() const { return recordKind == CaptureRecordKind::Stereo3D; }
+        bool IsHudOnlyRecord() const { return recordKind == CaptureRecordKind::HudOnly; }
+        bool HasAcceptedCapture(uint32_t captureMask) const { return (acceptedCaptureMask & captureMask) == captureMask; }
+        bool HasFatalIssue() const { return (issueFlags & CaptureIssue_FatalMask) != 0; }
+        bool Is3DComplete() const { return IsStereoRecord() && HasAcceptedCapture(CaptureMask_ColorLeft | CaptureMask_ColorRight | CaptureMask_DepthLeft | CaptureMask_DepthRight); }
+        bool Is2DComplete() const { return HasAcceptedCapture(CaptureMask_Hud); }
+
+        bool AddIssue(uint32_t issueFlag) {
+            if ((issueFlags & issueFlag) != 0)
+                return false;
+            issueFlags |= issueFlag;
+            return true;
+        }
+
+        bool TryAcceptCapture(uint32_t captureMask, VkImage image, VkImage& acceptedImage, long frameIdx, const char* roleName, bool competingSourceIsFatal = true) {
+            if ((acceptedCaptureMask & captureMask) != 0) {
+                if (acceptedImage == image) {
+                    AddIssue(CaptureIssue_Duplicate);
+                    Log::print<RENDERING>("[{}] Ignoring duplicate {} capture from image {}", frameIdx, roleName, (void*)image);
+                }
+                else if (competingSourceIsFatal) {
+                    AddIssue(CaptureIssue_CompetingSource);
+                    Log::print<WARNING>("[{}] Ignoring competing {} capture: {} != {}", frameIdx, roleName, (void*)image, (void*)acceptedImage);
+                }
+                return false;
+            }
+            acceptedImage = image;
+            acceptedCaptureMask |= captureMask;
+            return true;
+        }
+
+        void BeginStereoCapture(uint64_t stereoGeneration) {
+            Reset();
+            recordKind = CaptureRecordKind::Stereo3D;
+            activeStereoGeneration = stereoGeneration;
+        }
+
+        void BeginHudCapture() {
+            Reset();
+            recordKind = CaptureRecordKind::HudOnly;
+        }
 
         void Reset() {
             views = std::nullopt;
-            copiedColor[0] = false;
-            copiedColor[1] = false;
-            copiedDepth[0] = false;
-            copiedDepth[1] = false;
-            copied2D = false;
-            if (cameraIsCapturing3DFramebuffer > 0)
-                --cameraIsCapturing3DFramebuffer;
+            recordKind = CaptureRecordKind::None;
+            activeStereoGeneration = 0;
+            lastActivityOrdinal = 0;
+            acceptedCaptureMask = CaptureMask_None;
+            issueFlags = CaptureIssue_None;
+            acceptedColorImages[0] = VK_NULL_HANDLE;
+            acceptedColorImages[1] = VK_NULL_HANDLE;
+            acceptedDepthImages[0] = VK_NULL_HANDLE;
+            acceptedDepthImages[1] = VK_NULL_HANDLE;
+            acceptedHudImage = VK_NULL_HANDLE;
 
             ranMotionAnalysis[0] = false;
             ranMotionAnalysis[1] = false;
         }
     };
 
+    struct Stable3DReference {
+        long frameIdx = -1;
+        uint64_t stereoGeneration = 0;
+        bool valid = false;
+        std::array<XrView, 2> views = { XrView{ XR_TYPE_VIEW }, XrView{ XR_TYPE_VIEW } };
+    };
+
     void StartFrame();
     void EndFrame();
     std::optional<std::array<XrView, 2>> UpdateViews(XrTime predictedDisplayTime);
-    
-    std::optional<std::array<XrView, 2>> GetPoses(long frameIdx = -1) const { 
+
+    bool EnsureFrameViewsLatched() const;
+    bool EnsureFrameInputLatched();
+    bool HasCurrentFrameViewsLatched() const { return !m_frameViewsPending && !m_frameViewLatchFailed && m_currViews.has_value(); }
+    bool DidCurrentFrameViewLatchFail() const { return m_frameViewLatchFailed; }
+
+    std::optional<std::array<XrView, 2>> GetPoses(long frameIdx = -1) const {
         if (frameIdx != -1 && m_renderFrames[frameIdx].views.has_value()) return m_renderFrames[frameIdx].views;
-        return m_currViews; 
+        EnsureFrameViewsLatched();
+        return m_currViews;
     }
-    
-    std::optional<XrFovf> GetFOV(OpenXR::EyeSide side, long frameIdx = -1) const { 
-        const auto& views = (frameIdx != -1 && m_renderFrames[frameIdx].views.has_value()) ? m_renderFrames[frameIdx].views : m_currViews;
-        return views.transform([side](auto& views) { return views[side].fov; }); 
+
+    std::optional<XrFovf> GetFOV(OpenXR::EyeSide side, long frameIdx = -1) const {
+        auto views = GetPoses(frameIdx);
+        return views.transform([side](auto& value) { return value[side].fov; });
     }
-    
-    std::optional<XrPosef> GetPose(OpenXR::EyeSide side, long frameIdx = -1) const { 
-        const auto& views = (frameIdx != -1 && m_renderFrames[frameIdx].views.has_value()) ? m_renderFrames[frameIdx].views : m_currViews;
-        return views.transform([side](auto& views) { return views[side].pose; }); 
+
+    std::optional<XrPosef> GetPose(OpenXR::EyeSide side, long frameIdx = -1) const {
+        auto views = GetPoses(frameIdx);
+        return views.transform([side](auto& value) { return value[side].pose; });
     }
-    
+
     std::optional<glm::fmat4> GetPoseAsMatrix(OpenXR::EyeSide side, long frameIdx = -1) const {
-        const auto& views = (frameIdx != -1 && m_renderFrames[frameIdx].views.has_value()) ? m_renderFrames[frameIdx].views : m_currViews;
+        auto views = GetPoses(frameIdx);
         return views.transform([side](auto& views) {
             const XrPosef& pose = views[side].pose;
             return ToMat4(ToGLM(pose.position), ToGLM(pose.orientation));
         });
     };
-    
+
     std::optional<glm::fmat4> GetMiddlePose(long frameIdx = -1) const {
-        const auto& views = (frameIdx != -1 && m_renderFrames[frameIdx].views.has_value()) ? m_renderFrames[frameIdx].views : m_currViews;
+        auto views = GetPoses(frameIdx);
         if (!views.has_value()) return std::nullopt;
         const XrPosef& leftPose = views->at(OpenXR::EyeSide::LEFT).pose;
         const XrPosef& rightPose = views->at(OpenXR::EyeSide::RIGHT).pose;
@@ -97,19 +184,24 @@ public:
     double GetLastOverheadMs() const { return m_lastOverheadMs; }
 
     void On3DColorCopied(OpenXR::EyeSide side, long frameIdx) {
-        m_renderFrames[frameIdx].copiedColor[side] = true;
-        if (!m_renderFrames[frameIdx].views.has_value()) m_renderFrames[frameIdx].views = m_currViews;
+        if (!m_renderFrames[frameIdx].views.has_value() && HasCurrentFrameViewsLatched()) m_renderFrames[frameIdx].views = m_currViews;
         DebugDraw::instance().SnapshotEyeState(side, frameIdx);
     }
 
     void On3DDepthCopied(OpenXR::EyeSide side, long frameIdx) {
-        m_renderFrames[frameIdx].copiedDepth[side] = true;
-        if (!m_renderFrames[frameIdx].views.has_value()) m_renderFrames[frameIdx].views = m_currViews;
+        if (!m_renderFrames[frameIdx].views.has_value() && HasCurrentFrameViewsLatched()) m_renderFrames[frameIdx].views = m_currViews;
     }
 
     void On2DCopied(long frameIdx) {
-        m_renderFrames[frameIdx].copied2D = true;
     }
+
+    void BeginStereoCaptureGeneration(long frameIdx);
+    void BeginHudCaptureGeneration(long frameIdx);
+    uint64_t NextCaptureActivityOrdinal() { return m_nextCaptureActivityOrdinal++; }
+    void InvalidateStable3DForFrame(long frameIdx);
+    void PromoteStable3D(long frameIdx);
+    void NoteDuplicateCaptureDropped() { ++m_duplicateCaptureDrops; }
+    void NoteFatalSlotInvalidation() { ++m_fatalSlotInvalidations; }
 
     RenderFrame& GetFrame(long frameIdx) { return m_renderFrames[frameIdx]; }
     const RenderFrame& GetFrame(long frameIdx) const { return m_renderFrames[frameIdx]; }
@@ -124,8 +216,8 @@ public:
         void PrepareRendering(OpenXR::EyeSide side);
         void StartRendering();
         void PrepareDebugDraw(const DebugDrawRenderData& debugDrawData);
-        void Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData);
-        const std::array<XrCompositionLayerProjectionView, 2>& FinishRendering(long frameIdx);
+        void RecordRender(RND_D3D12::CommandContext<false>* context, OpenXR::EyeSide side, long frameIdx, const std::array<XrView, 2>& views, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData);
+        const std::array<XrCompositionLayerProjectionView, 2>& FinishRendering(const std::array<XrView, 2>& views);
 
         float GetAspectRatio(OpenXR::EyeSide side) const { return m_recommendedAspectRatios[side]; }
         const RenderUtils::UvTransform& GetPresentUvTransform(OpenXR::EyeSide side) const { return m_presentUvTransforms[side]; }
@@ -161,8 +253,9 @@ public:
             uint64_t lastSignal = m_textures[frameIdx]->GetLastSignalledValue();
             return lastSignal > 0 && (lastSignal % 2 == 1);
         };
+        void PrepareRendering() const;
         void StartRendering() const;
-        void Render(long frameIdx);
+        void RecordRender(RND_D3D12::CommandContext<false>* context, long frameIdx);
         std::vector<XrCompositionLayerQuad> FinishRendering(XrTime predictedDisplayTime, long frameIdx);
         long GetCurrentFrameIdx() const { return m_currentFrameIdx; }
         auto& GetSharedTextures() { return m_textures; }
@@ -225,7 +318,7 @@ public:
     float m_gameRenderAspectRatio = 16.0f / 9.0f;
 
     bool IsRendering3D(long frameIdx) {
-        return m_renderFrames[frameIdx].presented3D;
+        return m_lastPresented3D;
     }
     bool IsRendering2D() {
         return m_presented2DLastFrame;
@@ -236,7 +329,10 @@ public:
     bool IsGameCapturing3DFrameBuffer() const {
         return m_cameraIsCapturing3DFrameBuffer > 0;
     }
-    void SignalGameCapturing3DFrameBuffer() {
+    void SignalGameCapturing3DFrameBuffer(long frameIdx = -1) {
+        if (frameIdx >= 0 && frameIdx < (long)m_renderFrames.size()) {
+            m_renderFrames[frameIdx].AddIssue(CaptureIssue_MonoCapture);
+        }
         m_cameraIsCapturing3DFrameBuffer = 1;
     }
 
@@ -268,14 +364,21 @@ public:
 
     bool IsFadeActive() const { return m_isFadeActive.load(std::memory_order_relaxed); }
 
+private:
+    bool IsCurrent3DPresentationAllowed(const RenderFrame& frame) const;
+    bool IsStable3DReuseAllowed(const RenderFrame& frame) const;
+    long SelectNewestHudReadyFrame() const;
+
 protected:
     XrSession m_session;
     XrFrameState m_frameState = { XR_TYPE_FRAME_STATE };
-    std::optional<std::array<XrView, 2>> m_currViews;
+    mutable std::optional<std::array<XrView, 2>> m_currViews;
     std::array<RenderFrame, 2> m_renderFrames;
+    Stable3DReference m_stable3D = {};
 
     std::atomic_bool m_isInitialized = false;
     std::atomic_bool m_presented2DLastFrame = false;
+    std::atomic_bool m_lastPresented3D = false;
     std::atomic_uint8_t m_cameraIsCapturing3DFrameBuffer = 0;
     std::atomic_bool m_isFadeActive = false;
     std::atomic<float> m_customFadeAmount = 0.0f;
@@ -285,6 +388,17 @@ protected:
 
     // Full-frame timing derived from OpenXR timestamps (XrTime is in nanoseconds)
     XrTime m_lastPredictedDisplayTime = 0;
+    uint64_t m_nextStereoGeneration = 1;
+    uint64_t m_nextCaptureActivityOrdinal = 1;
+    mutable bool m_frameViewsPending = false;
+    bool m_frameInputsPending = false;
+    mutable bool m_frameViewLatchFailed = false;
+    bool m_frameInputLatchFailed = false;
+    uint64_t m_current3DPresentedCount = 0;
+    uint64_t m_stable3DReusedCount = 0;
+    uint64_t m_3DSuppressedCount = 0;
+    uint64_t m_duplicateCaptureDrops = 0;
+    uint64_t m_fatalSlotInvalidations = 0;
 
     std::chrono::high_resolution_clock::time_point m_frameStartTime;
 

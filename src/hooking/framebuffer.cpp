@@ -11,13 +11,36 @@
 std::mutex lockImageResolutions;
 std::unordered_map<VkImage, std::pair<VkExtent2D, VkFormat>> imageResolutions;
 
-std::mutex s_activeCopyMutex;
-std::vector<std::pair<VkCommandBuffer, SharedTexture*>> s_activeCopyOperations;
+struct PendingCopyOperation {
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    SharedTexture* texture = nullptr;
+};
+
+std::mutex s_pendingCopyMutex;
+std::vector<PendingCopyOperation> s_pendingCopyOperations;
 
 VkImage s_curr3DColorImage = VK_NULL_HANDLE;
 VkImage s_curr3DDepthImage = VK_NULL_HANDLE;
 
 using namespace VRLayer;
+
+static bool QueuePendingCopyOperation(VkCommandBuffer commandBuffer, SharedTexture* texture) {
+    if (commandBuffer == VK_NULL_HANDLE || texture == nullptr) {
+        return false;
+    }
+
+    std::lock_guard lk(s_pendingCopyMutex);
+    const auto duplicateIt = std::ranges::find_if(s_pendingCopyOperations, [commandBuffer, texture](const PendingCopyOperation& operation) {
+        return operation.commandBuffer == commandBuffer && operation.texture == texture;
+    });
+    if (duplicateIt != s_pendingCopyOperations.end()) {
+        Log::print<INTEROP>("Ignoring duplicate pending copy registration for commandBuffer={} texture={}", (void*)commandBuffer, (void*)texture);
+        return false;
+    }
+
+    s_pendingCopyOperations.push_back({ commandBuffer, texture });
+    return true;
+}
 
 VkResult VkDeviceOverrides::CreateImage(const vkroots::VkDeviceDispatch& pDispatch, VkDevice device, const VkImageCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkImage* pImage) {
     VkResult res = pDispatch.CreateImage(device, pCreateInfo, pAllocator, pImage);
@@ -54,7 +77,9 @@ void CemuHooks::hook_FixCameraSaveFilesAndInventory(PPCInterpreter_t* hCPU) {
     uint32_t frameIdx = hCPU->gpr[5];
 
     Log::print<PPC>("[{:08X}] hook_FixCameraSaveFilesAndInventory: isEnabling3DFramebufferCapture={:08X}, side={}, frameIdx={}", originCaller, isEnabling3DFramebufferCapture, side, frameIdx);
-    VRManager::instance().XR->GetRenderer()->SignalGameCapturing3DFrameBuffer();
+    if (auto* renderer = VRManager::instance().XR->GetRenderer(); renderer != nullptr) {
+        renderer->SignalGameCapturing3DFrameBuffer((long)frameIdx);
+    }
 }
 
 
@@ -153,9 +178,18 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
             VkClearColorValue clearColor = disableAlpha ? VkClearColorValue{ { 0.0f, 0.0f, 0.0f, 1.0f } } : VkClearColorValue{ { 0.0f, 0.0f, 0.0f, 0.0f } };
             pDispatch.CmdClearColorImage(commandBuffer, image, imageLayout, &clearColor, rangeCount, pRanges);
         };
+        const bool useMonoCapture = CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures();
 
         // 3D layer - color texture for 3D rendering
         if (captureIdx == 0) {
+            auto skip3DColorCapture = [&](bool disableAlpha) -> void {
+                returnToLayout();
+                if (useMonoCapture) {
+                    return;
+                }
+                clearFramebuffer(disableAlpha);
+            };
+
             // check if the color texture has the appropriate texture format
             if (s_curr3DColorImage == VK_NULL_HANDLE) {
                 lockImageResolutions.lock();
@@ -175,31 +209,38 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
 
             if (image != s_curr3DColorImage) {
                 Log::print<RENDERING>("Color image is not the same as the current 3D color image! ({} != {})", (void*)image, (void*)s_curr3DColorImage);
-                returnToLayout();
-                return clearFramebuffer(!VRManager::instance().XR->GetRenderer()->IsRendering3D(frameIdx));
+                return skip3DColorCapture(!renderer->IsRendering3D(frameIdx));
             }
 
-            if (renderer->GetFrame(frameIdx).copiedColor[side]) {
-                // the color texture has already been copied to the layer
-                Log::print<RENDERING>("A 3D color texture is already been copied for the current frame!");
-
-                returnToLayout();
-                if (CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
-                    return;
+            if (side == EyeSide::LEFT) {
+                if (!frame.IsStereoRecord() || frame.activeStereoGeneration == 0) {
+                    renderer->BeginStereoCaptureGeneration(frameIdx);
                 }
-                return clearFramebuffer(false);
+            }
+            else if (!frame.IsStereoRecord() || frame.activeStereoGeneration == 0) {
+                frame.AddIssue(RND_Renderer::CaptureIssue_UnexpectedSequence);
+                Log::print<RENDERING>("[{}] Ignoring right-eye 3D color before stereo generation start", frameIdx);
+                return skip3DColorCapture(!renderer->IsRendering3D(frameIdx));
             }
 
-            // note: This uses vkCmdCopyImage to copy the image to the D3D12-created interop texture. s_activeCopyOperations queues a semaphore for the D3D12 side to wait on.
+            if (frame.HasFatalIssue()) {
+                Log::print<RENDERING>("[{}] Ignoring 3D color capture because the stereo slot is already invalid", frameIdx);
+                return skip3DColorCapture(!renderer->IsRendering3D(frameIdx));
+            }
+
+            const uint32_t colorMask = side == EyeSide::LEFT ? RND_Renderer::CaptureMask_ColorLeft : RND_Renderer::CaptureMask_ColorRight;
+            if (!frame.TryAcceptCapture(colorMask, image, frame.acceptedColorImages[side], frameIdx, side == EyeSide::LEFT ? "left-eye 3D color" : "right-eye 3D color")) {
+                renderer->NoteDuplicateCaptureDropped();
+                return skip3DColorCapture(false);
+            }
+            frame.lastActivityOrdinal = renderer->NextCaptureActivityOrdinal();
+
             SharedTexture* texture = layer3D->CopyColorToLayer(side, commandBuffer, image, frameIdx);
             renderer->On3DColorCopied(side, frameIdx);
+            QueuePendingCopyOperation(commandBuffer, texture);
 
-            {
-                std::lock_guard lk(s_activeCopyMutex);
-                s_activeCopyOperations.emplace_back(commandBuffer, texture);
-            }
-
-            if (CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
+            if (useMonoCapture) {
+                returnToLayout();
                 return;
             }
 
@@ -213,48 +254,45 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
 
             // clear the image to be transparent to allow for the HUD to be rendered on top of it which results in a transparent HUD layer
             returnToLayout();
-            return clearFramebuffer(false);
+            clearFramebuffer(false);
+            return;
         }
 
         // 2D layer - color texture for HUD rendering
         if (captureIdx == 2) {
-            bool hudCopied = renderer->GetFrame(frameIdx).copied2D;
+            bool hudCopied = frame.Is2DComplete();
 
             if (side == EyeSide::LEFT) {
-                if (hudCopied) {
-                    // the 2D texture has already been copied to the layer
-                    Log::print<RENDERING>("A 2D texture has already been copied for the current frame!");
-
-                    returnToLayout();
-                    return clearFramebuffer(false);
+                if (!frame.IsStereoRecord() && frame.recordKind == RND_Renderer::CaptureRecordKind::None) {
+                    renderer->BeginHudCaptureGeneration(frameIdx);
                 }
-                else {
-                    // provide the HUD texture to the imgui overlay we'll use to recomposite Cemu's original flatscreen rendering
-                    if (imguiOverlay && !hudCopied) {
-                        imguiOverlay->DrawHUDLayerAsBackground(commandBuffer, image, frameIdx);
-                        VulkanUtils::DebugPipelineBarrier(commandBuffer);
-                    }
 
-                    if (imguiOverlay && !hudCopied) {
-                        // render imgui, and then copy the framebuffer to the 2D layer
-                        imguiOverlay->Update();
-                        imguiOverlay->Render(frameIdx, false, false);
-                        imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, false);
-                        VulkanUtils::DebugPipelineBarrier(commandBuffer);
-                    }
-
-                    // copy the HUD texture to D3D12 to be presented
-                    // only copy the first attempt at capturing when GX2ClearColor is called with this capture index since the game/Cemu clears the 2D layer twice
-                    SharedTexture* texture = layer2D->CopyColorToLayer(commandBuffer, image, frameIdx);
-                    renderer->On2DCopied(frameIdx);
-
+                if (!frame.TryAcceptCapture(RND_Renderer::CaptureMask_Hud, image, frame.acceptedHudImage, frameIdx, "HUD", false)) {
+                    renderer->NoteDuplicateCaptureDropped();
                     returnToLayout();
-                    {
-                        std::lock_guard lk(s_activeCopyMutex);
-                        s_activeCopyOperations.emplace_back(commandBuffer, texture);
-                    }
+                    clearFramebuffer(false);
                     return;
                 }
+                frame.lastActivityOrdinal = renderer->NextCaptureActivityOrdinal();
+
+                if (imguiOverlay) {
+                    imguiOverlay->DrawHUDLayerAsBackground(commandBuffer, image, frameIdx);
+                    VulkanUtils::DebugPipelineBarrier(commandBuffer);
+                }
+
+                if (imguiOverlay) {
+                    imguiOverlay->Update();
+                    imguiOverlay->Render(frameIdx, false, false);
+                    imguiOverlay->DrawAndCopyToImage(commandBuffer, image, frameIdx, false);
+                    VulkanUtils::DebugPipelineBarrier(commandBuffer);
+                }
+
+                SharedTexture* texture = layer2D->CopyColorToLayer(commandBuffer, image, frameIdx);
+                renderer->On2DCopied(frameIdx);
+
+                returnToLayout();
+                QueuePendingCopyOperation(commandBuffer, texture);
+                return;
             }
             if (side == EyeSide::RIGHT) {
                 // render the imgui overlay on the right side
@@ -298,10 +336,13 @@ void VkDeviceOverrides::CmdClearDepthStencilImage(const vkroots::VkCommandBuffer
         const uint32_t frameCounter = pDepthStencil->stencil;
         checkAssert(frameCounter == 0 || frameCounter == 1, "Invalid frame counter for depth clear!");
 
-        auto& layer3D = VRManager::instance().XR->GetRenderer()->m_layer3D;
-        auto& layer2D = VRManager::instance().XR->GetRenderer()->m_layer2D;
+        auto* renderer = VRManager::instance().XR->GetRenderer();
+        if (renderer == nullptr) {
+            return pDispatch.CmdClearDepthStencilImage(commandBuffer, image, imageLayout, pDepthStencil, rangeCount, pRanges);
+        }
+        auto& layer3D = renderer->m_layer3D;
 
-        if (!VRManager::instance().XR->GetRenderer()->IsInitialized()) {
+        if (!renderer->IsInitialized()) {
             return;
         }
 
@@ -315,6 +356,8 @@ void VkDeviceOverrides::CmdClearDepthStencilImage(const vkroots::VkCommandBuffer
             VulkanUtils::TransitionLayout(commandBuffer, image, VK_IMAGE_LAYOUT_GENERAL, imageLayout);
             VulkanUtils::DebugPipelineBarrier(commandBuffer);
         };
+
+        RND_Renderer::RenderFrame& frame = renderer->GetFrame(frameCounter);
 
         if (side == OpenXR::EyeSide::LEFT || side == OpenXR::EyeSide::RIGHT) {
             // 3D layer - depth texture for 3D rendering
@@ -334,28 +377,30 @@ void VkDeviceOverrides::CmdClearDepthStencilImage(const vkroots::VkCommandBuffer
                 return;
             }
 
-            if (VRManager::instance().XR->GetRenderer()->GetFrame(frameCounter).copiedDepth[side]) {
-                // the depth texture has already been copied to the layer
-                Log::print<RENDERING>("A depth texture is already bound for the current frame!");
+            if (!frame.IsStereoRecord() || frame.activeStereoGeneration == 0) {
+                frame.AddIssue(RND_Renderer::CaptureIssue_UnexpectedSequence);
+                Log::print<RENDERING>("[{}] Ignoring {} depth capture before stereo generation start", frameCounter, side == EyeSide::LEFT ? "left-eye" : "right-eye");
                 returnToLayout();
                 return;
             }
 
-            // if (layer3D.GetStatus() == Status3D::LEFT_BINDING_DEPTH || layer3D.GetStatus() == Status3D::RIGHT_BINDING_DEPTH) {
-            //     // seems to always be the case whenever closing the (inventory) menu
-            //     Log::print("A depth texture is already bound for the current frame!");
-            //     return;
-            // }
-            //
-            // checkAssert(layer3D.GetStatus() == Status3D::LEFT_BINDING_COLOR || layer3D.GetStatus() == Status3D::RIGHT_BINDING_COLOR, "3D layer is not in the correct state for capturing depth images!");
+            if (frame.HasFatalIssue()) {
+                Log::print<RENDERING>("[{}] Ignoring 3D depth capture because the stereo slot is already invalid", frameCounter);
+                returnToLayout();
+                return;
+            }
+
+            const uint32_t depthMask = side == EyeSide::LEFT ? RND_Renderer::CaptureMask_DepthLeft : RND_Renderer::CaptureMask_DepthRight;
+            if (!frame.TryAcceptCapture(depthMask, image, frame.acceptedDepthImages[side], frameCounter, side == EyeSide::LEFT ? "left-eye 3D depth" : "right-eye 3D depth")) {
+                renderer->NoteDuplicateCaptureDropped();
+                returnToLayout();
+                return;
+            }
+            frame.lastActivityOrdinal = renderer->NextCaptureActivityOrdinal();
 
             SharedTexture* texture = layer3D->CopyDepthToLayer(side, commandBuffer, image, frameCounter);
-            VRManager::instance().XR->GetRenderer()->On3DDepthCopied(side, frameCounter);
-
-            {
-                std::lock_guard lk(s_activeCopyMutex);
-                s_activeCopyOperations.emplace_back(commandBuffer, texture);
-            }
+            renderer->On3DDepthCopied(side, frameCounter);
+            QueuePendingCopyOperation(commandBuffer, texture);
             returnToLayout();
             return;
         }
@@ -367,14 +412,14 @@ void VkDeviceOverrides::CmdClearDepthStencilImage(const vkroots::VkCommandBuffer
 
 VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatch, VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence) {
     VkResult result = VK_SUCCESS;
-    
-    size_t activeCopyCount;
+
+    size_t pendingCopyCount = 0;
     {
-        std::lock_guard lk(s_activeCopyMutex);
-        activeCopyCount = s_activeCopyOperations.size();
+        std::lock_guard lk(s_pendingCopyMutex);
+        pendingCopyCount = s_pendingCopyOperations.size();
     }
 
-    if (activeCopyCount == 0) {
+    if (pendingCopyCount == 0) {
         result = pDispatch.QueueSubmit(queue, submitCount, pSubmits, fence);
     }
     else {
@@ -390,10 +435,35 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
         };
 
         // insert (possible) pipeline barriers for any active copy operations
+        std::vector<std::vector<PendingCopyOperation>> matchedOperations(submitCount);
+        {
+            std::lock_guard lk(s_pendingCopyMutex);
+
+            for (auto it = s_pendingCopyOperations.begin(); it != s_pendingCopyOperations.end();) {
+                bool matched = false;
+
+                for (uint32_t submitIdx = 0; submitIdx < submitCount && !matched; ++submitIdx) {
+                    const VkSubmitInfo& submitInfo = pSubmits[submitIdx];
+                    for (uint32_t commandBufferIdx = 0; commandBufferIdx < submitInfo.commandBufferCount; ++commandBufferIdx) {
+                        if (submitInfo.pCommandBuffers[commandBufferIdx] == it->commandBuffer) {
+                            matchedOperations[submitIdx].push_back(*it);
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (matched) {
+                    it = s_pendingCopyOperations.erase(it);
+                }
+                else {
+                    ++it;
+                }
+            }
+        }
+
         std::vector<ModifiedSubmitInfo_t> modifiedSubmitInfos{ submitCount };
         std::vector<VkSubmitInfo> shadowSubmits{ submitCount };
-
-        std::lock_guard lk(s_activeCopyMutex);
 
         for (uint32_t i = 0; i < submitCount; i++) {
             const VkSubmitInfo& submitInfo = pSubmits[i];
@@ -403,11 +473,17 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
             modifiedSubmitInfo.submitInfoCopy = submitInfo;
 
             // copy old semaphores into new vectors
-            modifiedSubmitInfo.waitSemaphores.assign(submitInfo.pWaitSemaphores, submitInfo.pWaitSemaphores + submitInfo.waitSemaphoreCount);
-            modifiedSubmitInfo.waitDstStageMasks.assign(submitInfo.pWaitDstStageMask, submitInfo.pWaitDstStageMask + submitInfo.waitSemaphoreCount);
+            if (submitInfo.waitSemaphoreCount > 0 && submitInfo.pWaitSemaphores != nullptr) {
+                modifiedSubmitInfo.waitSemaphores.assign(submitInfo.pWaitSemaphores, submitInfo.pWaitSemaphores + submitInfo.waitSemaphoreCount);
+            }
+            if (submitInfo.waitSemaphoreCount > 0 && submitInfo.pWaitDstStageMask != nullptr) {
+                modifiedSubmitInfo.waitDstStageMasks.assign(submitInfo.pWaitDstStageMask, submitInfo.pWaitDstStageMask + submitInfo.waitSemaphoreCount);
+            }
             modifiedSubmitInfo.timelineWaitValues.resize(submitInfo.waitSemaphoreCount, 0);
 
-            modifiedSubmitInfo.signalSemaphores.assign(submitInfo.pSignalSemaphores, submitInfo.pSignalSemaphores + submitInfo.signalSemaphoreCount);
+            if (submitInfo.signalSemaphoreCount > 0 && submitInfo.pSignalSemaphores != nullptr) {
+                modifiedSubmitInfo.signalSemaphores.assign(submitInfo.pSignalSemaphores, submitInfo.pSignalSemaphores + submitInfo.signalSemaphoreCount);
+            }
             modifiedSubmitInfo.timelineSignalValues.resize(submitInfo.signalSemaphoreCount, 0);
 
             // find timeline semaphore submit info if already present
@@ -433,25 +509,17 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
             }
 
             // Insert timeline semaphores for active copy operations
-            for (uint32_t j = 0; j < submitInfo.commandBufferCount; j++) {
-                for (auto it = s_activeCopyOperations.begin(); it != s_activeCopyOperations.end();) {
-                    if (submitInfo.pCommandBuffers[j] == it->first) {
-                        // Wait for D3D12/XR to finish with the previous shared texture render
-                        uint64_t waitValue = it->second->GetVulkanWaitValue();
-                        modifiedSubmitInfo.waitSemaphores.emplace_back(it->second->GetSemaphoreForWait(waitValue));
-                        modifiedSubmitInfo.waitDstStageMasks.emplace_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-                        modifiedSubmitInfo.timelineWaitValues.emplace_back(waitValue);
+            for (const PendingCopyOperation& operation : matchedOperations[i]) {
+                // Wait for D3D12/XR to finish with the previous shared texture render
+                uint64_t waitValue = operation.texture->GetVulkanWaitValue();
+                modifiedSubmitInfo.waitSemaphores.emplace_back(operation.texture->GetSemaphoreForWait(waitValue));
+                modifiedSubmitInfo.waitDstStageMasks.emplace_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+                modifiedSubmitInfo.timelineWaitValues.emplace_back(waitValue);
 
-                        // Signal to D3D12/XR rendering that the shared texture can be rendered to VR headset
-                        uint64_t signalValue = it->second->GetVulkanSignalValue();
-                        modifiedSubmitInfo.signalSemaphores.emplace_back(it->second->GetSemaphoreForSignal(signalValue));
-                        modifiedSubmitInfo.timelineSignalValues.emplace_back(signalValue);
-                        it = s_activeCopyOperations.erase(it);
-                    }
-                    else {
-                        ++it;
-                    }
-                }
+                // Signal to D3D12/XR rendering that the shared texture can be rendered to VR headset
+                uint64_t signalValue = operation.texture->GetVulkanSignalValue();
+                modifiedSubmitInfo.signalSemaphores.emplace_back(operation.texture->GetSemaphoreForSignal(signalValue));
+                modifiedSubmitInfo.timelineSignalValues.emplace_back(signalValue);
             }
 
             // Update timeline semaphore submit info

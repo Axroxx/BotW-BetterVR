@@ -968,6 +968,8 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
     if (!renderer) {
         return;
     }
+    renderer->EnsureFrameInputLatched();
+
     auto* imguiOverlay = renderer->m_imguiOverlay.get();
     if (!imguiOverlay) {
         return;
