@@ -123,6 +123,7 @@ public:
         SharedTexture* CopyDepthToLayer(OpenXR::EyeSide side, VkCommandBuffer copyCmdBuffer, VkImage image, long frameIdx);
         void PrepareRendering(OpenXR::EyeSide side);
         void StartRendering();
+        void PrepareDebugDraw(const DebugDrawRenderData& debugDrawData);
         void Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData);
         const std::array<XrCompositionLayerProjectionView, 2>& FinishRendering(long frameIdx);
 

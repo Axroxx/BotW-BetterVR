@@ -543,7 +543,27 @@ RND_D3D12::DebugDrawPipeline::DebugDrawPipeline() {
     for (uint32_t eye = 0; eye < 2; ++eye) {
         for (uint32_t settingsIndex = 0; settingsIndex < 2; ++settingsIndex) {
             m_sceneSettingsBuffers[eye][settingsIndex] = D3D12Utils::CreateConstantBuffer(device, D3D12_HEAP_TYPE_UPLOAD, sizeof(debugDrawLineSettings));
+            void* mappedData = nullptr;
+            const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
+            checkHResult(m_sceneSettingsBuffers[eye][settingsIndex]->Map(0, &readRange, &mappedData), "Failed to map memory for debug draw scene settings!");
+            m_sceneSettingsMappedData[eye][settingsIndex] = (uint8_t*)mappedData;
         }
+    }
+}
+
+RND_D3D12::DebugDrawPipeline::~DebugDrawPipeline() {
+    for (uint32_t eye = 0; eye < m_sceneSettingsBuffers.size(); ++eye) {
+        for (uint32_t settingsIndex = 0; settingsIndex < m_sceneSettingsBuffers[eye].size(); ++settingsIndex) {
+            if (m_sceneSettingsBuffers[eye][settingsIndex] != nullptr && m_sceneSettingsMappedData[eye][settingsIndex] != nullptr) {
+                m_sceneSettingsBuffers[eye][settingsIndex]->Unmap(0, nullptr);
+                m_sceneSettingsMappedData[eye][settingsIndex] = nullptr;
+            }
+        }
+    }
+
+    if (m_vertexBuffer != nullptr && m_mappedVertexBuffer != nullptr) {
+        m_vertexBuffer->Unmap(0, nullptr);
+        m_mappedVertexBuffer = nullptr;
     }
 }
 
@@ -552,8 +572,51 @@ void RND_D3D12::DebugDrawPipeline::EnsureVertexBuffer(uint32_t requiredBytes) {
         return;
     }
 
+    if (m_vertexBuffer != nullptr && m_mappedVertexBuffer != nullptr) {
+        m_vertexBuffer->Unmap(0, nullptr);
+        m_mappedVertexBuffer = nullptr;
+    }
+
     m_vertexBufferCapacity = std::max(requiredBytes, std::max(m_vertexBufferCapacity * 2, 4096u));
     m_vertexBuffer = D3D12Utils::CreateConstantBuffer(VRManager::instance().D3D12->GetDevice(), D3D12_HEAP_TYPE_UPLOAD, m_vertexBufferCapacity);
+    void* mappedData = nullptr;
+    const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
+    checkHResult(m_vertexBuffer->Map(0, &readRange, &mappedData), "Failed to map memory for debug draw vertex buffer!");
+    m_mappedVertexBuffer = (DebugDrawVertex*)mappedData;
+}
+
+void RND_D3D12::DebugDrawPipeline::UploadRenderData(const DebugDrawRenderData& renderData) {
+    const uint32_t triangleVertexCount = (uint32_t)renderData.triangleVertices.size();
+    const uint32_t lineVertexCount = (uint32_t)renderData.lineVertices.size();
+    const uint32_t xrayTriangleVertexCount = (uint32_t)renderData.xrayTriangleVertices.size();
+    const uint32_t xrayLineVertexCount = (uint32_t)renderData.xrayLineVertices.size();
+    const uint32_t totalVertexCount = triangleVertexCount + lineVertexCount + xrayTriangleVertexCount + xrayLineVertexCount;
+    const uint32_t vertexBufferBytes = totalVertexCount * sizeof(DebugDrawVertex);
+    EnsureVertexBuffer(vertexBufferBytes);
+
+    if (m_mappedVertexBuffer == nullptr) {
+        return;
+    }
+
+    DebugDrawVertex* dstVertices = m_mappedVertexBuffer;
+    if (triangleVertexCount > 0) {
+        memcpy(dstVertices, renderData.triangleVertices.data(), triangleVertexCount * sizeof(DebugDrawVertex));
+    }
+    if (lineVertexCount > 0) {
+        memcpy(dstVertices + triangleVertexCount, renderData.lineVertices.data(), lineVertexCount * sizeof(DebugDrawVertex));
+    }
+    if (xrayTriangleVertexCount > 0) {
+        memcpy(dstVertices + triangleVertexCount + lineVertexCount, renderData.xrayTriangleVertices.data(), xrayTriangleVertexCount * sizeof(DebugDrawVertex));
+    }
+    if (xrayLineVertexCount > 0) {
+        memcpy(dstVertices + triangleVertexCount + lineVertexCount + xrayTriangleVertexCount, renderData.xrayLineVertices.data(), xrayLineVertexCount * sizeof(DebugDrawVertex));
+    }
+
+    m_vertexBufferView = {
+        .BufferLocation = m_vertexBuffer->GetGPUVirtualAddress(),
+        .SizeInBytes = vertexBufferBytes,
+        .StrideInBytes = sizeof(DebugDrawVertex),
+    };
 }
 
 void RND_D3D12::DebugDrawPipeline::UpdateSceneSettings(OpenXR::EyeSide side, uint32_t settingsIndex, ID3D12Resource* colorTarget, const glm::mat4& viewProjection, float xrayAlphaScale) {
@@ -566,13 +629,8 @@ void RND_D3D12::DebugDrawPipeline::UpdateSceneSettings(OpenXR::EyeSide side, uin
     };
 
     checkAssert(settingsIndex < m_sceneSettingsBuffers[side].size(), "Debug draw scene settings index is out of range!");
-    ID3D12Resource* sceneSettingsBuffer = m_sceneSettingsBuffers[side][settingsIndex].Get();
-    checkAssert(sceneSettingsBuffer != nullptr, "Debug draw scene settings buffer is missing!");
-    void* data = nullptr;
-    const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
-    checkHResult(sceneSettingsBuffer->Map(0, &readRange, &data), "Failed to map memory for debug draw scene settings!");
-    memcpy(data, &settings, sizeof(settings));
-    sceneSettingsBuffer->Unmap(0, nullptr);
+    checkAssert(m_sceneSettingsMappedData[side][settingsIndex] != nullptr, "Debug draw scene settings mapping is missing!");
+    memcpy(m_sceneSettingsMappedData[side][settingsIndex], &settings, sizeof(settings));
 }
 
 void RND_D3D12::DebugDrawPipeline::RecreatePipeline() {
@@ -728,32 +786,9 @@ void RND_D3D12::DebugDrawPipeline::Render(OpenXR::EyeSide side, ID3D12GraphicsCo
     const uint32_t xrayTriangleVertexCount = (uint32_t)renderData.xrayTriangleVertices.size();
     const uint32_t xrayLineVertexCount = (uint32_t)renderData.xrayLineVertices.size();
     const uint32_t totalVertexCount = triangleVertexCount + lineVertexCount + xrayTriangleVertexCount + xrayLineVertexCount;
-    const uint32_t vertexBufferBytes = totalVertexCount * sizeof(DebugDrawVertex);
-    EnsureVertexBuffer(vertexBufferBytes);
-
-    void* vertexData = nullptr;
-    const D3D12_RANGE readRange = { .Begin = 0, .End = 0 };
-    checkHResult(m_vertexBuffer->Map(0, &readRange, &vertexData), "Failed to map memory for debug draw vertex buffer!");
-    DebugDrawVertex* dstVertices = (DebugDrawVertex*)vertexData;
-    if (triangleVertexCount > 0) {
-        memcpy(dstVertices, renderData.triangleVertices.data(), triangleVertexCount * sizeof(DebugDrawVertex));
+    if (totalVertexCount > 0 && m_vertexBufferView.SizeInBytes < totalVertexCount * sizeof(DebugDrawVertex)) {
+        UploadRenderData(renderData);
     }
-    if (lineVertexCount > 0) {
-        memcpy(dstVertices + triangleVertexCount, renderData.lineVertices.data(), lineVertexCount * sizeof(DebugDrawVertex));
-    }
-    if (xrayTriangleVertexCount > 0) {
-        memcpy(dstVertices + triangleVertexCount + lineVertexCount, renderData.xrayTriangleVertices.data(), xrayTriangleVertexCount * sizeof(DebugDrawVertex));
-    }
-    if (xrayLineVertexCount > 0) {
-        memcpy(dstVertices + triangleVertexCount + lineVertexCount + xrayTriangleVertexCount, renderData.xrayLineVertices.data(), xrayLineVertexCount * sizeof(DebugDrawVertex));
-    }
-    m_vertexBuffer->Unmap(0, nullptr);
-
-    m_vertexBufferView = {
-        .BufferLocation = m_vertexBuffer->GetGPUVirtualAddress(),
-        .SizeInBytes = vertexBufferBytes,
-        .StrideInBytes = sizeof(DebugDrawVertex),
-    };
 
     commandList->SetGraphicsRootSignature(m_signature.Get());
 

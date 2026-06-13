@@ -116,8 +116,9 @@ public:
     class DebugDrawPipeline {
     public:
         DebugDrawPipeline();
-        ~DebugDrawPipeline() = default;
+        ~DebugDrawPipeline();
 
+        void UploadRenderData(const DebugDrawRenderData& renderData);
         void Render(OpenXR::EyeSide side, ID3D12GraphicsCommandList* commandList, ID3D12Resource* sceneDepthTexture, ID3D12Resource* colorTarget, DXGI_FORMAT colorFormat, ID3D12Resource* depthTarget, DXGI_FORMAT depthFormat, const DebugDrawRenderData& renderData, const glm::mat4& viewProjection);
 
     private:
@@ -138,10 +139,12 @@ public:
         ComPtr<ID3D12Resource> m_vertexBuffer;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView = {};
         uint32_t m_vertexBufferCapacity = 0;
+        DebugDrawVertex* m_mappedVertexBuffer = nullptr;
 
         ComPtr<ID3D12DescriptorHeap> m_sceneDepthHeap;
         ComPtr<ID3D12DescriptorHeap> m_targetHeap;
         ComPtr<ID3D12DescriptorHeap> m_depthHeap;
+        std::array<std::array<uint8_t*, 2>, 2> m_sceneSettingsMappedData = {};
         std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> m_sceneDepthHandles = {};
         std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 2> m_sceneDepthGpuHandles = {};
         std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> m_targetHandles = {};

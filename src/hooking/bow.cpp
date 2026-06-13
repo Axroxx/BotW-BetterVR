@@ -236,7 +236,7 @@ static constexpr float kLaunchTargetDistance = 100.0f;
 static constexpr float kMinimumArrowSpeed = 0.01f;
 static constexpr uint64_t kActiveSnapshotLifetimeMs = 1500;
 static constexpr uint64_t kPendingShotOverrideLifetimeMs = 250;
-static constexpr uint32_t kPresetDefaultMaxFrames = 96;
+static constexpr uint32_t kPresetDefaultMaxFrames = 48;
 static constexpr float kPreviewFirstFrameStep = 0.01f;
 static constexpr float kPreviewSpeedEpsilon = 0.00000011920929f;
 static constexpr float kPreviewFallSpeedRatioRangeBase = 20.0f;
@@ -292,16 +292,7 @@ struct PoseFallbackState {
     BowVisualizationDirectionSource directionSource = BowVisualizationDirectionSource::Unknown;
 };
 
-enum class PreviewPhase : uint8_t {
-    Start,
-    Middle,
-    Fall,
-};
-
-struct PreviewPoint {
-    glm::vec3 position = glm::vec3(0.0f);
-    PreviewPhase phase = PreviewPhase::Middle;
-};
+using PreviewPoint = glm::vec3;
 
 struct PendingShotOverride {
     bool valid = false;
@@ -1056,32 +1047,33 @@ static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std
     float currentSpeed = launchSpeed;
     float currentAccel = launchState.accel;
     float targetSpeed = launchState.aimSpeed;
-    PreviewPhase phase = PreviewPhase::Start;
+    bool isFirstFrame = true;
+    bool isFalling = false;
 
-    outPoints[outPointCount++] = { position, PreviewPhase::Middle };
+    outPoints[outPointCount++] = position;
 
     for (uint32_t frame = 1; frame <= kPresetDefaultMaxFrames && outPointCount < outPoints.size(); frame++) {
-        if (phase == PreviewPhase::Start) {
+        if (isFirstFrame) {
             currentSpeed = IntegrateSpeed(currentSpeed, currentAccel, targetSpeed, vfrScale);
             const glm::vec3 baseVelocity = direction * currentSpeed;
             const glm::vec3 combinedVelocity = hasRelativeVelocity ? (baseVelocity + relativeVel) : baseVelocity;
             currentVelocity = ScaleVectorToLengthOrScaleRaw(combinedVelocity, kPreviewFirstFrameStep);
             position += currentVelocity * vfrScale;
-            outPoints[outPointCount++] = { position, PreviewPhase::Start };
-            phase = PreviewPhase::Middle;
+            outPoints[outPointCount++] = position;
+            isFirstFrame = false;
             continue;
         }
 
-        if (phase == PreviewPhase::Middle) {
+        if (!isFalling) {
             const float distanceFromOrigin = glm::distance(position, launchState.launchOrigin);
             const bool enterFallNextFrame = atRange <= kPreviewImmediateFallRange || distanceFromOrigin >= atRange;
             currentSpeed = IntegrateSpeed(currentSpeed, currentAccel, targetSpeed, vfrScale);
             const glm::vec3 baseVelocity = direction * currentSpeed;
             currentVelocity = hasRelativeVelocity ? (baseVelocity + relativeVel) : baseVelocity;
             position += currentVelocity * vfrScale;
-            outPoints[outPointCount++] = { position, PreviewPhase::Middle };
+            outPoints[outPointCount++] = position;
             if (enterFallNextFrame) {
-                phase = PreviewPhase::Fall;
+                isFalling = true;
                 currentAccel = std::abs(launchState.fallAccel);
                 targetSpeed = ComputeFallTargetSpeed(launchState, currentSpeed);
                 gravityBias = glm::vec3(0.0f, launchState.gravity, 0.0f);
@@ -1100,7 +1092,7 @@ static bool BuildPreviewTrajectory(const BowVisualizationState& launchState, std
         const glm::vec3 combinedVelocity = scaledLocalVelocity + gravityBias;
         currentVelocity = hasRelativeVelocity ? (combinedVelocity + relativeVel) : combinedVelocity;
         position += currentVelocity * vfrScale;
-        outPoints[outPointCount++] = { position, PreviewPhase::Fall };
+        outPoints[outPointCount++] = position;
     }
 
     return outPointCount >= 2;
@@ -1218,26 +1210,26 @@ static uint32_t LerpColor(uint32_t a, uint32_t b, float t) {
     return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)bl << 16) | ((uint32_t)al << 24);
 }
 
-static float ComputeArcDistanceFraction(const std::array<PreviewPoint, kPresetDefaultMaxFrames + 2>& points, uint32_t pointCount, uint32_t pointIndex) {
-    if (pointCount < 2 || pointIndex >= pointCount) {
-        return 0.0f;
+static void BuildArcDistanceFractions(const std::array<PreviewPoint, kPresetDefaultMaxFrames + 2>& points, uint32_t pointCount, std::array<float, kPresetDefaultMaxFrames + 2>& outFractions) {
+    outFractions.fill(0.0f);
+    if (pointCount < 2) {
+        return;
     }
 
     float totalDistance = 0.0f;
-    float pointDistance = 0.0f;
     for (uint32_t i = 1; i < pointCount; ++i) {
-        const float segmentLength = glm::distance(points[i - 1].position, points[i].position);
-        totalDistance += segmentLength;
-        if (i <= pointIndex) {
-            pointDistance += segmentLength;
-        }
+        totalDistance += glm::distance(points[i - 1], points[i]);
+        outFractions[i] = totalDistance;
     }
 
     if (totalDistance <= 0.000001f) {
-        return 0.0f;
+        return;
     }
 
-    return glm::clamp(pointDistance / totalDistance, 0.0f, 1.0f);
+    const float invTotalDistance = 1.0f / totalDistance;
+    for (uint32_t i = 1; i < pointCount; ++i) {
+        outFractions[i] = glm::clamp(outFractions[i] * invTotalDistance, 0.0f, 1.0f);
+    }
 }
 
 static uint32_t ArcGradientColor(float t, float fallFraction) {
@@ -1271,27 +1263,27 @@ static void DrawAimingArc(const AimingArcCache& cache) {
     constexpr bool kPreviewXray = false;
 
     if (cache.pointCount >= 2) {
-        std::array<glm::vec3, kPresetDefaultMaxFrames + 2> positions = {};
         std::array<uint32_t, kPresetDefaultMaxFrames + 2> colors = {};
-        const float fallFraction = cache.firstFallIndex >= 0 ? ComputeArcDistanceFraction(cache.points, cache.pointCount, std::min((uint32_t)cache.firstFallIndex, cache.pointCount - 1)) : -1.0f;
+        std::array<float, kPresetDefaultMaxFrames + 2> distanceFractions = {};
+        BuildArcDistanceFractions(cache.points, cache.pointCount, distanceFractions);
+        const float fallFraction = cache.firstFallIndex >= 0 ? distanceFractions[std::min((uint32_t)cache.firstFallIndex, cache.pointCount - 1)] : -1.0f;
         for (uint32_t i = 0; i < cache.pointCount; ++i) {
-            positions[i] = cache.points[i].position;
-            colors[i] = ArcGradientColor(ComputeArcDistanceFraction(cache.points, cache.pointCount, i), fallFraction);
+            colors[i] = ArcGradientColor(distanceFractions[i], fallFraction);
         }
         DebugDraw::instance().Polyline(
-            std::span<const glm::vec3>(positions.data(), cache.pointCount),
+            std::span<const glm::vec3>(cache.points.data(), cache.pointCount),
             std::span<const uint32_t>(colors.data(), cache.pointCount),
             kThickness,
             kPreviewXray
         );
 
         if (cache.firstFallIndex >= 0 && (uint32_t)cache.firstFallIndex < cache.pointCount) {
-            DebugDraw::instance().Sphere(cache.points[cache.firstFallIndex].position, 0.12f, fallMarkerColor, 0, kPreviewXray);
+            DebugDraw::instance().Sphere(cache.points[cache.firstFallIndex], 0.12f, fallMarkerColor, 12, kPreviewXray);
         }
     }
 
     if (cache.hasTargetPos) {
-        DebugDraw::instance().Sphere(cache.targetPos, 0.16f, targetColor, 0, kPreviewXray);
+        DebugDraw::instance().Sphere(cache.targetPos, 0.16f, targetColor, 12, kPreviewXray);
     }
 }
 

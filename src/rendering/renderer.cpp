@@ -133,6 +133,7 @@ void RND_Renderer::EndFrame() {
         if (m_layer3D) {
             if (m_renderFrames[frameIdx].Is3DComplete()) {
                 m_layer3D->StartRendering();
+                m_layer3D->PrepareDebugDraw(debugDrawData);
                 m_layer3D->Render(OpenXR::EyeSide::LEFT, frameIdx, fadeTexture, debugDrawData);
                 m_layer3D->Render(OpenXR::EyeSide::RIGHT, frameIdx, fadeTexture, debugDrawData);
                 layer3DViews = m_layer3D->FinishRendering(frameIdx);
@@ -298,6 +299,14 @@ void RND_Renderer::Layer3D::StartRendering() {
     this->m_swapchains[OpenXR::EyeSide::RIGHT]->StartRendering();
     this->m_depthSwapchains[OpenXR::EyeSide::RIGHT]->PrepareRendering();
     this->m_depthSwapchains[OpenXR::EyeSide::RIGHT]->StartRendering();
+}
+
+void RND_Renderer::Layer3D::PrepareDebugDraw(const DebugDrawRenderData& debugDrawData) {
+    if (m_debugDrawPipeline == nullptr || debugDrawData.IsEmpty()) {
+        return;
+    }
+
+    m_debugDrawPipeline->UploadRenderData(debugDrawData);
 }
 
 void RND_Renderer::Layer3D::Render(OpenXR::EyeSide side, long frameIdx, SharedTexture* fadeTexture, const DebugDrawRenderData& debugDrawData) {

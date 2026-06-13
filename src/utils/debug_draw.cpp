@@ -65,6 +65,8 @@ static constexpr int BOX_FACES[6][4] = {
     { 1, 5, 6, 2 },
 };
 
+static constexpr int kPolylineTubeSideCount = 6;
+
 static uint8_t GetColorChannel(uint32_t color, int shift) {
     return (uint8_t)((color >> shift) & 0xFFu);
 }
@@ -231,10 +233,10 @@ static glm::vec3 ComputeTubeFrameNormal(const glm::vec3& tangent, const glm::vec
 }
 
 static uint32_t ShadeTubeColor(uint32_t color, const glm::vec3& normal) {
-    const glm::vec3 lightDir = glm::normalize(glm::vec3(-0.32f, 0.84f, 0.44f));
-    const glm::vec3 fillDir = glm::normalize(glm::vec3(0.58f, 0.18f, -0.79f));
-    const float keyLight = glm::max(glm::dot(normal, lightDir), 0.0f);
-    const float fillLight = glm::max(glm::dot(normal, fillDir), 0.0f);
+    static const glm::vec3 s_lightDir = glm::normalize(glm::vec3(-0.32f, 0.84f, 0.44f));
+    static const glm::vec3 s_fillDir = glm::normalize(glm::vec3(0.58f, 0.18f, -0.79f));
+    const float keyLight = glm::max(glm::dot(normal, s_lightDir), 0.0f);
+    const float fillLight = glm::max(glm::dot(normal, s_fillDir), 0.0f);
     const float skyLight = glm::max(normal.y, 0.0f);
     const float shade = glm::clamp(0.42f + (keyLight * 0.34f) + (fillLight * 0.12f) + (skyLight * 0.16f), 0.34f, 1.04f);
     return ScaleColor(color, shade);
@@ -266,11 +268,13 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
         return;
     }
 
-    static constexpr int kTubeSideCount = 8;
-    std::array<glm::vec3, kTubeSideCount> previousRingPositions = {};
-    std::array<glm::vec3, kTubeSideCount> previousRingNormals = {};
-    std::array<glm::vec3, kTubeSideCount> currentRingPositions = {};
-    std::array<glm::vec3, kTubeSideCount> currentRingNormals = {};
+    auto& triangleVertices = xray ? renderData.xrayTriangleVertices : renderData.triangleVertices;
+    triangleVertices.reserve(triangleVertices.size() + ((pointCount - 1) * kPolylineTubeSideCount * 6));
+
+    std::array<glm::vec3, kPolylineTubeSideCount> previousRingPositions = {};
+    std::array<glm::vec3, kPolylineTubeSideCount> previousRingNormals = {};
+    std::array<glm::vec3, kPolylineTubeSideCount> currentRingPositions = {};
+    std::array<glm::vec3, kPolylineTubeSideCount> currentRingNormals = {};
     glm::vec3 previousFrameNormal = ComputeTubeFrameNormal(ComputePolylineTangent(points, pointCount, 0), glm::vec3(0.0f, 1.0f, 0.0f));
 
     for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
@@ -281,8 +285,8 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
 
         auto& ringPositions = pointIndex == 0 ? previousRingPositions : currentRingPositions;
         auto& ringNormals = pointIndex == 0 ? previousRingNormals : currentRingNormals;
-        for (int side = 0; side < kTubeSideCount; ++side) {
-            const float angle = (glm::two_pi<float>() * (float)side) / (float)kTubeSideCount;
+        for (int side = 0; side < kPolylineTubeSideCount; ++side) {
+            const float angle = (glm::two_pi<float>() * (float)side) / (float)kPolylineTubeSideCount;
             const glm::vec3 radial = (ringNormal * std::cos(angle)) + (ringBitangent * std::sin(angle));
             ringPositions[side] = points[pointIndex] + radial * radius;
             ringNormals[side] = radial;
@@ -292,8 +296,8 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
             continue;
         }
 
-        for (int side = 0; side < kTubeSideCount; ++side) {
-            const int nextSide = (side + 1) % kTubeSideCount;
+        for (int side = 0; side < kPolylineTubeSideCount; ++side) {
+            const int nextSide = (side + 1) % kPolylineTubeSideCount;
             AddShadedQuad(
                 renderData,
                 previousRingPositions[side],
@@ -319,11 +323,13 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
         return;
     }
 
-    static constexpr int kTubeSideCount = 8;
-    std::array<glm::vec3, kTubeSideCount> previousRingPositions = {};
-    std::array<glm::vec3, kTubeSideCount> previousRingNormals = {};
-    std::array<glm::vec3, kTubeSideCount> currentRingPositions = {};
-    std::array<glm::vec3, kTubeSideCount> currentRingNormals = {};
+    auto& triangleVertices = xray ? renderData.xrayTriangleVertices : renderData.triangleVertices;
+    triangleVertices.reserve(triangleVertices.size() + ((pointCount - 1) * kPolylineTubeSideCount * 6));
+
+    std::array<glm::vec3, kPolylineTubeSideCount> previousRingPositions = {};
+    std::array<glm::vec3, kPolylineTubeSideCount> previousRingNormals = {};
+    std::array<glm::vec3, kPolylineTubeSideCount> currentRingPositions = {};
+    std::array<glm::vec3, kPolylineTubeSideCount> currentRingNormals = {};
     glm::vec3 previousFrameNormal = ComputeTubeFrameNormal(ComputePolylineTangent(points, pointCount, 0), glm::vec3(0.0f, 1.0f, 0.0f));
 
     for (uint32_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
@@ -334,8 +340,8 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
 
         auto& ringPositions = pointIndex == 0 ? previousRingPositions : currentRingPositions;
         auto& ringNormals = pointIndex == 0 ? previousRingNormals : currentRingNormals;
-        for (int side = 0; side < kTubeSideCount; ++side) {
-            const float angle = (glm::two_pi<float>() * (float)side) / (float)kTubeSideCount;
+        for (int side = 0; side < kPolylineTubeSideCount; ++side) {
+            const float angle = (glm::two_pi<float>() * (float)side) / (float)kPolylineTubeSideCount;
             const glm::vec3 radial = (ringNormal * std::cos(angle)) + (ringBitangent * std::sin(angle));
             ringPositions[side] = points[pointIndex] + radial * radius;
             ringNormals[side] = radial;
@@ -352,13 +358,13 @@ static void AddPolylineTube(DebugDrawRenderData& renderData, const glm::vec3* po
         const float previousRadius = glm::max(radius * previousRadiusScale, radius * 0.04f);
         const float currentRadius = glm::max(radius * currentRadiusScale, radius * 0.04f);
 
-        for (int side = 0; side < kTubeSideCount; ++side) {
+        for (int side = 0; side < kPolylineTubeSideCount; ++side) {
             previousRingPositions[side] = points[pointIndex - 1] + previousRingNormals[side] * previousRadius;
             currentRingPositions[side] = points[pointIndex] + currentRingNormals[side] * currentRadius;
         }
 
-        for (int side = 0; side < kTubeSideCount; ++side) {
-            const int nextSide = (side + 1) % kTubeSideCount;
+        for (int side = 0; side < kPolylineTubeSideCount; ++side) {
+            const int nextSide = (side + 1) % kPolylineTubeSideCount;
             AddShadedQuad(
                 renderData,
                 previousRingPositions[side],
@@ -580,6 +586,10 @@ DebugDrawRenderData DebugDraw::TakeRenderData(long frameIdx) {
     }
 
     DebugDrawRenderData renderData;
+    renderData.lineVertices.reserve(primitives.size() * 4);
+    renderData.xrayLineVertices.reserve(primitives.size() * 4);
+    renderData.triangleVertices.reserve(primitives.size() * 12);
+    renderData.xrayTriangleVertices.reserve(primitives.size() * 12);
 
     {
         std::scoped_lock lock(s_debugEyeStateMutex);
