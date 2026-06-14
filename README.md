@@ -34,11 +34,9 @@ While more integrated solutions are being found out, there's probably ways to se
 
 ### Current Limitations & Known Issues
 
-- There's a small chance that the screen stays black after exiting any menus, which requires restarting the game to continue.
-- Bow Aiming is done via a crosshair on the VR headset. Bow support might be added at some point.
+- [Should Be Fixed] There's a small chance that the screen stays black after exiting any menus, which requires restarting the game to continue.
 - Climbing ladders require jumping up the ladder to go up and you have to look at the ladder.
 - You can get stuck behind ladders sometimes, especially when you stop moving at the very top of the ladder while climbing down. So keep moving at the start!
-- Bombs, barrels etc. are thrown at a weird angle.
 - It'll lack some comfort options for now, like a left-handed mode or snap turning. These will be added later.
 
 ### Mod Installation
