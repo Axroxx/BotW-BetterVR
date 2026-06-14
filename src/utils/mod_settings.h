@@ -336,6 +336,19 @@ public:
         ImGui::SameLine();
         AddResetToGUI(changed);
     }
+
+    void AddPercentToGUI(bool* changed, float windowWidth, float minPercent, float maxPercent) {
+        float value = float(T(*this)) * 100.0f;
+        std::string idStr = std::format("##{}", this->name);
+        ImGui::PushItemWidth(windowWidth * 0.35f);
+        if (ImGui::SliderFloat(idStr.c_str(), &value, minPercent, maxPercent, "%.0f%%")) {
+            *this = T(value / 100.0f);
+            *changed = true;
+        }
+        ImGui::PopItemWidth();
+        ImGui::SameLine();
+        AddResetToGUI(changed);
+    }
 };
 
 class BoolSetting : public ModSetting<bool> {

@@ -808,33 +808,23 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
                 }
             });
         }
-
-        DrawSettingRow(windowWidth, "Thumbstick Deadzone", [&]() {
-            settings.stickDeadzone.AddToGUI(changed, windowWidth.x, 0.0f, 0.5f);
-        });
-
-        DrawSettingRow(windowWidth, "Stick Direction Threshold", [&]() {
-            settings.axisThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 0.9f);
+        
+        DrawSettingRow(windowWidth, "Walking Direction", [&]() {
+            settings.walkingDirection.AddComboToGUI(changed, ModSettings::toDisplayString);
         });
 
         DrawSettingRow(windowWidth, "Bow Aiming Arc Transparency", [&]() {
-            float value = settings.bowArcTransparency * 100.0f;
-            ImGui::PushItemWidth(windowWidth.x * 0.35f);
-            if (ImGui::SliderFloat("##BowArcTransparency", &value, 0.0f, 100.0f, "%.0f%%")) {
-                settings.bowArcTransparency = value / 100.0f;
-                *changed = true;
-            }
-            ImGui::PopItemWidth();
-            ImGui::SameLine();
-            if (ImGui::Button("Reset##BowArcTransparency")) {
-                settings.bowArcTransparency.Reset();
-                *changed = true;
-            }
+            settings.bowArcTransparency.AddPercentToGUI(changed, windowWidth.x, 0.0f, 100.0f);
         });
 
         ImGui::Spacing();
-        DrawSettingRow(windowWidth, "Walking Direction", [&]() {
-            settings.walkingDirection.AddComboToGUI(changed, ModSettings::toDisplayString);
+
+        DrawSettingRow(windowWidth, "Thumbstick Deadzone", [&]() {
+            settings.stickDeadzone.AddPercentToGUI(changed, windowWidth.x, 0.0f, 50.0f);
+        });
+
+        DrawSettingRow(windowWidth, "Stick Direction Threshold", [&]() {
+            settings.axisThreshold.AddPercentToGUI(changed, windowWidth.x, 10.0f, 90.0f);
         });
     }
     else {
@@ -1151,15 +1141,29 @@ void RND_Renderer::ImGuiOverlay::DrawCustomAttackSensitivityTab(const ImVec2& wi
 static const char* GetControllerModMenuPrompt() {
     auto& caps = VRManager::instance().XR->m_capabilities;
     switch (caps.activeControllerType) {
-    case ControllerType::OculusTouch:
-    case ControllerType::Pico4:
-    case ControllerType::HPReverbG2:
-    case ControllerType::ViveCosmos:
-        return "Hold the " ICON_KI_BUTTON_X " button on your left controller for 1 second to open the mod menu.\nAlternatively, for regular gamepad controllers, use the " ICON_KI_BUTTON_START " button.";
-    case ControllerType::ValveIndex:
-        return "Hold the " ICON_KI_BUTTON_A " button on your left controller for 1 second to open the mod menu.\nAlternatively, for regular gamepad controllers, use the " ICON_KI_BUTTON_START " button.";
-    default:
-        return "Hold the " ICON_KI_BUTTON_START " button on your gamepad from Cemu's input settings for 1 second to open the mod menu.";
+        case ControllerType::OculusTouch:
+        case ControllerType::Pico4:
+        case ControllerType::HPReverbG2:
+        case ControllerType::ViveCosmos:
+            return "Hold the " ICON_KI_BUTTON_X " button on your left controller for 1 second to open the mod menu.\nAlternatively, for regular gamepad controllers, use the " ICON_KI_BUTTON_START " button.";
+        case ControllerType::ValveIndex:
+            return "Hold the " ICON_KI_BUTTON_A " button on your left controller for 1 second to open the mod menu.\nAlternatively, for regular gamepad controllers, use the " ICON_KI_BUTTON_START " button.";
+        default:
+            return "Hold the " ICON_KI_BUTTON_START " button on your gamepad from Cemu's input settings for 1 second to open the mod menu.";
+    }
+}
+
+static const char* GetControllerMenuNavPrompt() {
+    auto& caps = VRManager::instance().XR->m_capabilities;
+    switch (caps.activeControllerType) {
+        case ControllerType::OculusTouch:
+        case ControllerType::Pico4:
+        case ControllerType::HPReverbG2:
+        case ControllerType::ViveCosmos:
+        case ControllerType::ValveIndex:
+            return ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_LT " " ICON_KI_BUTTON_RT " Tabs";
+        default:
+            return ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_L " " ICON_KI_BUTTON_R " Tabs";
     }
 }
 
@@ -1305,7 +1309,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
         ImGui::Unindent(10.0f);
         ImGui::Separator();
         ImGui::Spacing();
-        const char* navText = ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_L " " ICON_KI_BUTTON_R " Tabs";
+        const char* navText = GetControllerMenuNavPrompt();
         float textWidth = ImGui::CalcTextSize(navText).x;
         float availW = ImGui::GetContentRegionAvail().x;
         if (availW > textWidth) {
