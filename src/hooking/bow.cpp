@@ -1290,13 +1290,17 @@ static void DrawAimingArc(const AimingArcCache& cache) {
     constexpr float kThickness = 3.2f;
     constexpr bool kPreviewXray = false;
 
+    const float alphaScale = GetSettings().GetBowArcTransparency();
+
     if (cache.pointCount >= 2) {
         std::array<uint32_t, kPresetDefaultMaxFrames + 2> colors = {};
         std::array<float, kPresetDefaultMaxFrames + 2> distanceFractions = {};
         BuildArcDistanceFractions(cache.points, cache.pointCount, distanceFractions);
         const float fallFraction = cache.firstFallIndex >= 0 ? distanceFractions[std::min((uint32_t)cache.firstFallIndex, cache.pointCount - 1)] : -1.0f;
         for (uint32_t i = 0; i < cache.pointCount; ++i) {
-            colors[i] = ArcGradientColor(distanceFractions[i], fallFraction);
+            uint32_t c = ArcGradientColor(distanceFractions[i], fallFraction);
+            const uint8_t a = (uint8_t)glm::clamp((int)std::lround((float)((c >> 24) & 0xFF) * alphaScale), 0, 255);
+            colors[i] = (c & 0x00FFFFFF) | ((uint32_t)a << 24);
         }
         DebugDraw::instance().Polyline(
             std::span<const glm::vec3>(cache.points.data(), cache.pointCount),

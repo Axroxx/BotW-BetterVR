@@ -817,6 +817,21 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
             settings.axisThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 0.9f);
         });
 
+        DrawSettingRow(windowWidth, "Bow Aiming Arc Transparency", [&]() {
+            float value = settings.bowArcTransparency * 100.0f;
+            ImGui::PushItemWidth(windowWidth.x * 0.35f);
+            if (ImGui::SliderFloat("##BowArcTransparency", &value, 0.0f, 100.0f, "%.0f%%")) {
+                settings.bowArcTransparency = value / 100.0f;
+                *changed = true;
+            }
+            ImGui::PopItemWidth();
+            ImGui::SameLine();
+            if (ImGui::Button("Reset##BowArcTransparency")) {
+                settings.bowArcTransparency.Reset();
+                *changed = true;
+            }
+        });
+
         ImGui::Spacing();
         DrawSettingRow(windowWidth, "Walking Direction", [&]() {
             settings.walkingDirection.AddComboToGUI(changed, ModSettings::toDisplayString);

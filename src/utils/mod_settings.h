@@ -752,6 +752,7 @@ struct ModSettings {
     BoolSetting uiFollowsGaze = BoolSetting("UiFollowsGaze", true);
     FloatSetting<float> hudDistance = FloatSetting<float>("HudDistance", 1.85f, 0.5f, 2.5f);
     FloatSetting<float> hudSize = FloatSetting<float>("HudSize", 0.85f, 0.4f, 1.75f);
+    FloatSetting<float> bowArcTransparency = FloatSetting<float>("BowArcTransparency", 0.7f, 0.0f, 1.0f);
 
     // advanced settings
     BoolSetting enableDebuggerTools = BoolSetting("EnableDebugOverlay", false);
@@ -801,6 +802,7 @@ struct ModSettings {
             &uiFollowsGaze,
             &hudDistance,
             &hudSize,
+            &bowArcTransparency,
             &enableDebuggerTools,
             &debugShowEntityBoxesIn3DView,
             &debugShowRaycastLines,
@@ -871,6 +873,7 @@ struct ModSettings {
     }
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
+    float GetBowArcTransparency() const { return bowArcTransparency; }
     bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
