@@ -28,6 +28,7 @@ enum class BowVisualizationOriginSource : uint8_t {
 enum class BowVisualizationDirectionSource : uint8_t {
     Unknown,
     TargetPos,
+    BowEntityForward,
     RightHandAimPose,
     LeftHandAimPose,
     RightHandForward,
@@ -250,6 +251,7 @@ static constexpr uint32_t kWeaponAttackPosOffset = 0x770;
 static constexpr uint32_t kWeaponTargetPosOffset = 0x77C;
 static constexpr uint32_t kWeaponAttackPosValidOffset = 0x7A0;
 static constexpr uint32_t kWeaponDrawAmountOffset = 0x94C;
+static constexpr uint32_t kWeaponActorMtxOffset = 0x1F8;
 static constexpr uint32_t kGParamListNumObjectsOffset = 0x240;
 static constexpr uint32_t kGParamListObjectsPtrOffset = 0x244;
 static constexpr uint32_t kAttackObjectSlotOffset = 0x20;
@@ -413,6 +415,25 @@ static bool TryReadWeaponTargetPos(uint32_t weaponPtr, glm::vec3& outTargetPos) 
     CemuHooks::readMemory(weaponPtr + kWeaponTargetPosOffset, &beTargetPos);
     outTargetPos = beTargetPos.getLE();
     return IsFiniteVec3(outTargetPos);
+}
+
+static bool TryGetBowEntityWorldForward(glm::vec3& outForward) {
+    const uint32_t bowWeaponPtr = GetHeldLeftBowWeaponPtr();
+    if (bowWeaponPtr == 0) {
+        return false;
+    }
+
+    BEMatrix34 bowMtx = {};
+    CemuHooks::readMemory(bowWeaponPtr + kWeaponActorMtxOffset, &bowMtx);
+    const glm::mat4x3 m = bowMtx.getLEMatrix();
+    const glm::vec3 forward = -glm::vec3(m[0]);
+
+    if (!HasFiniteDirection(forward)) {
+        return false;
+    }
+
+    outForward = glm::normalize(forward);
+    return true;
 }
 
 static bool TryReadLiveBowState(LiveBowState& outState) {
@@ -645,10 +666,10 @@ static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTa
         };
 
         if (preferPoseAim) {
-            if (hasRightAimPose && tryAimPoint(rightAimWorldPos + rightAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::RightHandAimPose)) {
+            if (hasLeftAimPose && tryAimPoint(leftAimWorldPos + leftAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::LeftHandAimPose)) {
                 return true;
             }
-            if (hasLeftAimPose && tryAimPoint(leftAimWorldPos + leftAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::LeftHandAimPose)) {
+            if (hasRightAimPose && tryAimPoint(rightAimWorldPos + rightAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::RightHandAimPose)) {
                 return true;
             }
             if (hasCameraPose && tryAimPoint(cameraOrigin + cameraForward * kPreviewAimDistance, BowVisualizationDirectionSource::CameraAim)) {
@@ -661,10 +682,10 @@ static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTa
         }
 
         if (!preferPoseAim) {
-            if (hasRightAimPose && tryAimPoint(rightAimWorldPos + rightAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::RightHandAimPose)) {
+            if (hasLeftAimPose && tryAimPoint(leftAimWorldPos + leftAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::LeftHandAimPose)) {
                 return true;
             }
-            if (hasLeftAimPose && tryAimPoint(leftAimWorldPos + leftAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::LeftHandAimPose)) {
+            if (hasRightAimPose && tryAimPoint(rightAimWorldPos + rightAimWorldForward * kPreviewAimDistance, BowVisualizationDirectionSource::RightHandAimPose)) {
                 return true;
             }
         }
@@ -686,7 +707,14 @@ static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTa
     };
 
     auto tryFinalizePose = [&](const glm::vec3& fallbackForward, BowVisualizationDirectionSource fallbackSource) -> bool {
-        if (resolveDirectionAndTarget(outPose.origin, outPose.direction, outPose.directionSource, outPose.targetPos)) {
+        glm::vec3 bowEntityForward = glm::vec3(0.0f);
+        if (TryGetBowEntityWorldForward(bowEntityForward)) {
+            outPose.direction = bowEntityForward;
+            outPose.directionSource = BowVisualizationDirectionSource::BowEntityForward;
+            outPose.targetPos = outPose.origin + glm::normalize(bowEntityForward) * kPreviewAimDistance;
+            outPose.hasTargetPos = true;
+        }
+        else if (resolveDirectionAndTarget(outPose.origin, outPose.direction, outPose.directionSource, outPose.targetPos)) {
             outPose.hasTargetPos = true;
         }
         else {
@@ -710,24 +738,24 @@ static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTa
             trySnapToWeaponAttackOrigin(leftAimWorldPos);
         }
 
-        const glm::vec3 fallbackForward = hasRightAimPose ? rightAimWorldForward : (hasRightHandPose ? rightWorldForward : leftWorldForward);
-        const BowVisualizationDirectionSource fallbackSource = hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : (hasRightHandPose ? BowVisualizationDirectionSource::RightHandForward : BowVisualizationDirectionSource::LeftHandForward);
+        const glm::vec3 fallbackForward = hasLeftAimPose ? leftAimWorldForward : leftWorldForward;
+        const BowVisualizationDirectionSource fallbackSource = hasLeftAimPose ? BowVisualizationDirectionSource::LeftHandAimPose : BowVisualizationDirectionSource::LeftHandForward;
         return tryFinalizePose(fallbackForward, fallbackSource);
     }
 
     if (liveState.hasOrigin) {
         outPose.origin = liveState.origin;
         outPose.originSource = BowVisualizationOriginSource::WeaponAttackPos;
-        const glm::vec3 fallbackForward = hasRightAimPose ? rightAimWorldForward : (hasRightHandPose ? rightWorldForward : (hasLeftAimPose ? leftAimWorldForward : glm::vec3(0.0f, 0.0f, -1.0f)));
-        const BowVisualizationDirectionSource fallbackSource = hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : (hasRightHandPose ? BowVisualizationDirectionSource::RightHandForward : (hasLeftAimPose ? BowVisualizationDirectionSource::LeftHandAimPose : BowVisualizationDirectionSource::CameraForward));
+        const glm::vec3 fallbackForward = hasLeftAimPose ? leftAimWorldForward : (hasLeftHandPose ? leftWorldForward : (hasRightAimPose ? rightAimWorldForward : glm::vec3(0.0f, 0.0f, -1.0f)));
+        const BowVisualizationDirectionSource fallbackSource = hasLeftAimPose ? BowVisualizationDirectionSource::LeftHandAimPose : (hasLeftHandPose ? BowVisualizationDirectionSource::LeftHandForward : (hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : BowVisualizationDirectionSource::CameraForward));
         return tryFinalizePose(fallbackForward, fallbackSource);
     }
 
     if (hasRightHandPose) {
         outPose.origin = rightWorldPos + rightWorldForward * kPreviewOriginForwardOffset;
         outPose.originSource = BowVisualizationOriginSource::RightHandPose;
-        const glm::vec3 fallbackForward = hasRightAimPose ? rightAimWorldForward : rightWorldForward;
-        const BowVisualizationDirectionSource fallbackSource = hasRightAimPose ? BowVisualizationDirectionSource::RightHandAimPose : BowVisualizationDirectionSource::RightHandForward;
+        const glm::vec3 fallbackForward = hasLeftAimPose ? leftAimWorldForward : rightWorldForward;
+        const BowVisualizationDirectionSource fallbackSource = hasLeftAimPose ? BowVisualizationDirectionSource::LeftHandAimPose : BowVisualizationDirectionSource::RightHandForward;
         return tryFinalizePose(fallbackForward, fallbackSource);
     }
 
