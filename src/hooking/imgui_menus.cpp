@@ -1140,11 +1140,11 @@ static const char* GetControllerModMenuPrompt() {
     case ControllerType::Pico4:
     case ControllerType::HPReverbG2:
     case ControllerType::ViveCosmos:
-        return "Hold the " ICON_KI_BUTTON_X " button on your left controller for 1 second to open the mod menu.";
+        return "Hold the " ICON_KI_BUTTON_X " button on your left controller for 1 second to open the mod menu.\nAlternatively, for regular gamepad controllers, use the " ICON_KI_BUTTON_START " button.";
     case ControllerType::ValveIndex:
-        return "Hold the " ICON_KI_BUTTON_A " button on your left controller for 1 second to open the mod menu.";
+        return "Hold the " ICON_KI_BUTTON_A " button on your left controller for 1 second to open the mod menu.\nAlternatively, for regular gamepad controllers, use the " ICON_KI_BUTTON_START " button.";
     default:
-        return "Hold the " ICON_KI_BUTTON_START " button on your gamepad for 1 second to open the mod menu.";
+        return "Hold the " ICON_KI_BUTTON_START " button on your gamepad from Cemu's input settings for 1 second to open the mod menu.";
     }
 }
 

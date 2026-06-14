@@ -333,8 +333,13 @@ inline ControllerType DetectActiveControllerType(XrInstance instance, XrSession 
     xrStringToPath(instance, "/user/hand/left", &topLevelPath);
 
     XrInteractionProfileState profileState = { XR_TYPE_INTERACTION_PROFILE_STATE };
-    if (xrGetCurrentInteractionProfile(session, topLevelPath, &profileState) != XR_SUCCESS || profileState.interactionProfile == XR_NULL_PATH) {
-        Log::print<INFO>(" - Active Controller Type: Unknown (no profile)");
+    XrResult profileResult = xrGetCurrentInteractionProfile(session, topLevelPath, &profileState);
+    if (profileResult != XR_SUCCESS) {
+        Log::print<INFO>(" - Active Controller Type: Unknown (xrGetCurrentInteractionProfile failed: {})", (int)profileResult);
+        return ControllerType::Unknown;
+    }
+    if (profileState.interactionProfile == XR_NULL_PATH) {
+        Log::print<INFO>(" - Active Controller Type: Unknown (no controllers bound yet)");
         return ControllerType::Unknown;
     }
 

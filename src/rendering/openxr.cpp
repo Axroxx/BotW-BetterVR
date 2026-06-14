@@ -751,9 +751,11 @@ void OpenXR::ProcessEvents() {
             case XR_TYPE_EVENT_DATA_EVENTS_LOST:
                 Log::print<WARNING>("OpenXR has indicated that events are being lost!");
                 break;
-            case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
-                Log::print<WARNING>("OpenXR has indicated that the interaction profile has changed!");
+            case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED: {
+                Log::print<INFO>("OpenXR has indicated that the interaction profile has changed, re-detecting controller type...");
+                m_capabilities.activeControllerType = DetectActiveControllerType(m_instance, m_session);
                 break;
+            }
             case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
                 Log::print<WARNING>("OpenXR has indicated that the reference space has changed!");
                 break;
