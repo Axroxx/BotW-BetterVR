@@ -105,6 +105,12 @@ b continueTo3DClear
 
 ; void GX2ClearBuffersEx(GX2ColorBuffer* colorBuffer, GX2DepthBuffer* depthBuffer, float r, float g, float b, float a, float depthClearValue, uint8 stencilClearValue, GX2ClearFlags clearFlags)
 continueTo3DClear:
+; check if clear calls should be skipped
+lis r12, useStubHooks_preventClearCalls@ha
+lwz r12, useStubHooks_preventClearCalls@l(r12)
+cmpwi r12, 1
+beq exit_hookPostHDRComposedImage
+
 ; identifier type of clear
 lis r7, magic3DClearingValues@ha
 lfs f1, magic3DClearingValues@l+0x0(r7)

@@ -6,6 +6,9 @@ moduleMatches = 0x6267BFD0
 useStubHooks:
 .int 0
 
+useStubHooks_preventClearCalls:
+.int 0
+
 const_cameraHeightChange:
 .float 0.5
 .float -0.5

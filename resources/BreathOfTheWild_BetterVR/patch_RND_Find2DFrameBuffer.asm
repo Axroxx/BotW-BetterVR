@@ -69,6 +69,12 @@ bl import.coreinit.hook_OSReportToConsole
 b continueTo2DClear
 
 continueTo2DClear:
+; check if clear calls should be skipped
+lis r12, useStubHooks_preventClearCalls@ha
+lwz r12, useStubHooks_preventClearCalls@l(r12)
+cmpwi r12, 1
+beq skipClearing2DColorBuffer
+
 lis r3, magic2DColorValue@ha
 lfs f1, magic2DColorValue@l+0x0(r3)
 
