@@ -759,6 +759,23 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
             };
             settings.playerHeightOffset.AddToGUI(changed, windowWidth.x, -0.5f, 1.0f, formatHeight);
         });
+
+        DrawSettingRow(windowWidth, "Snap Turn Angle", [&]() {
+            static const char* kSnapLabels[] = { "Smooth", "30 deg (Recommended)", "45 deg", "60 deg" };
+            static const int32_t kSnapValues[] = { 0, 30, 45, 60 };
+            int current = settings.snapTurnAngle;
+            int idx = 1;
+            for (int i = 0; i < 4; ++i) {
+                if (current == kSnapValues[i]) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (ImGui::Combo("##SnapTurnAngle", &idx, kSnapLabels, 4)) {
+                settings.snapTurnAngle = kSnapValues[idx];
+                *changed = true;
+            }
+        });
     }
 
     ImGui::Spacing();

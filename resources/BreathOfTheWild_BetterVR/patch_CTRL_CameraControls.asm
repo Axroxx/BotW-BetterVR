@@ -63,6 +63,10 @@ lwz r4, 0x18(r1)
 lwz r5, 0x14(r1)
 bl import.coreinit.hook_AdjustGameplayCameraPivot
 
+lwz r4, 0x18(r1)
+lwz r5, 0x14(r1)
+bl import.coreinit.hook_SnapTurnCameraPivot
+
 lwz r5, 0x14(r1)
 lwz r4, 0x18(r1)
 lwz r3, 0x1C(r1)

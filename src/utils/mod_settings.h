@@ -784,6 +784,7 @@ struct ModSettings {
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
     FloatSetting<float> stickDeadzone = FloatSetting<float>("StickDeadzone", kDefaultStickDeadzone, 0.0f, 1.0f);
     EnumSetting<WalkingDirection> walkingDirection = EnumSetting<WalkingDirection>("WalkingDirection", WalkingDirection::CAMERA, ModSettings::toString, { WalkingDirection::CAMERA, WalkingDirection::CONTROLLER });
+    IntSetting<int32_t> snapTurnAngle = IntSetting<int32_t>("SnapTurnAngle", 30, 0, 60);
     EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_EASY, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_CUSTOM });
     FloatSetting<float> customStabSpeedThreshold = FloatSetting<float>("CustomStabSpeedThreshold", 0.05f, 0.01f, 0.50f);
     FloatSetting<float> customStabAccThreshold = FloatSetting<float>("CustomStabAccThreshold", 7.0f, 1.0f, 15.0f);
@@ -830,6 +831,7 @@ struct ModSettings {
             &axisThreshold,
             &stickDeadzone,
             &walkingDirection,
+            &snapTurnAngle,
             &swingSensitivity,
             &customStabSpeedThreshold,
             &customStabAccThreshold,
@@ -892,6 +894,7 @@ struct ModSettings {
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
     WalkingDirection GetWalkingDirection() const { return walkingDirection; }
+    int32_t GetSnapTurnAngle() const { return snapTurnAngle; }
     float GetWeaponDamageOutputScale() const { return GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM ? customDamageOutputScale : 1.0f; }
 
     bool IsDebuggingToolsEnabled() const;
@@ -921,6 +924,7 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
         std::format_to(std::back_inserter(buffer), " - Weapon Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
         std::format_to(std::back_inserter(buffer), " - Walking Direction: {}\n", toDisplayString(GetWalkingDirection()));
+        std::format_to(std::back_inserter(buffer), " - Snap Turn Angle: {} deg\n", GetSnapTurnAngle());
         return buffer;
     }
 };

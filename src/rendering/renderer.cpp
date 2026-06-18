@@ -11,6 +11,26 @@
 
 std::atomic_bool RND_Renderer::Layer2D::s_isBowAimingActive = false;
 
+static float GetSnapTurnFadeAmount() {
+    auto* xr = VRManager::instance().XR.get();
+    if (xr == nullptr) {
+        return 0.0f;
+    }
+
+    const uint64_t startNs = xr->m_snapTurnFadeStartNs.load(std::memory_order_relaxed);
+    const uint64_t endNs = xr->m_snapTurnFadeUntilNs.load(std::memory_order_relaxed);
+    const uint64_t nowNs = GetTimeStamp();
+    if (startNs == 0 || endNs <= startNs || nowNs >= endNs) {
+        return 0.0f;
+    }
+
+    const double durationNs = (double)(endNs - startNs);
+    const double t = glm::clamp(((double)(nowNs - startNs)) / durationNs, 0.0, 1.0);
+    const double triangle = t <= 0.5 ? (t * 2.0) : ((1.0 - t) * 2.0);
+    const double eased = triangle * triangle * (3.0 - (2.0 * triangle));
+    return (float)eased;
+}
+
 bool RND_Renderer::IsCurrent3DPresentationAllowed(const RenderFrame& frame) const {
     if (!CemuHooks::IsInGame()) {
         return false;
@@ -140,9 +160,11 @@ void RND_Renderer::EndFrame() {
     DebugDrawRenderData debugDrawData = hudFrameIdx != -1 ? DebugDraw::instance().TakeRenderData(hudFrameIdx) : DebugDraw::instance().TakeRenderData();
 
     const bool isFadeVisible = CemuHooks::IsAnyFadeScreenVisible();
+    const float roomscaleFade = CemuHooks::GetRoomscaleFadeAmount();
+    const float snapTurnFade = GetSnapTurnFadeAmount();
     m_isFadeActive.store(isFadeVisible, std::memory_order_relaxed);
     SetCustomFadeColor(glm::fvec3(0.0f));
-    SetCustomFadeAmount(CemuHooks::GetRoomscaleFadeAmount());
+    SetCustomFadeAmount(std::max(roomscaleFade, snapTurnFade));
 
     bool reusedStable3D = false;
     long presented3DFrameIdx = -1;

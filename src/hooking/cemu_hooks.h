@@ -45,6 +45,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_CheckIfCameraCanSeePos", &hook_CheckIfCameraCanSeePos);
         osLib_registerHLEFunction("coreinit", "hook_UpdateCameraForGameplay", &hook_UpdateCameraForGameplay);
         osLib_registerHLEFunction("coreinit", "hook_AdjustGameplayCameraPivot", &hook_AdjustGameplayCameraPivot);
+        osLib_registerHLEFunction("coreinit", "hook_SnapTurnCameraPivot", &hook_SnapTurnCameraPivot);
         osLib_registerHLEFunction("coreinit", "hook_GetRenderCamera", &hook_GetRenderCamera);
         osLib_registerHLEFunction("coreinit", "hook_GetRenderProjection", &hook_GetRenderProjection);
         osLib_registerHLEFunction("coreinit", "hook_EndCameraSide", &hook_EndCameraSide);
@@ -211,6 +212,7 @@ private:
     static void hook_OverwriteSeadPerspectiveProjectionSet(PPCInterpreter_t* hCPU);
     static void hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU);
     static void hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU);
+    static void hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU);
     static void hook_GetRenderCamera(PPCInterpreter_t* hCPU);
     static void hook_GetRenderProjection(PPCInterpreter_t* hCPU);
     static void hook_EndCameraSide(PPCInterpreter_t* hCPU);

@@ -101,6 +101,21 @@ static bool IsAllFinite(const glm::vec3& value) {
     return glm::all(glm::isfinite(value));
 }
 
+inline uint64_t GetTimeStamp() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+inline float NormalizeDegrees(float degrees) {
+    float normalized = std::remainder(degrees, 360.0f);
+    if (normalized <= -180.0f) {
+        normalized += 360.0f;
+    }
+    else if (normalized > 180.0f) {
+        normalized -= 360.0f;
+    }
+    return normalized;
+}
+
 inline XrVector2f ToXR(const glm::fvec2& vec) {
     return { vec.x, vec.y };
 }

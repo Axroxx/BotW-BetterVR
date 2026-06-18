@@ -55,6 +55,58 @@ int getMagnesisForwardFrameInterval(float v)
     return 1;
 }
 
+static void ClearPendingSnapTurnRequest(OpenXR* xr, bool& isLatched, const char* reason) {
+    const int pendingDirection = xr->m_pendingSnapTurnDirection.exchange(0, std::memory_order_relaxed);
+    const uint64_t pendingUntilNs = xr->m_pendingSnapTurnRequestUntilNs.exchange(0, std::memory_order_relaxed);
+    if (pendingDirection != 0 || pendingUntilNs != 0 || isLatched) {
+        Log::print<INFO>("SnapTurn: cleared request ({}) dir={} latched={}", reason, pendingDirection, isLatched);
+    }
+    isLatched = false;
+}
+
+static bool ShouldUseFirstPersonSnapTurn(bool inGame) {
+    return inGame && CemuHooks::IsFirstPerson() && !CemuHooks::HasActiveCutscene() && !CemuHooks::IsScreenVisible(ScreenId::AppCamera_00) && GetSettings().GetSnapTurnAngle() != 0;
+}
+
+static void UpdateFirstPersonSnapTurnState(XrActionStateVector2f& rightStickSource, bool inGame) {
+    auto* xr = VRManager::instance().XR.get();
+    if (xr == nullptr) {
+        return;
+    }
+
+    static bool s_snapTurnStickLatched = false;
+    constexpr auto kSnapTurnRequestDuration = std::chrono::milliseconds(120);
+
+    if (!ShouldUseFirstPersonSnapTurn(inGame) || xr->m_isMenuOpen.load(std::memory_order_relaxed)) {
+        ClearPendingSnapTurnRequest(xr, s_snapTurnStickLatched, "mode/menu");
+        return;
+    }
+
+    const uint64_t nowNs = GetTimeStamp();
+    const uint64_t pendingUntilNs = xr->m_pendingSnapTurnRequestUntilNs.load(std::memory_order_relaxed);
+    if (pendingUntilNs != 0 && nowNs > pendingUntilNs) {
+        const int expiredDirection = xr->m_pendingSnapTurnDirection.exchange(0, std::memory_order_relaxed);
+        xr->m_pendingSnapTurnRequestUntilNs.store(0, std::memory_order_relaxed);
+        Log::print<INFO>("SnapTurn: request expired before camera hook dir={}", expiredDirection);
+    }
+
+    const float axisThreshold = GetSettings().axisThreshold;
+    const float releaseThreshold = std::max<float>((float)GetSettings().stickDeadzone, axisThreshold * 0.5f);
+    const float stickX = rightStickSource.currentState.x;
+
+    if (s_snapTurnStickLatched) {
+        if (std::fabs(stickX) <= releaseThreshold) {
+            s_snapTurnStickLatched = false;
+        }
+    }
+    else if (stickX >= axisThreshold || stickX <= -axisThreshold) {
+        const int direction = stickX > 0.0f ? 1 : -1;
+        xr->m_pendingSnapTurnDirection.store(direction, std::memory_order_relaxed);
+        xr->m_pendingSnapTurnRequestUntilNs.store(nowNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnRequestDuration).count(), std::memory_order_relaxed);
+        s_snapTurnStickLatched = true;
+    }
+}
+
 // Gesture detection functions
 HandGestureState calculateHandGesture(
     OpenXR::GameState& gameState,
@@ -870,7 +922,7 @@ void processHandGesture(RND_Renderer* renderer, OpenXR::InputState& inputs, Hand
     }
 }
 
-void processJoystickInput(VPADButtons& oldXRStickHold, VPADButtons& newXRStickHold, VPADStatus& vpadStatus, XrActionStateVector2f& leftStickSource, XrActionStateVector2f& rightStickSource)
+void processJoystickInput(VPADButtons& oldXRStickHold, VPADButtons& newXRStickHold, VPADStatus& vpadStatus, XrActionStateVector2f& leftStickSource, XrActionStateVector2f& rightStickSource, bool disableRightStickHorizontalRotation)
 {
     // movement/navigation stick
     vpadStatus.leftStick = { leftStickSource.currentState.x + vpadStatus.leftStick.x.getLE(), leftStickSource.currentState.y + vpadStatus.leftStick.y.getLE() };
@@ -887,12 +939,15 @@ void processJoystickInput(VPADButtons& oldXRStickHold, VPADButtons& newXRStickHo
     else if (leftStickSource.currentState.y >= axisThreshold || (HAS_FLAG(oldXRStickHold, VPAD_STICK_L_EMULATION_UP) && leftStickSource.currentState.y >= holdThreshold))
         newXRStickHold |= VPAD_STICK_L_EMULATION_UP;
 
-    vpadStatus.rightStick = { rightStickSource.currentState.x + vpadStatus.rightStick.x.getLE(), rightStickSource.currentState.y + vpadStatus.rightStick.y.getLE() };
+    const float rightStickX = disableRightStickHorizontalRotation ? 0.0f : rightStickSource.currentState.x;
+    vpadStatus.rightStick = { rightStickX + vpadStatus.rightStick.x.getLE(), rightStickSource.currentState.y + vpadStatus.rightStick.y.getLE() };
 
-    if (rightStickSource.currentState.x <= -axisThreshold || (HAS_FLAG(oldXRStickHold, VPAD_STICK_R_EMULATION_LEFT) && rightStickSource.currentState.x <= -holdThreshold))
-        newXRStickHold |= VPAD_STICK_R_EMULATION_LEFT;
-    else if (rightStickSource.currentState.x >= axisThreshold || (HAS_FLAG(oldXRStickHold, VPAD_STICK_R_EMULATION_RIGHT) && rightStickSource.currentState.x >= holdThreshold))
-        newXRStickHold |= VPAD_STICK_R_EMULATION_RIGHT;
+    if (!disableRightStickHorizontalRotation) {
+        if (rightStickSource.currentState.x <= -axisThreshold || (HAS_FLAG(oldXRStickHold, VPAD_STICK_R_EMULATION_LEFT) && rightStickSource.currentState.x <= -holdThreshold))
+            newXRStickHold |= VPAD_STICK_R_EMULATION_LEFT;
+        else if (rightStickSource.currentState.x >= axisThreshold || (HAS_FLAG(oldXRStickHold, VPAD_STICK_R_EMULATION_RIGHT) && rightStickSource.currentState.x >= holdThreshold))
+            newXRStickHold |= VPAD_STICK_R_EMULATION_RIGHT;
+    }
 
     if (rightStickSource.currentState.y <= -axisThreshold || (HAS_FLAG(oldXRStickHold, VPAD_STICK_R_EMULATION_DOWN) && rightStickSource.currentState.y <= -holdThreshold))
         newXRStickHold |= VPAD_STICK_R_EMULATION_DOWN;
@@ -964,7 +1019,8 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
     uint32_t vpadStatusOffset = hCPU->gpr[4];
     VPADStatus vpadStatus = {};
 
-    auto* renderer = VRManager::instance().XR->GetRenderer();
+    auto& xr = VRManager::instance().XR;
+    auto* renderer = xr->GetRenderer();
     if (!renderer) {
         return;
     }
@@ -988,7 +1044,7 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
             startBtnActionConsumed = false;
         }
         else if (!startBtnActionConsumed && std::chrono::steady_clock::now() - startBtnLastTime > std::chrono::milliseconds(500)) {
-            VRManager::instance().XR->m_isMenuOpen = !VRManager::instance().XR->m_isMenuOpen;
+            xr->m_isMenuOpen = !xr->m_isMenuOpen;
             startBtnActionConsumed = true;
         }
         startBtnWasDown = true;
@@ -997,16 +1053,16 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
         startBtnWasDown = false;
     }
 
-    auto* rumbleMgr = VRManager::instance().XR->GetRumbleManager();
+    auto* rumbleMgr = xr->GetRumbleManager();
 
     // fetch input state
-    OpenXR::InputState inputs = VRManager::instance().XR->m_input.load();
+    OpenXR::InputState inputs = xr->m_input.load();
     inputs.inGame.drop_weapon[0] = inputs.inGame.drop_weapon[1] = false;
 
     float dt = (float)(inputs.shared.inputTime - prev_sample) / 1000000000.0f;
 
     // fetch game state
-    auto gameState = VRManager::instance().XR->m_gameState.load(); 
+    auto gameState = xr->m_gameState.load(); 
     gameState.in_game = inputs.shared.in_game;
 
     // buttons
@@ -1146,13 +1202,16 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
         processMenuInput(newXRBtnHold, inputs, gameState);
     }
 
+    UpdateFirstPersonSnapTurnState(rightStickSource, gameState.in_game);
+
     // Update rumble/haptics
     rumbleMgr->updateHaptics();
 
     // sticks
+    const bool disableRightStickHorizontalRotation = ShouldUseFirstPersonSnapTurn(gameState.in_game) && !xr->m_isMenuOpen && xr->m_isCameraChaseActive;
     static VPADButtons oldXRStickHold = VPAD_BUTTON_NONE;
     VPADButtons newXRStickHold = VPAD_BUTTON_NONE;
-    processJoystickInput(oldXRStickHold, newXRStickHold, vpadStatus, leftStickSource, rightStickSource);
+    processJoystickInput(oldXRStickHold, newXRStickHold, vpadStatus, leftStickSource, rightStickSource, disableRightStickHorizontalRotation);
 
     // calculate new hold, trigger and release
     uint32_t combinedHold = (vpadStatus.hold.getLE() | (newXRBtnHold | newXRStickHold));
@@ -1180,8 +1239,8 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
 
     updatePreviousValues(gameState, newXRBtnHold, leftGesture, rightGesture, inputs.shared.inputTime);
 
-    VRManager::instance().XR->m_gameState.store(gameState);
-    VRManager::instance().XR->m_input.store(inputs);
+    xr->m_gameState.store(gameState);
+    xr->m_input.store(inputs);
 }
 
 

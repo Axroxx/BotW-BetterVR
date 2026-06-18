@@ -114,6 +114,11 @@ public:
     };
     std::atomic<InputState> m_input = InputState{};
     std::atomic<glm::fquat> m_inputCameraRotation = glm::identity<glm::fquat>();
+    std::atomic_int32_t m_pendingSnapTurnDirection = 0;
+    std::atomic_uint64_t m_pendingSnapTurnRequestUntilNs = 0;
+    std::atomic_uint64_t m_snapTurnFadeStartNs = 0;
+    std::atomic_uint64_t m_snapTurnFadeUntilNs = 0;
+    std::atomic_bool m_isCameraChaseActive = false;
 
     struct GameState {
         uint32_t previous_button_hold;

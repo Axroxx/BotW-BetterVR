@@ -59,6 +59,90 @@ bool s_wasCrouching = false;
 float actualCrouchOffset = 0.0f;
 std::chrono::steady_clock::time_point crouch_state_change_time;
 
+static int TryConsumePendingSnapTurnDirection() {
+    auto* xr = VRManager::instance().XR.get();
+    if (xr == nullptr) {
+        return 0;
+    }
+
+    const uint64_t requestUntilNs = xr->m_pendingSnapTurnRequestUntilNs.load(std::memory_order_relaxed);
+    if (requestUntilNs == 0 || GetTimeStamp() > requestUntilNs) {
+        xr->m_pendingSnapTurnDirection.store(0, std::memory_order_relaxed);
+        xr->m_pendingSnapTurnRequestUntilNs.store(0, std::memory_order_relaxed);
+        return 0;
+    }
+
+    const int direction = xr->m_pendingSnapTurnDirection.exchange(0, std::memory_order_relaxed);
+    if (direction != 0) {
+        xr->m_pendingSnapTurnRequestUntilNs.store(0, std::memory_order_relaxed);
+    }
+    return direction;
+}
+
+static glm::fvec3 SphericalToCameraTargetVector(const glm::fvec3& sphericalDegrees) {
+    const float radius = sphericalDegrees.x;
+    const float latRadians = glm::radians(sphericalDegrees.y);
+    const float yawRadians = glm::radians(sphericalDegrees.z);
+    const float horizontalRadius = radius * std::cos(latRadians);
+
+    return {
+        horizontalRadius * std::sin(yawRadians),
+        radius * std::sin(latRadians),
+        horizontalRadius * std::cos(yawRadians),
+    };
+}
+
+static void SignalSnapTurnFade() {
+    auto* xr = VRManager::instance().XR.get();
+    if (xr == nullptr) {
+        return;
+    }
+
+    constexpr auto kSnapTurnFadeDuration = std::chrono::milliseconds(110);
+    const uint64_t startNs = GetTimeStamp();
+    xr->m_snapTurnFadeStartNs.store(startNs, std::memory_order_relaxed);
+    xr->m_snapTurnFadeUntilNs.store(startNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnFadeDuration).count(), std::memory_order_relaxed);
+}
+
+static bool ApplySnapTurnToComputedCameraPivot(PPCInterpreter_t* hCPU, int direction) {
+    if (direction == 0 || hCPU->gpr[4] == 0 || hCPU->gpr[5] == 0) {
+        return false;
+    }
+
+    const float snapAngle = GetSettings().GetSnapTurnAngle();
+    if (snapAngle <= 0.0f) {
+        return false;
+    }
+
+    BEVec3 cameraWorldPosBE = {};
+    BEVec3 sphericalBE = {};
+    CemuHooks::readMemory(hCPU->gpr[4], &cameraWorldPosBE);
+    CemuHooks::readMemory(hCPU->gpr[5], &sphericalBE);
+
+    const glm::fvec3 cameraWorldPos = cameraWorldPosBE.getLE();
+    glm::fvec3 spherical = sphericalBE.getLE();
+    if (!glm::all(glm::isfinite(cameraWorldPos)) || !glm::all(glm::isfinite(spherical)) || spherical.x <= 1.0e-4f) {
+        return false;
+    }
+
+    const glm::fvec3 cameraToTarget = SphericalToCameraTargetVector(spherical);
+    const glm::fvec3 targetWorldPos = cameraWorldPos + cameraToTarget;
+
+    spherical.z = NormalizeDegrees(spherical.z + ((float)direction * snapAngle));
+    const glm::fvec3 snappedCameraToTarget = SphericalToCameraTargetVector(spherical);
+    const glm::fvec3 snappedCameraWorldPos = targetWorldPos - snappedCameraToTarget;
+    if (!glm::all(glm::isfinite(snappedCameraWorldPos))) {
+        return false;
+    }
+
+    BEVec3 snappedCameraWorldPosBE(snappedCameraWorldPos.x, snappedCameraWorldPos.y, snappedCameraWorldPos.z);
+    BEVec3 snappedSphericalBE(spherical.x, spherical.y, spherical.z);
+    CemuHooks::writeMemory(hCPU->gpr[4], &snappedCameraWorldPosBE);
+    CemuHooks::writeMemory(hCPU->gpr[5], &snappedSphericalBE);
+    Log::print<CONTROLS>("SnapTurn: applied dir={} yaw={:.3f} camera_pos={} target_pos={}", direction, spherical.z, snappedCameraWorldPos, targetWorldPos);
+    return true;
+}
+
 static glm::fvec3 GetAppliedHeadsetOffset(glm::fvec3 eyePos) {
     if (CemuHooks::IsFirstPerson()) {
         glm::fvec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
@@ -354,6 +438,19 @@ void CemuHooks::hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU) {
 
     pivot = currentPivot + pivotDelta;
     writeMemory(pivotPtr, &pivot);
+}
+
+void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    if (!IsFirstPerson() || HasActiveCutscene()) {
+        return;
+    }
+
+    const int snapTurnDirection = TryConsumePendingSnapTurnDirection();
+    if (ApplySnapTurnToComputedCameraPivot(hCPU, snapTurnDirection)) {
+        SignalSnapTurnFade();
+    }
 }
 
 void CemuHooks::hook_FixStaminaGaugeScreenPosition(PPCInterpreter_t* hCPU) {
@@ -903,6 +1000,7 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
         }
     }
 
+    constexpr uint32_t kCameraChaseVtbl = 0x101B34F4;
     constexpr uint32_t kCameraTailVtbl = 0x101BC278;
     constexpr uint32_t kCameraMagneCatchVtbl = 0x101BAB4C;
 
@@ -917,6 +1015,17 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
         s_lastLoggedCameraVtbl = currentCameraVtbl;
         s_lastLoggedCameraInstance = currCameraInstance;
         s_lastLoggedCameraChaseInstance = cameraChaseInstance;
+    }
+
+    auto* xr = VRManager::instance().XR.get();
+    if (xr != nullptr) {
+        static uint32_t s_lastCameraChaseActive = UINT32_MAX;
+        const bool isCameraChase = currentCameraVtbl == kCameraChaseVtbl;
+        if (static_cast<bool>(s_lastCameraChaseActive) != isCameraChase) {
+            Log::print<INFO>("CameraChase active: {} (vtbl={:#X})", isCameraChase, currentCameraVtbl);
+            s_lastCameraChaseActive = isCameraChase ? 1 : 0;
+        }
+        xr->m_isCameraChaseActive.store(isCameraChase, std::memory_order_relaxed);
     }
 
     //hCPU->gpr[3] = cameraChaseInstance;
