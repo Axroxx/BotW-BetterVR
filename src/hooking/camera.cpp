@@ -912,10 +912,11 @@ void CemuHooks::hook_SetActorOpacity(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_CalculateModelOpacity(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    // overwrites return value to 1 if in first person mode
-    if (IsFirstPerson()) {
-        hCPU->fpr[1].fp0 = 1.0f;
+    if (!IsFirstPerson()) {
+        return;
     }
+
+    hCPU->fpr[1].fp0 = 1.0f;
 }
 
 

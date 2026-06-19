@@ -259,6 +259,10 @@ static bool isFaceBone(const std::string_view& boneName) {
     return false;
 }
 
+static bool isFaceMaterialTriggerBone(const std::string_view& boneName) {
+    return boneName == "Face_Root" || boneName == "Head" || boneName == "Eyeball_L" || boneName == "Eyeball_R";
+}
+
 static Skeleton s_skeleton;
 static bool s_skeletonParsed = false;
 static glm::vec3 s_manualBodyOffset = glm::vec3(0.0f, 0.0f, -0.075f);
@@ -285,6 +289,8 @@ static glm::fvec3 RemoveHeadsetHorizontalOffset(glm::fvec3 trackedPos) {
 
 void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
+    hCPU->gpr[7] = 0;
+    hCPU->gpr[8] = 0;
 
     const uint32_t gsysModelPtr = hCPU->gpr[3];
     const uint32_t matrixPtr = hCPU->gpr[4];
@@ -311,16 +317,21 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         setMemory(scalePtr, scale);
     };
 
-    if (IsThirdPerson()) {
+    const bool isThirdPerson = IsThirdPerson();
+
+    if (isThirdPerson) {
         if (isFaceBone(boneName)) {
             setMemory(scalePtr, glm::fvec3(1.0f));
         }
         return;
     }
 
+    if (isFaceMaterialTriggerBone(boneName)) {
+        hCPU->gpr[7] = 1;
+        hCPU->gpr[8] = 1;
+    }
 
     if (isFaceBone(boneName)) {
-        writeBoneQuat(glm::fvec3(), glm::identity<glm::fquat>(), glm::fvec3(0.05f));
         return;
     }
 
