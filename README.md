@@ -66,8 +66,9 @@ While more integrated solutions are being found out, there's probably ways to se
 
 6. Besides those, there's some other recommended graphic pack settings to make your game run properly and look better in VR:
    - `Graphics`:  
-	 - Set the VR Resolution Multiplier to change the resolution of the game when you're in VR. The mod is not very GPU intensive, so using a higher multiplier might not cost any performance.  
-	 - Set the Anti-Aliasing to `Nvidia FXAA` or `None` (if you are using 2x resolution multiplier or higher).
+ 	 - Set the VR Resolution Multiplier to change the resolution of the game when you're in VR. The mod is not very GPU intensive, so using a higher multiplier might not cost any performance.  
+ 	 - Set the Anti-Aliasing to `Nvidia FXAA` or `None` (if you are using 2x resolution multiplier or higher).  
+ 	 - Use the optional recording mode above the VR Resolution Multiplier to render pixels outside of your VR headset's field-of-view to fit a 16:9 aspect ratio.
    - `FPS++`: Set the FPS limit to at least 120 or 144. Your headset/runtime will still control the actual VR framerate.
    - `Enhancements`: Set anisotropic filtering to 16x, and optionally set a Clarity preset to make the colors less washed out.
 
