@@ -197,7 +197,7 @@ static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
         CemuHooks::readMemory(CemuHooks::s_playerMtxAddress, &playerMtx);
         glm::fvec3 playerPos = playerMtx.getPos().getLE();
 
-        if (CemuHooks::IsRiding()) {
+        if (CemuHooks::IsRiding(true)) {
             playerPos.y -= hardcodedRidingOffset + GetSettings().GetPlayerHeightOffset();
         }
         else if (s_isSwimming) {
@@ -350,7 +350,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
 
         glm::fvec3 playerPos = actor.mtx.getPos().getLE();
 
-        if (CemuHooks::IsRiding()) {
+        if (CemuHooks::IsRiding(true)) {
             playerPos.y -= hardcodedRidingOffset + GetSettings().GetPlayerHeightOffset();
         }
         else if (s_isSwimming) {
