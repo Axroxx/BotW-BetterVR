@@ -760,8 +760,8 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
             settings.playerHeightOffset.AddToGUI(changed, windowWidth.x, -0.5f, 1.0f, formatHeight);
         });
 
-        DrawSettingRow(windowWidth, "Snap Turn Angle", [&]() {
-            static const char* kSnapLabels[] = { "Smooth", "30 deg (Recommended)", "45 deg", "60 deg" };
+        DrawSettingRow(windowWidth, "Turn Mode", [&]() {
+            static const char* kSnapLabels[] = { "Smooth", "30 deg Snap (Recommended)", "45 deg Snap", "60 deg Snap" };
             static const int32_t kSnapValues[] = { 0, 30, 45, 60 };
             int current = settings.snapTurnAngle;
             int idx = 1;
@@ -776,6 +776,12 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
                 *changed = true;
             }
         });
+
+        if (settings.GetSnapTurnAngle() == 0) {
+            DrawSettingRow(windowWidth, "Smooth Turn Speed", [&]() {
+                settings.smoothTurnSpeed.AddToGUI(changed, windowWidth.x, 30.0f, 300.0f, [](float) { return "%.0f deg/s"; });
+            });
+        }
     }
 
     ImGui::Spacing();

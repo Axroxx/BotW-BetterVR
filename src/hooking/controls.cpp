@@ -64,46 +64,57 @@ static void ClearPendingSnapTurnRequest(OpenXR* xr, bool& isLatched, const char*
     isLatched = false;
 }
 
-static bool ShouldUseFirstPersonSnapTurn(bool inGame) {
-    return inGame && CemuHooks::IsFirstPerson() && !CemuHooks::HasActiveCutscene() && !CemuHooks::IsScreenVisible(ScreenId::AppCamera_00) && GetSettings().GetSnapTurnAngle() != 0;
+static bool ShouldOverrideFirstPersonTurning(bool inGame) {
+    return inGame && CemuHooks::IsFirstPerson() && !CemuHooks::HasActiveCutscene() && !CemuHooks::IsScreenVisible(ScreenId::AppCamera_00);
 }
 
-static void UpdateFirstPersonSnapTurnState(XrActionStateVector2f& rightStickSource, bool inGame) {
+static void UpdateFirstPersonTurnState(XrActionStateVector2f& rightStickSource, bool inGame) {
     auto* xr = VRManager::instance().XR.get();
     if (xr == nullptr) {
         return;
     }
 
     static bool s_snapTurnStickLatched = false;
-    constexpr auto kSnapTurnRequestDuration = std::chrono::milliseconds(120);
 
-    if (!ShouldUseFirstPersonSnapTurn(inGame) || xr->m_isMenuOpen.load(std::memory_order_relaxed)) {
+    if (!ShouldOverrideFirstPersonTurning(inGame) || xr->m_isMenuOpen.load(std::memory_order_relaxed)) {
         ClearPendingSnapTurnRequest(xr, s_snapTurnStickLatched, "mode/menu");
+        xr->m_smoothTurnStickDeflection.store(0.0f, std::memory_order_relaxed);
         return;
     }
 
-    const uint64_t nowNs = GetTimeStamp();
-    const uint64_t pendingUntilNs = xr->m_pendingSnapTurnRequestUntilNs.load(std::memory_order_relaxed);
-    if (pendingUntilNs != 0 && nowNs > pendingUntilNs) {
-        const int expiredDirection = xr->m_pendingSnapTurnDirection.exchange(0, std::memory_order_relaxed);
-        xr->m_pendingSnapTurnRequestUntilNs.store(0, std::memory_order_relaxed);
-        Log::print<INFO>("SnapTurn: request expired before camera hook dir={}", expiredDirection);
-    }
+    const int32_t snapAngle = GetSettings().GetSnapTurnAngle();
+    if (snapAngle > 0) {
+        xr->m_smoothTurnStickDeflection.store(0.0f, std::memory_order_relaxed);
 
-    const float axisThreshold = GetSettings().axisThreshold;
-    const float releaseThreshold = std::max<float>((float)GetSettings().stickDeadzone, axisThreshold * 0.5f);
-    const float stickX = rightStickSource.currentState.x;
-
-    if (s_snapTurnStickLatched) {
-        if (std::fabs(stickX) <= releaseThreshold) {
-            s_snapTurnStickLatched = false;
+        constexpr auto kSnapTurnRequestDuration = std::chrono::milliseconds(120);
+        const uint64_t nowNs = GetTimeStamp();
+        const uint64_t pendingUntilNs = xr->m_pendingSnapTurnRequestUntilNs.load(std::memory_order_relaxed);
+        if (pendingUntilNs != 0 && nowNs > pendingUntilNs) {
+            const int expiredDirection = xr->m_pendingSnapTurnDirection.exchange(0, std::memory_order_relaxed);
+            xr->m_pendingSnapTurnRequestUntilNs.store(0, std::memory_order_relaxed);
+            Log::print<INFO>("SnapTurn: request expired before camera hook dir={}", expiredDirection);
         }
-    }
-    else if (stickX >= axisThreshold || stickX <= -axisThreshold) {
-        const int direction = stickX > 0.0f ? 1 : -1;
-        xr->m_pendingSnapTurnDirection.store(direction, std::memory_order_relaxed);
-        xr->m_pendingSnapTurnRequestUntilNs.store(nowNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnRequestDuration).count(), std::memory_order_relaxed);
-        s_snapTurnStickLatched = true;
+
+        const float axisThreshold = GetSettings().axisThreshold;
+        const float releaseThreshold = std::max<float>((float)GetSettings().stickDeadzone, axisThreshold * 0.5f);
+        const float stickX = rightStickSource.currentState.x;
+
+        if (s_snapTurnStickLatched) {
+            if (std::fabs(stickX) <= releaseThreshold) {
+                s_snapTurnStickLatched = false;
+            }
+        } else if (stickX >= axisThreshold || stickX <= -axisThreshold) {
+            const int direction = stickX > 0.0f ? 1 : -1;
+            xr->m_pendingSnapTurnDirection.store(direction, std::memory_order_relaxed);
+            xr->m_pendingSnapTurnRequestUntilNs.store(nowNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnRequestDuration).count(), std::memory_order_relaxed);
+            s_snapTurnStickLatched = true;
+        }
+    } else {
+        s_snapTurnStickLatched = false;
+        const float stickX = rightStickSource.currentState.x;
+        const float deadzone = (float)GetSettings().stickDeadzone;
+        const float deflection = std::fabs(stickX) > deadzone ? stickX : 0.0f;
+        xr->m_smoothTurnStickDeflection.store(deflection, std::memory_order_relaxed);
     }
 }
 
@@ -1202,13 +1213,13 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
         processMenuInput(newXRBtnHold, inputs, gameState);
     }
 
-    UpdateFirstPersonSnapTurnState(rightStickSource, gameState.in_game);
+    UpdateFirstPersonTurnState(rightStickSource, gameState.in_game);
 
     // Update rumble/haptics
     rumbleMgr->updateHaptics();
 
     // sticks
-    const bool disableRightStickHorizontalRotation = ShouldUseFirstPersonSnapTurn(gameState.in_game) && !xr->m_isMenuOpen && xr->m_isCameraChaseActive;
+    const bool disableRightStickHorizontalRotation = ShouldOverrideFirstPersonTurning(gameState.in_game) && !xr->m_isMenuOpen && xr->m_isCameraChaseActive;
     static VPADButtons oldXRStickHold = VPAD_BUTTON_NONE;
     VPADButtons newXRStickHold = VPAD_BUTTON_NONE;
     processJoystickInput(oldXRStickHold, newXRStickHold, vpadStatus, leftStickSource, rightStickSource, disableRightStickHorizontalRotation);

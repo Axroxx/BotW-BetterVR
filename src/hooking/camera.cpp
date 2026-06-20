@@ -79,6 +79,25 @@ static int TryConsumePendingSnapTurnDirection() {
     return direction;
 }
 
+static float TryConsumePendingSmoothTurnDelta() {
+    auto* xr = VRManager::instance().XR.get();
+    if (xr == nullptr) {
+        return 0.0f;
+    }
+
+    static uint64_t s_lastTimeNs = 0;
+    const uint64_t nowNs = GetTimeStamp();
+    const float dt = s_lastTimeNs == 0 ? 0.0f : (float)(nowNs - s_lastTimeNs) * 1.0e-9f;
+    s_lastTimeNs = nowNs;
+
+    const float stickDeflection = xr->m_smoothTurnStickDeflection.load(std::memory_order_relaxed);
+    if (stickDeflection == 0.0f || dt <= 0.0f || dt > 0.5f) {
+        return 0.0f;
+    }
+
+    return stickDeflection * GetSettings().GetSmoothTurnSpeed() * dt;
+}
+
 static glm::fvec3 SphericalToCameraTargetVector(const glm::fvec3& sphericalDegrees) {
     const float radius = sphericalDegrees.x;
     const float latRadians = glm::radians(sphericalDegrees.y);
@@ -104,13 +123,8 @@ static void SignalSnapTurnFade() {
     xr->m_snapTurnFadeUntilNs.store(startNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnFadeDuration).count(), std::memory_order_relaxed);
 }
 
-static bool ApplySnapTurnToComputedCameraPivot(PPCInterpreter_t* hCPU, int direction) {
-    if (direction == 0 || hCPU->gpr[4] == 0 || hCPU->gpr[5] == 0) {
-        return false;
-    }
-
-    const float snapAngle = GetSettings().GetSnapTurnAngle();
-    if (snapAngle <= 0.0f) {
+static bool ApplyYawDeltaToComputedCameraPivot(PPCInterpreter_t* hCPU, float yawDeltaDegrees) {
+    if (yawDeltaDegrees == 0.0f || hCPU->gpr[4] == 0 || hCPU->gpr[5] == 0) {
         return false;
     }
 
@@ -128,18 +142,17 @@ static bool ApplySnapTurnToComputedCameraPivot(PPCInterpreter_t* hCPU, int direc
     const glm::fvec3 cameraToTarget = SphericalToCameraTargetVector(spherical);
     const glm::fvec3 targetWorldPos = cameraWorldPos + cameraToTarget;
 
-    spherical.z = NormalizeDegrees(spherical.z + ((float)direction * snapAngle));
-    const glm::fvec3 snappedCameraToTarget = SphericalToCameraTargetVector(spherical);
-    const glm::fvec3 snappedCameraWorldPos = targetWorldPos - snappedCameraToTarget;
-    if (!glm::all(glm::isfinite(snappedCameraWorldPos))) {
+    spherical.z = NormalizeDegrees(spherical.z + yawDeltaDegrees);
+    const glm::fvec3 rotatedCameraToTarget = SphericalToCameraTargetVector(spherical);
+    const glm::fvec3 rotatedCameraWorldPos = targetWorldPos - rotatedCameraToTarget;
+    if (!glm::all(glm::isfinite(rotatedCameraWorldPos))) {
         return false;
     }
 
-    BEVec3 snappedCameraWorldPosBE(snappedCameraWorldPos.x, snappedCameraWorldPos.y, snappedCameraWorldPos.z);
-    BEVec3 snappedSphericalBE(spherical.x, spherical.y, spherical.z);
-    CemuHooks::writeMemory(hCPU->gpr[4], &snappedCameraWorldPosBE);
-    CemuHooks::writeMemory(hCPU->gpr[5], &snappedSphericalBE);
-    Log::print<CONTROLS>("SnapTurn: applied dir={} yaw={:.3f} camera_pos={} target_pos={}", direction, spherical.z, snappedCameraWorldPos, targetWorldPos);
+    BEVec3 rotatedCameraWorldPosBE(rotatedCameraWorldPos.x, rotatedCameraWorldPos.y, rotatedCameraWorldPos.z);
+    BEVec3 rotatedSphericalBE(spherical.x, spherical.y, spherical.z);
+    CemuHooks::writeMemory(hCPU->gpr[4], &rotatedCameraWorldPosBE);
+    CemuHooks::writeMemory(hCPU->gpr[5], &rotatedSphericalBE);
     return true;
 }
 
@@ -447,9 +460,15 @@ void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    const int snapTurnDirection = TryConsumePendingSnapTurnDirection();
-    if (ApplySnapTurnToComputedCameraPivot(hCPU, snapTurnDirection)) {
-        SignalSnapTurnFade();
+    const int32_t snapAngle = GetSettings().GetSnapTurnAngle();
+    if (snapAngle > 0) {
+        const int direction = TryConsumePendingSnapTurnDirection();
+        if (direction != 0 && ApplyYawDeltaToComputedCameraPivot(hCPU, (float)direction * (float)snapAngle)) {
+            SignalSnapTurnFade();
+        }
+    } else {
+        const float smoothDelta = TryConsumePendingSmoothTurnDelta();
+        ApplyYawDeltaToComputedCameraPivot(hCPU, smoothDelta);
     }
 }
 
