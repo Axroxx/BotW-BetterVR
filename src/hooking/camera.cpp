@@ -142,7 +142,7 @@ static bool ApplyYawDeltaToComputedCameraPivot(PPCInterpreter_t* hCPU, float yaw
     const glm::fvec3 cameraToTarget = SphericalToCameraTargetVector(spherical);
     const glm::fvec3 targetWorldPos = cameraWorldPos + cameraToTarget;
 
-    spherical.z = NormalizeDegrees(spherical.z + yawDeltaDegrees);
+    spherical.z = NormalizeDegrees(spherical.z - yawDeltaDegrees);
     const glm::fvec3 rotatedCameraToTarget = SphericalToCameraTargetVector(spherical);
     const glm::fvec3 rotatedCameraWorldPos = targetWorldPos - rotatedCameraToTarget;
     if (!glm::all(glm::isfinite(rotatedCameraWorldPos))) {
@@ -469,6 +469,49 @@ void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {
     } else {
         const float smoothDelta = TryConsumePendingSmoothTurnDelta();
         ApplyYawDeltaToComputedCameraPivot(hCPU, smoothDelta);
+    }
+}
+
+static bool ApplyYawDeltaToCameraTailPivot(PPCInterpreter_t* hCPU, float yawDeltaDegrees) {
+    if (yawDeltaDegrees == 0.0f || hCPU->gpr[3] == 0 || hCPU->gpr[4] == 0) {
+        return false;
+    }
+
+    constexpr uint32_t kCameraTailFloat98Offset = 0x98;
+    constexpr uint32_t kSphericalYawOffset = 8;
+
+    uint32_t sphericalYawAddr = hCPU->gpr[4] + kSphericalYawOffset;
+    float sphericalYaw = CemuHooks::getMemory<BEType<float>>(sphericalYawAddr).getLE();
+    if (!std::isfinite(sphericalYaw)) {
+        return false;
+    }
+    CemuHooks::setMemory<BEType<float>>(sphericalYawAddr, NormalizeDegrees(sphericalYaw - yawDeltaDegrees));
+
+    uint32_t float98Addr = hCPU->gpr[3] + kCameraTailFloat98Offset;
+    float float98 = CemuHooks::getMemory<BEType<float>>(float98Addr).getLE();
+    if (std::isfinite(float98)) {
+        CemuHooks::setMemory<BEType<float>>(float98Addr, NormalizeDegrees(float98 - yawDeltaDegrees));
+    }
+
+    return true;
+}
+
+void CemuHooks::hook_SnapTurnCameraTailPivot(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    if (!IsFirstPerson() || HasActiveCutscene()) {
+        return;
+    }
+
+    const int32_t snapAngle = GetSettings().GetSnapTurnAngle();
+    if (snapAngle > 0) {
+        const int direction = TryConsumePendingSnapTurnDirection();
+        if (direction != 0 && ApplyYawDeltaToCameraTailPivot(hCPU, (float)direction * (float)snapAngle)) {
+            SignalSnapTurnFade();
+        }
+    } else {
+        const float smoothDelta = TryConsumePendingSmoothTurnDelta();
+        ApplyYawDeltaToCameraTailPivot(hCPU, smoothDelta);
     }
 }
 
@@ -1039,13 +1082,13 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
 
     auto* xr = VRManager::instance().XR.get();
     if (xr != nullptr) {
-        static uint32_t s_lastCameraChaseActive = UINT32_MAX;
-        const bool isCameraChase = currentCameraVtbl == kCameraChaseVtbl;
-        if (static_cast<bool>(s_lastCameraChaseActive) != isCameraChase) {
-            Log::print<INFO>("CameraChase active: {} (vtbl={:#X})", isCameraChase, currentCameraVtbl);
-            s_lastCameraChaseActive = isCameraChase ? 1 : 0;
+        static uint32_t s_lastSnapTurnCameraActive = UINT32_MAX;
+        const bool isSnapTurnCamera = currentCameraVtbl == kCameraChaseVtbl || currentCameraVtbl == kCameraTailVtbl;
+        if (static_cast<bool>(s_lastSnapTurnCameraActive) != isSnapTurnCamera) {
+            Log::print<INFO>("SnapTurn camera active: {} (vtbl={:#X})", isSnapTurnCamera, currentCameraVtbl);
+            s_lastSnapTurnCameraActive = isSnapTurnCamera ? 1 : 0;
         }
-        xr->m_isCameraChaseActive.store(isCameraChase, std::memory_order_relaxed);
+        xr->m_isSnapTurnCameraActive.store(isSnapTurnCamera, std::memory_order_relaxed);
     }
 
     //hCPU->gpr[3] = cameraChaseInstance;

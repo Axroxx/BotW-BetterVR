@@ -194,6 +194,35 @@ blr
 0x02B9D324 = bla import.coreinit.hook_OverwriteFloatParam
 
 
+; ==================================================================================
+
+snapTurnCameraTailAndConvert:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x1C(r1)
+stw r4, 0x18(r1)
+
+mr r3, r31
+bl import.coreinit.hook_SnapTurnCameraTailPivot
+
+lwz r4, 0x18(r1)
+lwz r3, 0x1C(r1)
+
+lis r12, 0x02E5
+ori r12, r12, 0x5864
+mtctr r12
+bctrl
+
+lwz r0, 0x24(r1)
+addi r1, r1, 0x20
+mtlr r0
+blr
+
+0x02BEEE48 = bla snapTurnCameraTailAndConvert
+0x02BEF014 = bla snapTurnCameraTailAndConvert
+
+
 ; workaround for ladder climbing issue
 ; Always sets the ladder mode to 4 which allows pressing A to jump up ladders
 ; Sets the ladder mode to 1 when player is moving the stick downwards to allow sliding down ladders

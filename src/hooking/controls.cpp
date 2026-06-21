@@ -1219,7 +1219,7 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
     rumbleMgr->updateHaptics();
 
     // sticks
-    const bool disableRightStickHorizontalRotation = ShouldOverrideFirstPersonTurning(gameState.in_game) && !xr->m_isMenuOpen && xr->m_isCameraChaseActive;
+    const bool disableRightStickHorizontalRotation = ShouldOverrideFirstPersonTurning(gameState.in_game) && !xr->m_isMenuOpen && xr->m_isSnapTurnCameraActive;
     static VPADButtons oldXRStickHold = VPAD_BUTTON_NONE;
     VPADButtons newXRStickHold = VPAD_BUTTON_NONE;
     processJoystickInput(oldXRStickHold, newXRStickHold, vpadStatus, leftStickSource, rightStickSource, disableRightStickHorizontalRotation);

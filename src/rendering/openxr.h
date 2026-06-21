@@ -119,7 +119,7 @@ public:
     std::atomic_uint64_t m_snapTurnFadeStartNs = 0;
     std::atomic_uint64_t m_snapTurnFadeUntilNs = 0;
     std::atomic<float> m_smoothTurnStickDeflection = 0.0f;
-    std::atomic_bool m_isCameraChaseActive = false;
+    std::atomic_bool m_isSnapTurnCameraActive = false;
 
     struct GameState {
         uint32_t previous_button_hold;
