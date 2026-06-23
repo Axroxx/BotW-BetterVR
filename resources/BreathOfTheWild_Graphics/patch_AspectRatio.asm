@@ -19,6 +19,7 @@ moduleMatches = 0x6267BFD0
 
 ; BetterVR reads this fixed address to know which recording mode preset is active.
 0x10416BF4 = .int $recordingOutput
+0x10416BF8 = .int $qualityPreset
 
 ; rodata constants
 0x101BF8E8 = .float ($width/$height)

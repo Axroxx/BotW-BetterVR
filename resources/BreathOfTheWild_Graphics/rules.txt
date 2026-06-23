@@ -27,6 +27,7 @@ $shadowNearbyEnd = 1.0
 $shadowFarStart = 1.0
 $shadowFarEnd = 1.0
 $recordingOutput:int = 0
+$qualityPreset:int = 2
 
 # Should be set to 1 or 2 (changes verbosity of loggin) when trying to log the layout of panes while they're getting loaded for debugging purposes
 $enableUltrawideDebugLogging:int = 0
@@ -222,6 +223,25 @@ category = Shadow Draw Distance
 $shadowNearbyEnd = 1.4
 $shadowFarStart = 1.4
 $shadowFarEnd = 1.55
+
+
+# Quality Preset (BetterVR)
+
+[Preset]
+name = Low (No Shadows & Godrays)
+category = Quality Preset
+$qualityPreset:int = 0
+
+[Preset]
+name = Medium (No Godrays)
+category = Quality Preset
+$qualityPreset:int = 1
+
+[Preset]
+name = High (All, Recommended)
+category = Quality Preset
+default = 1
+$qualityPreset:int = 2
 
 
 # Texture Changes
