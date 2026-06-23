@@ -12,12 +12,13 @@ moduleMatches = 0x6267BFD0
 ; At Low (0) or Medium (1) quality, these two calls are skipped (god-rays off).
 ; At High (2) they run normally.
 ; The $qualityPreset value is written to 0x10416BF8 by the Graphics pack.
-; Shadows will be gated here in the future.
+; Shadows are disabled at Low (0) quality, enabled at Medium (1) and High (2).
 ; ============================================================================
 
 0x039CFA10 = gsys_ModelSceneFx_drawVolumeMask:
 0x039A9D28 = gsys_ModelScene_SyncWithGPUMaybe:
 0x10416BF8 = g_qualityPreset:
+0x039DDFC8 = continue_isDepthShadowEnabled:
 
 ; --------------------------------------------------------------------------------
 ; 0x039AB3B8: bl drawVolumeMask(r3, r4, r5, r6, r7)
@@ -66,3 +67,23 @@ skipSyncGpu_exit:
 blr
 
 0x039AB3CC = bla stub_skipGodraysSyncGpu
+
+; --------------------------------------------------------------------------------
+; 0x039DDFC4: entry of gsys::ModelSceneShadow::isDepthShadowEnabled
+; At Low quality (0), return false to disable depth shadows.
+stub_skipDepthShadow:
+li r11, $qualityPreset
+cmpwi r11, 0
+bne run_depth_shadow_check
+
+li r3, 0
+blr
+
+run_depth_shadow_check:
+lwz r12, 4(r3)
+lis r11, continue_isDepthShadowEnabled@ha
+addi r11, r11, continue_isDepthShadowEnabled@l
+mtctr r11
+bctr
+
+0x039DDFC4 = ba stub_skipDepthShadow
