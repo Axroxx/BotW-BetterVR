@@ -5,6 +5,7 @@ path = "The Legend of Zelda: Breath of the Wild/Graphics (For BetterVR)"
 description = Allows you to change the game resolution, shadow resolution and anti-aliasing.||Made by Kiri, Skalfate, rajkosto and NAVras.
 version = 7
 default = 1
+colorbufferOptimizationAware = true
 
 [Default]
 $width = 1280
@@ -13,9 +14,6 @@ $gameWidth = 1280
 $gameHeight = 720
 $aspectRatioWidth = 16
 $aspectRatioHeight = 9
-$showUltrawideOptions:int = 0
-$showSquareHUDOption:int = 0
-$ultrawideHUDMode:int = 0
 $fxaa:int = 1
 $shadowRes = 1
 $subPix:int = 1.0
@@ -28,9 +26,6 @@ $shadowFarStart = 1.0
 $shadowFarEnd = 1.0
 $recordingOutput:int = 0
 $qualityPreset:int = 2
-
-# Should be set to 1 or 2 (changes verbosity of loggin) when trying to log the layout of panes while they're getting loaded for debugging purposes
-$enableUltrawideDebugLogging:int = 0
 
 # Recording Output (BetterVR)
 
@@ -224,7 +219,6 @@ $shadowNearbyEnd = 1.4
 $shadowFarStart = 1.4
 $shadowFarEnd = 1.55
 
-
 # Quality Preset (BetterVR)
 
 [Preset]
@@ -323,6 +317,13 @@ formats = 0x001 # World lighting - Red
 overwriteWidth = ($width/$gameWidth) * 384
 overwriteHeight = ($height/$gameHeight) * 192
 
+[TextureRedefine] # same as above rule, for Cemu 2.0
+width = 384
+height = 180
+formats = 0x001 # World lighting - Red
+overwriteWidth = ($width/$gameWidth) * 384
+overwriteHeight = ($height/$gameHeight) * 180
+
 # Required 1/4 resolutions
 [TextureRedefine]
 width = 320
@@ -330,6 +331,20 @@ height = 192
 formats = 0x001,0x005,0x007,0x019,0x01a,0x80e,0x816,0x806,0x820,0x41a
 overwriteWidth = ($width/$gameWidth) * 320
 overwriteHeight = ($height/$gameHeight) * 192
+
+[TextureRedefine] # same as above rule, for Cemu 2.0
+width = 320
+height = 180
+formats = 0x001,0x005,0x007,0x019,0x01a,0x80e,0x816,0x806,0x820,0x41a
+overwriteWidth = ($width/$gameWidth) * 320
+overwriteHeight = ($height/$gameHeight) * 180
+
+[TextureRedefine] # variant of above for Cemu 2.0, purpose not exactly known
+width = 320
+height = 185
+formats = 0x001,0x005,0x007,0x019,0x01a,0x80e,0x816,0x806,0x820,0x41a
+overwriteWidth = ($width/$gameWidth) * 320
+overwriteHeight = ($height/$gameHeight) * 185
 
 # Required 1/4 resolutions
 [TextureRedefine]
@@ -347,6 +362,13 @@ formats = 0x007,0x806 # Used for Fog
 overwriteWidth = ($width/$gameWidth) * 192
 overwriteHeight = ($height/$gameHeight) * 96
 
+[TextureRedefine] # same as above rule, for Cemu 2.0
+width = 192
+height = 90
+formats = 0x007,0x806 # Used for Fog
+overwriteWidth = ($width/$gameWidth) * 192
+overwriteHeight = ($height/$gameHeight) * 90
+
 # Required 1/8 resolution
 [TextureRedefine]
 width = 160
@@ -356,7 +378,7 @@ overwriteWidth = ($width/$gameWidth) * 160
 overwriteHeight = ($height/$gameHeight) * 96
 
 # Required 1/8 resolution
-[TextureRedefine]
+[TextureRedefine] # same as above, for Cemu 2.0
 width = 160
 height = 90
 formats = 0x001,0x005,0x007,0x806,0x80e,0x816
@@ -411,6 +433,13 @@ formats = 0x80e # Used for depth
 overwriteWidth = ($width/$gameWidth) * 64
 overwriteHeight = ($height/$gameHeight) * 64
 
+[TextureRedefine] # same as above, for Cemu 2.0 (may not be required)
+width = 64
+height = 51
+formats = 0x80e # Used for depth
+overwriteWidth = ($width/$gameWidth) * 64
+overwriteHeight = ($height/$gameHeight) * 51
+
 # 0x019 - GUI Requirements
 
 [TextureRedefine]
@@ -438,6 +467,14 @@ formats = 0x816
 overwriteWidth = ($width/$gameWidth) * 1024
 overwriteHeight = ($height/$gameHeight) * 512
 
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 1024
+height = 360
+depth = 1
+formats = 0x816
+overwriteWidth = ($width/$gameWidth) * 1024
+overwriteHeight = ($height/$gameHeight) * 360
+
 # Sheikah slate scope
 [TextureRedefine]
 width = 512
@@ -446,6 +483,14 @@ depth = 1
 formats = 0x816
 overwriteWidth = ($width/$gameWidth) * 512
 overwriteHeight = ($height/$gameHeight) * 256
+
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 512
+height = 180
+depth = 1
+formats = 0x816
+overwriteWidth = ($width/$gameWidth) * 512
+overwriteHeight = ($height/$gameHeight) * 180
 
 # World bloom
 
@@ -457,6 +502,14 @@ tilemodes = 4
 overwriteWidth = ($width/$gameWidth) * 256
 overwriteHeight = ($height/$gameHeight) * 128
 
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 256
+height = 90
+formats = 0x816
+tilemodes = 4
+overwriteWidth = ($width/$gameWidth) * 256
+overwriteHeight = ($height/$gameHeight) * 90
+
 [TextureRedefine]
 width = 128
 height = 64
@@ -465,6 +518,22 @@ tilemodes = 4
 overwriteWidth = ($width/$gameWidth) * 128
 overwriteHeight = ($height/$gameHeight) * 64
 
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 128
+height = 50
+formats = 0x816
+tilemodes = 4
+overwriteWidth = ($width/$gameWidth) * 128
+overwriteHeight = ($height/$gameHeight) * 50
+
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 128
+height = 45
+formats = 0x816
+tilemodes = 4
+overwriteWidth = ($width/$gameWidth) * 128
+overwriteHeight = ($height/$gameHeight) * 45
+
 [TextureRedefine]
 width = 64
 height = 32
@@ -472,6 +541,8 @@ formats = 0x816
 tilemodes = 4
 overwriteWidth = ($width/$gameWidth) * 64
 overwriteHeight = ($height/$gameHeight) * 32
+
+# note for Cemu 2.0: There are a bunch of seen texture resolutions that used to be 64x32: 64x22/23/25/30. Investigate which ones we need to resize
 
 [TextureRedefine] # catches cubemap! 32x32, 16x16
 width = 32
@@ -571,7 +642,7 @@ overwriteWidth = ($width/$gameWidth) * 1504
 overwriteHeight = ($height/$gameHeight) * 720
 
 # Select-Menu Map
-[TextureRedefine]
+[TextureRedefine] # same as rule above, for Cemu 2.0
 width = 1500
 height = 720
 formats = 0x019
@@ -653,13 +724,21 @@ overwriteFormat = 0x01f
 overwriteWidth = ($width/$gameWidth) * 320
 overwriteHeight = ($height/$gameHeight) * 192
 
-[TextureRedefine]
+[TextureRedefine] # same as rule above, for Cemu 2.0
 width = 320
 height = 180
 formats = 0x019
 overwriteFormat = 0x01f
 overwriteWidth = ($width/$gameWidth) * 320
 overwriteHeight = ($height/$gameHeight) * 180
+
+[TextureRedefine] # same as rule above, for Cemu 2.0 (maybe not needed?)
+width = 320
+height = 185
+formats = 0x019
+overwriteFormat = 0x01f
+overwriteWidth = ($width/$gameWidth) * 320
+overwriteHeight = ($height/$gameHeight) * 185
 
 [TextureRedefine]
 width = 128
@@ -688,7 +767,7 @@ tilemodes = 4
 overwriteWidth = ($width/$gameWidth) * 1280
 overwriteHeight = ($height/$gameHeight) * 288
 
-[TextureRedefine] # same as above
+[TextureRedefine] # same as rule above, for Cemu 2.0
 width = 1280
 height = 278
 depth = 1
@@ -764,6 +843,15 @@ tilemodes = 4
 overwriteWidth = ($width/$gameWidth) * 512
 overwriteHeight = ($height/$gameHeight) * 96
 
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 512
+height = 94
+depth = 1
+formats = 0x1a
+tilemodes = 4
+overwriteWidth = ($width/$gameWidth) * 512
+overwriteHeight = ($height/$gameHeight) * 94
+
 [TextureRedefine]
 width = 500
 height = 94
@@ -783,6 +871,15 @@ formats = 0x01a
 tilemodes = 4
 overwriteWidth = ($width/$gameWidth) * 480
 overwriteHeight = ($height/$gameHeight) * 32
+
+[TextureRedefine] # same as rule above, for Cemu 2.0
+width = 480
+height = 28
+depth = 1
+formats = 0x01a
+tilemodes = 4
+overwriteWidth = ($width/$gameWidth) * 480
+overwriteHeight = ($height/$gameHeight) * 28
 
 [TextureRedefine]
 width = 464
