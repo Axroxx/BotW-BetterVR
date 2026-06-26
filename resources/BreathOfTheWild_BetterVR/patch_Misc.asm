@@ -132,7 +132,7 @@ moduleMatches = 0x6267BFD0
 ;0x024AC8DC = cmpw r3, r3
 ;0x024AC7B4 = nop
 
-; track and optionally block first-person PlayerNormal damage state changes
+; track and redirect first-person PlayerNormal damage state changes to a safe fallback
 0x02D0A558 = bla import.coreinit.hook_PlayerNormalChangeState
 
 ; neutralize PlayerLaunch movement for Link by overriding the launch float params to 0.0f

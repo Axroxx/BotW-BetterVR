@@ -7,7 +7,6 @@
 std::string CemuHooks::s_currentEvent = {};
 std::string CemuHooks::s_currentPlayerNormalState = {};
 std::string CemuHooks::s_lastRequestedPlayerNormalState = {};
-std::string CemuHooks::s_lastBlockedPlayerNormalState = {};
 CemuHooks::HybridEventSettings CemuHooks::s_currentEventSettings = {};
 std::unordered_map<std::string, CemuHooks::HybridEventSettings> CemuHooks::s_eventSettings = {};
 
@@ -23,7 +22,7 @@ constexpr CemuHooks::HybridEventSettings defaultFirstPersonSettings = {
 };
 
 constexpr uint32_t orig_PlayerNormalChangeStateInnerChangeChildFuncAddr = 0x037B8284;
-constexpr uint32_t orig_PlayerNormalChangeStateBlockedExitFuncAddr = 0x02D0A994;
+constexpr uint32_t kFallbackPlayerNormalStateAddr = 0x101E08C0;
 
 static bool ShouldBlockFirstPersonPlayerNormalState(std::string_view stateName, uint32_t stateNamePtr) {
     switch (stateNamePtr) {
@@ -280,11 +279,9 @@ void CemuHooks::hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU) {
     s_lastRequestedPlayerNormalState = requestedState;
 
     if (IsFirstPerson() && ShouldBlockFirstPersonPlayerNormalState(requestedState, stateNamePtr)) {
-        if (requestedState != s_lastBlockedPlayerNormalState) {
-            Log::print<PPC>("Blocking PlayerNormal state '{}' in first person", requestedState);
-            s_lastBlockedPlayerNormalState = requestedState;
-        }
-        hCPU->instructionPointer = orig_PlayerNormalChangeStateBlockedExitFuncAddr;
+        Log::print<PPC>("Redirecting PlayerNormal state '{}' to fallback in first person", requestedState);
+        hCPU->gpr[4] = kFallbackPlayerNormalStateAddr;
+        hCPU->instructionPointer = orig_PlayerNormalChangeStateInnerChangeChildFuncAddr;
         return;
     }
 

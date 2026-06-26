@@ -147,7 +147,6 @@ public:
     static std::string s_currentEvent;
     static std::string s_currentPlayerNormalState;
     static std::string s_lastRequestedPlayerNormalState;
-    static std::string s_lastBlockedPlayerNormalState;
     static HybridEventSettings s_currentEventSettings;
     static std::unordered_map<std::string, HybridEventSettings> s_eventSettings;
     static void initCutsceneDefaultSettings(uint32_t ppc_TableOfCutsceneEventsSettingsOffset);
