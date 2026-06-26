@@ -370,8 +370,6 @@ blr
 ; ===============================================================================
 ; LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT LEFT
 ; RND_Renderer::StartFrame
-; [Meta XR Simulator][00066.853197][V][arvr\projects\openxr_simulator\src\sim_xrsession.cpp:260] xrWaitFrame: missed frame interval: previous interval=4808, current interval=4813, time diff = 66.078ms
-; [Meta XR Simulator][00066.861202][V][arvr\projects\openxr_simulator\src\session_capture\sim_session_capturer_gfx.cpp:95] openxr_simulator::SessionCaptureRecorderGfx::beginFrame
 ; Updating actions while being in the in-game state
 ; clear() wrote 00000000 to the RenderSceneContext
 ; clear() wrote 00000000 to the RenderSceneContext
@@ -460,11 +458,6 @@ blr
 ; [D3D12 - 3D Layer] Signalling for 3D layer's left side to be 0
 ; [D3D12] Waiting for 3D layer's right side to be 1
 ; [D3D12 - 3D Layer] Signalling for 3D layer's right side to be 0
-; [Meta XR Simulator][00066.917700][V][arvr\projects\openxr_simulator\src\sim_xrsession.cpp:459] frameIndex 10580: creationTime 66853.193ms, beginTime 66861.200ms, endTime 66917.692ms, PDT 66930.633ms, PDP 13.889ms, shouldRender 1
-; [Meta XR Simulator][00066.917919][V][arvr\projects\openxr_simulator\src\sim_xrapilayer_debug_window_base.cpp:213]   2 layers
-; [Meta XR Simulator][00066.918007][V][arvr\projects\openxr_simulator\src\sim_xrapilayer_debug_window_base.cpp:216]     layer 0: XR_TYPE_COMPOSITION_LAYER_QUAD
-; [Meta XR Simulator][00066.918107][V][arvr\projects\openxr_simulator\src\sim_xrapilayer_debug_window_base.cpp:216]     layer 1: XR_TYPE_COMPOSITION_LAYER_PROJECTION
-; [Meta XR Simulator][00066.918652][V][arvr\projects\openxr_simulator\src\session_capture\sim_session_capturer_gfx.cpp:117] openxr_simulator::SessionCaptureRecorderGfx::endFrame
 ; RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT
 ; ===============================================================================
 ;
