@@ -389,6 +389,12 @@ void EntityDebugger::DrawWorldSpaceOverlaySettings(bool* changed) {
         *changed = true;
     }
 
+    bool showWeaponAxes = settings.debugShowWeaponAxes;
+    if (ImGui::Checkbox("Show Weapon Axes", &showWeaponAxes)) {
+        settings.debugShowWeaponAxes = showWeaponAxes;
+        *changed = true;
+    }
+
     bool showRoomscalePhysics = settings.debugShowRoomscalePhysics;
     if (ImGui::Checkbox("Show Roomscale Physics", &showRoomscalePhysics)) {
         settings.debugShowRoomscalePhysics = showRoomscalePhysics;

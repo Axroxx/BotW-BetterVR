@@ -766,13 +766,14 @@ struct ModSettings {
     BoolSetting uiFollowsGaze = BoolSetting("UiFollowsGaze", true);
     FloatSetting<float> hudDistance = FloatSetting<float>("HudDistance", 1.85f, 0.5f, 2.5f);
     FloatSetting<float> hudSize = FloatSetting<float>("HudSize", 0.85f, 0.4f, 1.75f);
-    FloatSetting<float> bowArcTransparency = FloatSetting<float>("BowArcTransparency", 0.7f, 0.0f, 1.0f);
+    FloatSetting<float> bowArcOpacity = FloatSetting<float>("BowArcTransparency", 0.7f, 0.0f, 1.0f);
 
     // advanced settings
     BoolSetting enableDebuggerTools = BoolSetting("EnableDebugOverlay", false);
     BoolSetting debugShowEntityBoxesIn3DView = BoolSetting("DebugShowEntityBoxesIn3DView", false);
     BoolSetting debugShowRoomscalePhysics = BoolSetting("DebugShowRoomscalePhysics", false);
     BoolSetting debugShowRaycastLines = BoolSetting("DebugShowRaycastLines", false);
+    BoolSetting debugShowWeaponAxes = BoolSetting("DebugShowWeaponAxes", false);
     BoolSetting alwaysPreventFirstPersonCutsceneCameraMovement = BoolSetting("AlwaysPreventFirstPersonCutsceneCameraMovement", false);
     BoolSetting preventFirstPersonRagdoll = BoolSetting("PreventFirstPersonRagdoll", true);
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
@@ -820,10 +821,11 @@ struct ModSettings {
             &uiFollowsGaze,
             &hudDistance,
             &hudSize,
-            &bowArcTransparency,
+            &bowArcOpacity,
             &enableDebuggerTools,
             &debugShowEntityBoxesIn3DView,
             &debugShowRaycastLines,
+            &debugShowWeaponAxes,
             &debugShowRoomscalePhysics,
             &alwaysPreventFirstPersonCutsceneCameraMovement,
             &preventFirstPersonRagdoll,
@@ -894,7 +896,7 @@ struct ModSettings {
     }
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
-    float GetBowArcTransparency() const { return bowArcTransparency; }
+    float GetBowArcOpacity() const { return bowArcOpacity; }
     bool ShouldAimThirdPersonBowFromCamera() const { return thirdPersonBowCameraAim; }
     bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
     bool ShouldPreventFirstPersonRagdoll() const { return preventFirstPersonRagdoll; }
@@ -910,6 +912,7 @@ struct ModSettings {
     bool ShouldShowRoomPhysics() const { return IsDebuggingToolsEnabled() && debugShowRoomscalePhysics; }
     bool ShouldShowEntityBoxesIn3DView() const { return IsDebuggingToolsEnabled() && debugShowEntityBoxesIn3DView; }
     bool ShouldShowRaycastLines() const { return IsDebuggingToolsEnabled() && debugShowRaycastLines; }
+    bool ShouldShowWeaponAxes() const { return IsDebuggingToolsEnabled() && debugShowWeaponAxes; }
 
     // By default BotW's camera uses 0.1f for near plane and 25000.0f for far plane, except maybe some indoor areas? But for simplicity, we'll use the default values everywhere.
     float GetZNear() const { return 0.1f; }

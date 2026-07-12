@@ -1338,13 +1338,18 @@ static uint32_t ArcGradientColor(float t, float fallFraction) {
     return (color & 0x00FFFFFF) | ((uint32_t)a << 24);
 }
 
+static uint32_t ScaleColorAlpha(uint32_t color, float scale) {
+    const uint8_t a = (uint8_t)glm::clamp((int)std::lround((float)((color >> 24) & 0xFF) * scale), 0, 255);
+    return (color & 0x00FFFFFF) | ((uint32_t)a << 24);
+}
+
 static void DrawAimingArc(const AimingArcCache& cache) {
     const uint32_t targetColor = DebugDrawColor(100, 180, 255, 100);
     const uint32_t fallMarkerColor = DebugDrawColor(255, 52, 36, 200);
     constexpr float kThickness = 1.5f;
     constexpr bool kPreviewXray = false;
 
-    const float alphaScale = GetSettings().GetBowArcTransparency();
+    const float alphaScale = GetSettings().GetBowArcOpacity();
 
     if (cache.pointCount >= 2) {
         std::array<uint32_t, kPresetDefaultMaxFrames + 2> colors = {};
@@ -1352,9 +1357,7 @@ static void DrawAimingArc(const AimingArcCache& cache) {
         BuildArcDistanceFractions(cache.points, cache.pointCount, distanceFractions);
         const float fallFraction = cache.firstFallIndex >= 0 ? distanceFractions[std::min((uint32_t)cache.firstFallIndex, cache.pointCount - 1)] : -1.0f;
         for (uint32_t i = 0; i < cache.pointCount; ++i) {
-            uint32_t c = ArcGradientColor(distanceFractions[i], fallFraction);
-            const uint8_t a = (uint8_t)glm::clamp((int)std::lround((float)((c >> 24) & 0xFF) * alphaScale), 0, 255);
-            colors[i] = (c & 0x00FFFFFF) | ((uint32_t)a << 24);
+            colors[i] = ScaleColorAlpha(ArcGradientColor(distanceFractions[i], fallFraction), alphaScale);
         }
         DebugDraw::instance().Polyline(
             std::span<const glm::vec3>(cache.points.data(), cache.pointCount),
@@ -1364,12 +1367,12 @@ static void DrawAimingArc(const AimingArcCache& cache) {
         );
 
         if (cache.firstFallIndex >= 0 && (uint32_t)cache.firstFallIndex < cache.pointCount) {
-            DebugDraw::instance().Sphere(cache.points[cache.firstFallIndex], 0.12f, fallMarkerColor, 12, kPreviewXray);
+            DebugDraw::instance().Sphere(cache.points[cache.firstFallIndex], 0.12f, ScaleColorAlpha(fallMarkerColor, alphaScale), 12, kPreviewXray);
         }
     }
 
     if (cache.hasTargetPos) {
-        DebugDraw::instance().Sphere(cache.targetPos, 0.16f, targetColor, 12, kPreviewXray);
+        DebugDraw::instance().Sphere(cache.targetPos, 0.16f, ScaleColorAlpha(targetColor, alphaScale), 12, kPreviewXray);
     }
 }
 

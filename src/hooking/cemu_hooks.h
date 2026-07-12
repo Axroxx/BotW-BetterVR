@@ -119,25 +119,10 @@ public:
     // Master switch for the experimental two-handed grip. Flip to true to re-enable the whole
     // feature (grip geometry, damage bonus, dual rumble); false fully disables it while keeping
     // all of the code in place.
-    static constexpr bool s_twoHandGripEnabled = false;
-
-    // live diagnostics for the two-handed grip, shown in the ImGui debug tab
-    struct TwoHandGripDebugState {
-        bool isFirstPerson = false;
-        WeaponType rightWeaponType = WeaponType::UnknownWeapon;
-        bool isTwoHandedWeaponType = false;
-        bool isWeaponDrawn = false;
-        bool isLeftHandEmpty = false;
-        bool arePosesValid = false;
-        bool isEngageable = false;
-        bool isBladeAxisValid = false;
-        int bladeModelAxisIdx = -1;
-        glm::fvec3 bladeAxisInHand = glm::fvec3(0.0f);
-        float handSeparation = 0.0f;
-        bool isEngaged = false;
-        uint32_t skelRootPasses = 0;
-    };
-    static TwoHandGripDebugState s_twoHandGripDebug;
+    static constexpr bool s_twoHandGripEnabled = true;
+    // Set by the skeleton hook once the off-hand grab has latched; read by the attack hook for the
+    // two-hand damage bonus and dual rumble.
+    static bool s_twoHandGripActive;
     static std::atomic_uint32_t s_recordingOutputMode;
     static uint32_t s_playerAddress;
     static uint32_t s_damageStateNameAddress;
