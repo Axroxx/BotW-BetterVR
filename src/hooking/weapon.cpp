@@ -10,6 +10,7 @@ std::array<uint32_t, 2> CemuHooks::m_heldWeapons = { 0, 0 };
 std::array<uint32_t, 2> CemuHooks::m_heldWeaponsLastUpdate = { 0, 0 };
 std::array<WeaponType, 2> CemuHooks::s_handWeaponTypes = { WeaponType::UnknownWeapon, WeaponType::UnknownWeapon };
 bool CemuHooks::s_twoHandGripActive = false;
+bool CemuHooks::s_twoHandGripConsumesGrabInput = false;
 
 std::array s_cameraRotations = {
     glm::identity<glm::fquat>(),
@@ -34,11 +35,10 @@ static bool IsSwingableWeaponType(WeaponType weaponType) {
         || weaponType == WeaponType::Spear;
 }
 
-// Gripping with both hands means giving up the free hand (no shield), so it earns a modest damage edge on top of the weapon's own stats.
-static constexpr float TWO_HAND_GRIP_DAMAGE_BONUS = 1.10f;
+static constexpr float SINGLE_HAND_DAMAGE_MULTIPLIER = 0.85f;
+static constexpr float TWO_HAND_GRIP_DAMAGE_MULTIPLIER = 1.20f;
 
 bool CemuHooks::IsTwoHandGripEngaged() {
-    // feature temporarily disabled via the master switch: behave exactly as before the two-hand work
     if (!s_twoHandGripEnabled)
         return false;
 
@@ -443,7 +443,9 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
         // Weak motions stay light; proper swings ramp up closer to full damage.
         const float power = motionAnalyser.GetSwingPower();
-        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale() * (isTwoHandGrip ? TWO_HAND_GRIP_DAMAGE_BONUS : 1.0f);
+        const bool isDualGrippableWeapon = weaponType == WeaponType::LargeSword || weaponType == WeaponType::Spear;
+        const float gripDamageMultiplier = isTwoHandGrip ? TWO_HAND_GRIP_DAMAGE_MULTIPLIER : (isDualGrippableWeapon ? SINGLE_HAND_DAMAGE_MULTIPLIER : 1.0f);
+        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale() * gripDamageMultiplier;
 
         writeMemory(weaponPtr, &weapon);
     }
@@ -459,7 +461,6 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
         float rumbleVelocity = std::max(0.0f, motionAnalyser.GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
 
-        // Two-hand grips rumble both controllers; the pair must be prioritized since non-prioritized commands are dropped while the queue is non-empty.
         const int rumbleHands[2] = { 1, 0 };
         const int rumbleHandCount = isTwoHandGrip ? 2 : 1;
         for (int i = 0; i < rumbleHandCount; i++) {

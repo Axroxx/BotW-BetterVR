@@ -220,7 +220,7 @@ $shadowFarEnd = 1.55
 # Quality Preset (BetterVR)
 
 [Preset]
-name = Low (No Shadows & Godrays)
+name = Low (No Shadows & Godrays, Dark During Nights, Very Experimental!)
 category = Quality Preset
 $qualityPreset:int = 0
 

@@ -1086,9 +1086,9 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     if (xr != nullptr) {
         static uint32_t s_lastSnapTurnCameraActive = UINT32_MAX;
         const bool isSnapTurnCamera = currentCameraVtbl == kCameraChaseVtbl || currentCameraVtbl == kCameraTailVtbl;
-        if (static_cast<bool>(s_lastSnapTurnCameraActive) != isSnapTurnCamera) {
+        if (s_lastSnapTurnCameraActive != (uint32_t)isSnapTurnCamera) {
             Log::print<INFO>("SnapTurn camera active: {} (vtbl={:#X})", isSnapTurnCamera, currentCameraVtbl);
-            s_lastSnapTurnCameraActive = isSnapTurnCamera ? 1 : 0;
+            s_lastSnapTurnCameraActive = (uint32_t)isSnapTurnCamera;
         }
         xr->m_isSnapTurnCameraActive.store(isSnapTurnCamera, std::memory_order_relaxed);
     }

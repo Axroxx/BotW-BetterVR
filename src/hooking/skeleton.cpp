@@ -289,16 +289,13 @@ static glm::fvec3 RemoveHeadsetHorizontalOffset(glm::fvec3 trackedPos) {
     return trackedPos;
 }
 
-// Two-handed grip: while a large sword or spear is drawn, hold the left grip to grab it with the off hand.
-// The grab latches wherever you grip along the weapon (anywhere inside its bounding box), both hands steer
-// the direction, and releasing the grip returns to single-hand. Recomputed once per frame at the Skl_Root bone.
-static constexpr uint32_t TWO_HAND_WEAPON_ACTOR_MTX_OFFSET = 0x1F8; // same actor world matrix bow.cpp reads (kWeaponActorMtxOffset)
-static constexpr float TWO_HAND_MIN_HAND_SEPARATION = 0.10f; // below this the hand-to-hand axis is degenerate, keep the previous one
-static constexpr float TWO_HAND_LARGE_SWORD_MAX_GRAB_DISTANCE = 0.22f; // keep the off hand on the hilt instead of allowing grabs up the blade
-static constexpr float TWO_HAND_SPEAR_MAX_GRAB_DISTANCE = 0.55f; // spears intentionally allow a wider grip along the shaft
-static constexpr float TWO_HAND_BLADE_AXIS_SMOOTHING = 0.15f; // per-frame blend toward the newly solved blade axis
-static constexpr float TWO_HAND_GRIP_BUTTON_THRESHOLD = 0.5f; // left squeeze value required to grab the weapon
-static constexpr float TWO_HAND_GRAB_AABB_MARGIN = 0.04f; // small tolerance for controller/hand pose mismatch around the weapon box
+// handle off-hand grab for two-handed weapons
+static constexpr uint32_t TWO_HAND_WEAPON_ACTOR_MTX_OFFSET = 0x1F8;
+static constexpr float TWO_HAND_MIN_HAND_SEPARATION = 0.10f;
+static constexpr float TWO_HAND_LARGE_SWORD_MAX_GRAB_DISTANCE = 0.22f;
+static constexpr float TWO_HAND_SPEAR_MAX_GRAB_DISTANCE = 0.55f;
+static constexpr float TWO_HAND_BLADE_AXIS_SMOOTHING = 0.15f;
+static constexpr float TWO_HAND_GRAB_AABB_MARGIN = 0.04f;
 
 struct TwoHandGripState {
     bool engaged = false;
@@ -309,8 +306,7 @@ struct TwoHandGripState {
 };
 static TwoHandGripState s_twoHandGrip;
 
-// blade-axis solver state: the weapon actor matrix in memory was produced by the wrist rotation we applied
-// last frame, so the blade's direction in the corrected right-hand frame can be measured instead of assumed
+// blade-axis solver state
 static glm::fquat s_lastAppliedRightWristRot = glm::identity<glm::fquat>();
 static bool s_lastAppliedRightWristRotValid = false;
 static uint32_t s_bladeAxisWeaponPtr = 0;
@@ -318,11 +314,11 @@ static glm::fvec3 s_bladeAxisInHand = glm::fvec3(0.0f);
 static bool s_bladeAxisValid = false;
 static glm::fvec3 s_lastGripAxisWorld = glm::fvec3(0.0f);
 
-// grab latch state: the off hand grips where the grip button is first pressed and holds that spot on the weapon
+// grab latch state
 static bool s_twoHandGripButtonHeld = false;
 static bool s_twoHandGripLatched = false;
-static glm::fvec3 s_latchedGripOffsetInRightHand = glm::fvec3(0.0f); // full grab offset in the weapon's corrected primary-hand frame
-static float s_latchedBladeDirectionSign = 1.0f; // preserves which side of the primary hand the blade occupied when grabbed
+static glm::fvec3 s_latchedGripOffsetInRightHand = glm::fvec3(0.0f);
+static float s_latchedBladeDirectionSign = 1.0f;
 
 static glm::fquat MinimalArcQuat(const glm::fvec3& from, const glm::fvec3& to) {
     const glm::fvec3 fromDir = glm::normalize(from);
@@ -332,7 +328,7 @@ static glm::fquat MinimalArcQuat(const glm::fvec3& from, const glm::fvec3& to) {
         return glm::identity<glm::fquat>();
 
     if (alignment < -0.99999f) {
-        // anti-parallel directions have no unique rotation axis, so pick any perpendicular one
+        // pick perpendicular axis for anti-parallel directions
         glm::fvec3 axis = glm::cross(fromDir, glm::fvec3(0.0f, 1.0f, 0.0f));
         if (glm::length2(axis) < 0.000001f)
             axis = glm::cross(fromDir, glm::fvec3(1.0f, 0.0f, 0.0f));
@@ -342,9 +338,6 @@ static glm::fquat MinimalArcQuat(const glm::fvec3& from, const glm::fvec3& to) {
     return glm::angleAxis(std::acos(alignment), glm::normalize(glm::cross(fromDir, toDir)));
 }
 
-// Debug overlay: draw the held weapon actor's world-space coordinate frame so the blade axis is
-// directly visible in the headset. X = red, Y = green, Z = blue; whichever colored line runs down
-// the visible blade tells us which model axis is the stem.
 static void DebugDrawWeaponAxes(uint32_t weaponPtr) {
     if (weaponPtr == 0)
         return;
@@ -364,14 +357,12 @@ static void DebugDrawWeaponAxes(uint32_t weaponPtr) {
         DebugDraw::instance().Line(origin, origin + glm::normalize(axis) * axisLength, color, 3.0f, true);
     };
 
-    drawAxis(glm::vec3(weaponMtx[0]), DebugDrawColor(255, 60, 60));  // X axis: red
-    drawAxis(glm::vec3(weaponMtx[1]), DebugDrawColor(60, 255, 60));  // Y axis: green
-    drawAxis(glm::vec3(weaponMtx[2]), DebugDrawColor(80, 120, 255)); // Z axis: blue
+    drawAxis(glm::vec3(weaponMtx[0]), DebugDrawColor(255, 60, 60));
+    drawAxis(glm::vec3(weaponMtx[1]), DebugDrawColor(60, 255, 60));
+    drawAxis(glm::vec3(weaponMtx[2]), DebugDrawColor(80, 120, 255));
     DebugDraw::instance().Sphere(origin, 0.04f, DebugDrawColor(255, 255, 0), 10, true);
 }
 
-// Is a world-space point inside the weapon actor's oriented bounding box (its local aabb transformed by the
-// weapon matrix)? Matches how the entity debugger draws the box, plus a small grab tolerance.
 static bool IsPointInsideWeaponAABB(uint32_t weaponPtr, const glm::vec3& worldPoint) {
     if (weaponPtr == 0)
         return false;
@@ -386,7 +377,7 @@ static bool IsPointInsideWeaponAABB(uint32_t weaponPtr, const glm::vec3& worldPo
     if (!IsAllFinite(aabbMin) || !IsAllFinite(aabbMax) || !IsAllFinite(weaponPos))
         return false;
 
-    // some actors report a degenerate/empty box; don't allow grabbing those
+    // ignore degenerate bounding boxes
     if (glm::all(glm::lessThanEqual(aabbMax - aabbMin, glm::vec3(0.0f))))
         return false;
 
@@ -413,7 +404,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     const bool isLeft = boneName.ends_with("_L");
     const OpenXR::EyeSide side = isLeft ? OpenXR::EyeSide::LEFT : OpenXR::EyeSide::RIGHT;
 
-    // reset before any early-return below, otherwise a tracking loss can strand a stale engaged grip
+    // reset grip state on root to prevent stranding on tracking loss
     if (boneName == "Skl_Root") {
         s_twoHandGrip = {};
         CemuHooks::s_twoHandGripActive = false;
@@ -434,7 +425,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     const bool isThirdPerson = IsThirdPerson();
 
     if (isThirdPerson) {
-        // the wrist is game-animated here, so last frame's stored rotation no longer matches the weapon matrix
+        // wrist is game-animated in third person
         s_lastAppliedRightWristRotValid = false;
         if (isFaceBone(boneName)) {
             setMemory(scalePtr, glm::fvec3(1.0f));
@@ -514,7 +505,6 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         return glm::inverse(playerMtx4) * targetWorld;
     };
 
-    // like calcControllerTargetModel, but with both wrists aligned to the two-handed grip axis and the left hand pinned onto the hilt
     auto calcTwoHandGripTargetModel = [&]() -> glm::mat4 {
         const glm::vec3 gripOrigin = isLeft ? s_twoHandGrip.leftPinnedWorld : s_twoHandGrip.rearOriginWorld;
         const glm::fquat gripRot = isLeft ? s_twoHandGrip.leftGripRotWorld : s_twoHandGrip.rightGripRotWorld;
@@ -581,21 +571,16 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         const glm::mat4 rightHandWorld = calcHandWorldMat(OpenXR::EyeSide::RIGHT);
         const glm::fquat rightHandRotWorld = glm::quat_cast(glm::mat3(rightHandWorld));
 
-        // debug overlay: show where the game actually places the held weapon(s) and how the grip axis compares
         if (GetSettings().ShouldShowWeaponAxes()) {
             DebugDrawWeaponAxes(m_heldWeapons[OpenXR::EyeSide::LEFT]);
             DebugDrawWeaponAxes(m_heldWeapons[OpenXR::EyeSide::RIGHT]);
 
-            // the intended two-hand grip axis: right (rear) hand through left (front) hand, in cyan
             const glm::vec3 rightGripPos = glm::vec3(rightHandWorld[3]);
             const glm::vec3 leftGripPos = glm::vec3(calcHandWorldMat(OpenXR::EyeSide::LEFT)[3]);
             DebugDraw::instance().Line(rightGripPos, leftGripPos, DebugDrawColor(0, 220, 255), 2.0f, true);
         }
 
-        // Measure the blade direction in the corrected right-hand frame. The weapon actor's world matrix was
-        // produced by the wrist rotation we applied last frame, so inverse(lastWristRot) * bladeWorld gives the
-        // fixed blade-in-hand vector exactly. The blade runs along the weapon actor's local Z axis (confirmed
-        // in-headset via the weapon-axis debug overlay).
+        // measure blade direction in corrected hand frame
         const uint32_t rightWeaponPtr = m_heldWeapons[OpenXR::EyeSide::RIGHT];
         if (s_twoHandGripEnabled && rightWeaponPtr != 0 && s_lastAppliedRightWristRotValid) {
             BEMatrix34 weaponMtxBE = {};
@@ -620,15 +605,15 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         const glm::vec3 rearPos = glm::vec3(rightHandWorld[3]);
         const glm::vec3 leftPos = glm::vec3(leftHandWorld[3]);
 
-        // Hold the left grip to grab the weapon with the off hand. The grab only latches if the hand is inside
-        // the weapon's bounding box (can't grab empty space); it stays latched at that spot until grip is released.
-        const bool leftGripHeld = s_twoHandGripEnabled && IsTwoHandGripEngaged() && inputs.inGame.grab[OpenXR::EyeSide::LEFT].currentState > TWO_HAND_GRIP_BUTTON_THRESHOLD;
+        // handle off-hand weapon grab latching
+        const bool leftGripHeld = s_twoHandGripEnabled && IsTwoHandGripEngaged() && inputs.inGame.grab[OpenXR::EyeSide::LEFT].currentState > TwoHandGripButtonThreshold;
         if (leftGripHeld && !s_twoHandGripButtonHeld && s_bladeAxisValid && IsPointInsideWeaponAABB(rightWeaponPtr, leftPos)) {
             const glm::vec3 grabOffsetWorld = leftPos - rearPos;
             const float grabSeparation = glm::length(grabOffsetWorld);
             const float maxGrabDistance = s_handWeaponTypes[OpenXR::EyeSide::RIGHT] == WeaponType::Spear ? TWO_HAND_SPEAR_MAX_GRAB_DISTANCE : TWO_HAND_LARGE_SWORD_MAX_GRAB_DISTANCE;
             if (grabSeparation > TWO_HAND_MIN_HAND_SEPARATION && grabSeparation <= maxGrabDistance) {
                 s_twoHandGripLatched = true;
+                CemuHooks::s_twoHandGripConsumesGrabInput = true;
                 s_latchedGripOffsetInRightHand = glm::inverse(rightHandRotWorld) * grabOffsetWorld;
                 s_latchedBladeDirectionSign = glm::dot(rightHandRotWorld * s_bladeAxisInHand, grabOffsetWorld) >= 0.0f ? 1.0f : -1.0f;
             }
@@ -642,21 +627,17 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
             const glm::vec3 rearToLeft = leftPos - rearPos;
             const float handSeparation = glm::length(rearToLeft);
             if (handSeparation > TWO_HAND_MIN_HAND_SEPARATION) {
-                s_lastGripAxisWorld = rearToLeft / handSeparation; // both real hands steer the direction (rear -> front)
+                s_lastGripAxisWorld = rearToLeft / handSeparation; // both hands steer the direction
             }
 
             const glm::vec3 bladeDir = s_lastGripAxisWorld;
             if (glm::length2(bladeDir) > 0.5f) {
                 const glm::fquat leftHandRotWorld = glm::quat_cast(glm::mat3(leftHandWorld));
 
-                // Point the blade along the grip axis while preserving the side selected when the grab latched.
                 const glm::vec3 currentBladeWorld = rightHandRotWorld * s_bladeAxisInHand;
                 const glm::vec3 targetBladeDir = bladeDir * s_latchedBladeDirectionSign;
 
-                // Both wrists share the same measured blade-in-hand vector; the left/right hand-correction
-                // frames differ, so convert the right-hand-local blade axis into the corrected left-hand frame.
-                // Rotate the complete latched grab offset with the primary hand so the off hand follows the
-                // weapon around its pivot.
+                // align wrists to grip axis and follow primary hand
                 const glm::fvec3 leftBladeInHand = s_rightToLeftCorrectedHandRot * s_bladeAxisInHand;
                 const glm::fquat solvedRightGripRotWorld = MinimalArcQuat(currentBladeWorld, targetBladeDir) * rightHandRotWorld;
                 s_twoHandGrip.engaged = true;
@@ -669,7 +650,6 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
 
         CemuHooks::s_twoHandGripActive = s_twoHandGrip.engaged;
 
-        // store the rotation the right wrist actually gets this frame; next frame's solve pairs it with the weapon matrix it produces
         s_lastAppliedRightWristRot = s_twoHandGrip.engaged ? s_twoHandGrip.rightGripRotWorld : rightHandRotWorld;
         s_lastAppliedRightWristRotValid = true;
 
@@ -678,9 +658,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     }
 
     // solve upper arm IK so the arms reach the VR controllers
-    if (boneName == "Arm_1_L" || boneName == "Arm_1_R" ||
-        boneName == "Elbow_L" || boneName == "Elbow_R" ||
-        boneName == "Wrist_Assist_L" || boneName == "Wrist_Assist_R") {
+    if (boneName == "Arm_1_L" || boneName == "Arm_1_R" || boneName == "Elbow_L" || boneName == "Elbow_R" || boneName == "Wrist_Assist_L" || boneName == "Wrist_Assist_R") {
 
         int arm1Index = s_skeleton.GetBoneIndex(isLeft ? "Arm_1_L" : "Arm_1_R");
         int arm2Index = s_skeleton.GetBoneIndex(isLeft ? "Arm_2_L" : "Arm_2_R");
@@ -699,9 +677,8 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         }
     }
 
-    // align the wrist and wrist assist directly with the controller pose, or with the two-handed grip while it's engaged
-    if (boneName == "Wrist_L" || boneName == "Wrist_R" ||
-        boneName == "Wrist_Assist_L" || boneName == "Wrist_Assist_R") {
+    // align wrists with controller or two-handed grip
+    if (boneName == "Wrist_L" || boneName == "Wrist_R" || boneName == "Wrist_Assist_L" || boneName == "Wrist_Assist_R") {
         calculatedLocalMat = s_skeleton.CalculateLocalMatrixFromWorld(boneIndex, s_twoHandGrip.engaged ? calcTwoHandGripTargetModel() : calcControllerTargetModel());
     }
 

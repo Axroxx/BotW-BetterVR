@@ -402,7 +402,8 @@ void processLeftHandInGameInput(
     const HandGestureState& leftGesture,
     XrActionStateVector2f& rightStickSource,
     const std::chrono::steady_clock::time_point& now,
-    float dt
+    float dt,
+    bool suppressGrabActions
 ) {
     constexpr std::chrono::milliseconds INPUT_DELAY(400);
     
@@ -411,9 +412,10 @@ void processLeftHandInGameInput(
     constexpr RumbleParameters RuneRumble = { true, 0, RumbleType::OscillationSmooth, 1.0f, false, 1.0, 0.25f, 0.25f };
     
     auto* rumbleMgr = VRManager::instance().XR->GetRumbleManager();
-    bool isGrabPressed = inputs.inGame.grabState[0].lastEvent == ButtonState::Event::ShortPress;
-    bool isGrabPressedLong = inputs.inGame.grabState[0].lastEvent == ButtonState::Event::LongPress;
-    bool isCurrentGrabPressed = inputs.inGame.grabState[0].wasDownLastFrame;
+    const ButtonState::Event grabEvent = suppressGrabActions ? ButtonState::Event::None : inputs.inGame.grabState[0].lastEvent;
+    bool isGrabPressed = grabEvent == ButtonState::Event::ShortPress;
+    bool isGrabPressedLong = grabEvent == ButtonState::Event::LongPress;
+    bool isCurrentGrabPressed = !suppressGrabActions && inputs.inGame.grabState[0].wasDownLastFrame;
     
     // Rune rumbles
     if (gameState.left_hand_current_equip_type == EquipType::SheikahSlate)
@@ -448,7 +450,7 @@ void processLeftHandInGameInput(
 
     // Handle shoulder slot interactions
     if (isHandOverLeftShoulderSlot(leftGesture) || isHandOverRightShoulderSlot(leftGesture)) {
-        if (openDpadMenuBodySlots(inputs.inGame.grabState[0].lastEvent, leftGesture, buttonHold, gameState))
+        if (openDpadMenuBodySlots(grabEvent, leftGesture, buttonHold, gameState))
             // Don't process normal input when opening dpad menu
             return;
 
@@ -483,7 +485,7 @@ void processLeftHandInGameInput(
     // Handle waist slot interaction (Rune)
     if (isHandOverLeftWaistSlot(leftGesture)) {    
         // Handle dpad menu
-        if (openDpadMenuBodySlots(inputs.inGame.grabState[0].lastEvent, leftGesture, buttonHold, gameState))
+        if (openDpadMenuBodySlots(grabEvent, leftGesture, buttonHold, gameState))
             // Don't process normal input when opening dpad menu
             return;
 
@@ -582,7 +584,8 @@ void processRightHandInGameInput(
     OpenXR::GameState& gameState,
     const HandGestureState& rightGesture,
     XrActionStateVector2f& rightStickSource,
-    const std::chrono::steady_clock::time_point& now
+    const std::chrono::steady_clock::time_point& now,
+    bool suppressGrabActions
 ) {
     constexpr std::chrono::milliseconds INPUT_DELAY(400);
     
@@ -591,15 +594,16 @@ void processRightHandInGameInput(
     constexpr RumbleParameters OverSlotsRumble = { false, 1, RumbleType::OscillationRaisingSawtoothWave, 1.0f, false, 1.0, 0.25f, 0.25f };
 
     auto* rumbleMgr = VRManager::instance().XR->GetRumbleManager();
-    bool isGrabPressedShort = inputs.inGame.grabState[1].lastEvent == ButtonState::Event::ShortPress;
-    bool isGrabPressedLong = inputs.inGame.grabState[1].lastEvent == ButtonState::Event::LongPress;
-    bool isCurrentGrabPressed = inputs.inGame.grabState[1].wasDownLastFrame;
+    const ButtonState::Event grabEvent = suppressGrabActions ? ButtonState::Event::None : inputs.inGame.grabState[1].lastEvent;
+    bool isGrabPressedShort = grabEvent == ButtonState::Event::ShortPress;
+    bool isGrabPressedLong = grabEvent == ButtonState::Event::LongPress;
+    bool isCurrentGrabPressed = !suppressGrabActions && inputs.inGame.grabState[1].wasDownLastFrame;
     bool isTriggerPressed = inputs.inGame.useRightItem.currentState;
     
     // Handle shoulder slot interactions
     if (isHandOverLeftShoulderSlot(rightGesture) || isHandOverRightShoulderSlot(rightGesture)) {
         // Handle dpad menu
-        if (openDpadMenuBodySlots(inputs.inGame.grabState[1].lastEvent, rightGesture, buttonHold, gameState))
+        if (openDpadMenuBodySlots(grabEvent, rightGesture, buttonHold, gameState))
             // Don't process normal input when opening dpad menu
             return;
 
@@ -664,7 +668,7 @@ void processRightHandInGameInput(
     // Handle waist slot interaction (Rune)
     if (isHandOverLeftWaistSlot(rightGesture)) {   
         // Handle dpad menu
-        if (openDpadMenuBodySlots(inputs.inGame.grabState[1].lastEvent, rightGesture, buttonHold, gameState))
+        if (openDpadMenuBodySlots(grabEvent, rightGesture, buttonHold, gameState))
             // Don't process normal input when opening dpad menu
             return;
 
@@ -1199,9 +1203,13 @@ void CemuHooks::hook_InjectXRInput(PPCInterpreter_t* hCPU) {
             }
         }
         
-        // Hand-specific input
-        processLeftHandInGameInput(newXRBtnHold, inputs, gameState, leftGesture, rightStickSource, now, dt);
-        processRightHandInGameInput(newXRBtnHold, inputs, gameState, rightGesture, rightStickSource, now);
+        // suppress hand-specific grip inputs during two-hand grip
+        const bool suppressGrabActionsForTwoHandGrip = s_twoHandGripActive || s_twoHandGripConsumesGrabInput;
+        processLeftHandInGameInput(newXRBtnHold, inputs, gameState, leftGesture, rightStickSource, now, dt, suppressGrabActionsForTwoHandGrip);
+        processRightHandInGameInput(newXRBtnHold, inputs, gameState, rightGesture, rightStickSource, now, suppressGrabActionsForTwoHandGrip);
+        const bool bothGripInputsReleased = inputs.inGame.grab[OpenXR::EyeSide::LEFT].currentState <= TwoHandGripButtonThreshold && inputs.inGame.grab[OpenXR::EyeSide::RIGHT].currentState <= TwoHandGripButtonThreshold;
+        if (s_twoHandGripConsumesGrabInput && bothGripInputsReleased)
+            s_twoHandGripConsumesGrabInput = false;
         
         // Trigger handling
         processLeftTriggerBindings(newXRBtnHold, inputs, gameState);

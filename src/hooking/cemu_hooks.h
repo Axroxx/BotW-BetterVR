@@ -116,13 +116,10 @@ public:
     static std::array<uint32_t, 2> m_heldWeaponsLastUpdate;
     static std::array<WeaponType, 2> s_handWeaponTypes;
 
-    // Master switch for the experimental two-handed grip. Flip to true to re-enable the whole
-    // feature (grip geometry, damage bonus, dual rumble); false fully disables it while keeping
-    // all of the code in place.
     static constexpr bool s_twoHandGripEnabled = true;
-    // Set by the skeleton hook once the off-hand grab has latched; read by the attack hook for the
-    // two-hand damage bonus and dual rumble.
+    static constexpr float TwoHandGripButtonThreshold = 0.5f;
     static bool s_twoHandGripActive;
+    static bool s_twoHandGripConsumesGrabInput;
     static std::atomic_uint32_t s_recordingOutputMode;
     static uint32_t s_playerAddress;
     static uint32_t s_damageStateNameAddress;
