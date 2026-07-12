@@ -929,9 +929,11 @@ void CemuHooks::hook_EndCameraSide(PPCInterpreter_t* hCPU) {
         m_heldWeaponsLastUpdate[1]++;
         if (m_heldWeaponsLastUpdate[0] >= 6) {
             m_heldWeapons[0] = 0;
+            s_handWeaponTypes[0] = WeaponType::UnknownWeapon;
         }
         if (m_heldWeaponsLastUpdate[1] >= 6) {
             m_heldWeapons[1] = 0;
+            s_handWeaponTypes[1] = WeaponType::UnknownWeapon;
         }
     }
 
@@ -1019,7 +1021,7 @@ static void ApplyStoredActionFloatParamOverrides() {
                 continue;
             }
 
-            uint32_t targetPointer = CemuHooks::IsFirstPerson() ? kPlayerLaunchZeroFloat : entry.originalPointer;
+            uint32_t targetPointer = (CemuHooks::IsFirstPerson() && GetSettings().ShouldPreventFirstPersonRagdoll()) ? kPlayerLaunchZeroFloat : entry.originalPointer;
             if (currentPointer != targetPointer) {
                 CemuHooks::setMemory<uint32_t>(entry.destPointerAddress, targetPointer);
             }

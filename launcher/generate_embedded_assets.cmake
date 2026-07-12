@@ -57,6 +57,8 @@ append_asset("${INPUT_JSON}" "BetterVR_Layer.json" "Runtime")
 file(GLOB_RECURSE graphic_pack_files RELATIVE "${GRAPHIC_PACK_DIR}" "${GRAPHIC_PACK_DIR}/*")
 list(SORT graphic_pack_files)
 
+list(FILTER graphic_pack_files EXCLUDE REGEX "(^|/)CemuPatchCompiler-release\\.exe$")
+
 if(EXCLUDE_DEBUG_PATCHES)
     list(FILTER graphic_pack_files EXCLUDE REGEX "(^|/)patch_debug_[^/]+\\.asm$")
 endif()

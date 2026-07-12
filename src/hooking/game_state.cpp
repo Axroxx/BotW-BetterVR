@@ -11,6 +11,7 @@ CemuHooks::HybridEventSettings CemuHooks::s_currentEventSettings = {};
 std::unordered_map<std::string, CemuHooks::HybridEventSettings> CemuHooks::s_eventSettings = {};
 
 uint32_t CemuHooks::s_playerAddress = 0;
+uint32_t CemuHooks::s_damageStateNameAddress = 0;
 uint32_t CemuHooks::s_isLadderClimbing = 0;
 uint32_t CemuHooks::s_isRiding = 0;
 uint32_t CemuHooks::s_isRidingSandSeal = 0;
@@ -22,7 +23,6 @@ constexpr CemuHooks::HybridEventSettings defaultFirstPersonSettings = {
 };
 
 constexpr uint32_t orig_PlayerNormalChangeStateInnerChangeChildFuncAddr = 0x037B8284;
-constexpr uint32_t kFallbackPlayerNormalStateAddr = 0x101E08C0;
 
 static bool ShouldBlockFirstPersonPlayerNormalState(std::string_view stateName, uint32_t stateNamePtr) {
     switch (stateNamePtr) {
@@ -36,7 +36,7 @@ static bool ShouldBlockFirstPersonPlayerNormalState(std::string_view stateName, 
         break;
     }
 
-    return stateName == "DamageSUpper";
+    return stateName == "DamageSUpper" || stateName == "DamageLarge" || stateName == "DamageFlipped" || stateName == "Launch" || stateName == "LargeDamage";
 }
 
 bool CemuHooks::HasActiveCutscene() {
@@ -278,11 +278,11 @@ void CemuHooks::hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU) {
     std::string requestedState = GameUtils::GetString(stateNamePtr);
     s_lastRequestedPlayerNormalState = requestedState;
 
-    if (IsFirstPerson() && ShouldBlockFirstPersonPlayerNormalState(requestedState, stateNamePtr)) {
-        Log::print<PPC>("Redirecting PlayerNormal state '{}' to fallback in first person", requestedState);
-        hCPU->gpr[4] = kFallbackPlayerNormalStateAddr;
-        hCPU->instructionPointer = orig_PlayerNormalChangeStateInnerChangeChildFuncAddr;
-        return;
+    if (IsFirstPerson() && GetSettings().ShouldPreventFirstPersonRagdoll() && ShouldBlockFirstPersonPlayerNormalState(requestedState, stateNamePtr)) {
+        if (s_damageStateNameAddress != 0) {
+            Log::print<PPC>("Redirecting PlayerNormal state '{}' to 'Damage' in first person", requestedState);
+            hCPU->gpr[4] = s_damageStateNameAddress;
+        }
     }
 
     if (requestedState != s_currentPlayerNormalState) {

@@ -8,6 +8,8 @@
 std::array<WeaponMotionAnalyser, 2> CemuHooks::m_motionAnalyzers = {};
 std::array<uint32_t, 2> CemuHooks::m_heldWeapons = { 0, 0 };
 std::array<uint32_t, 2> CemuHooks::m_heldWeaponsLastUpdate = { 0, 0 };
+std::array<WeaponType, 2> CemuHooks::s_handWeaponTypes = { WeaponType::UnknownWeapon, WeaponType::UnknownWeapon };
+CemuHooks::TwoHandGripDebugState CemuHooks::s_twoHandGripDebug = {};
 
 std::array s_cameraRotations = {
     glm::identity<glm::fquat>(),
@@ -30,6 +32,48 @@ static bool IsSwingableWeaponType(WeaponType weaponType) {
     return weaponType == WeaponType::SmallSword
         || weaponType == WeaponType::LargeSword
         || weaponType == WeaponType::Spear;
+}
+
+// Gripping with both hands means giving up the free hand (no shield), so it earns a modest damage edge on top of the weapon's own stats.
+static constexpr float TWO_HAND_GRIP_DAMAGE_BONUS = 1.10f;
+
+bool CemuHooks::IsTwoHandGripEngaged() {
+    auto& debugState = s_twoHandGripDebug;
+
+    // feature temporarily disabled via the master switch: behave exactly as before the two-hand work
+    if (!s_twoHandGripEnabled) {
+        debugState = {};
+        return false;
+    }
+
+    debugState.isFirstPerson = IsFirstPerson();
+
+    const WeaponType rightHandWeaponType = s_handWeaponTypes[OpenXR::EyeSide::RIGHT];
+    debugState.rightWeaponType = rightHandWeaponType;
+    debugState.isTwoHandedWeaponType = rightHandWeaponType == WeaponType::LargeSword || rightHandWeaponType == WeaponType::Spear;
+    debugState.isWeaponDrawn = m_heldWeapons[OpenXR::EyeSide::RIGHT] != 0;
+
+    const auto gameState = VRManager::instance().XR->m_gameState.load();
+    debugState.isLeftHandEmpty = !gameState.has_something_in_left_hand;
+
+    const auto inputs = VRManager::instance().XR->m_input.load();
+    bool posesValid = true;
+    for (uint32_t side = 0; side < 2; side++) {
+        if (!inputs.shared.pose[side].isActive) {
+            posesValid = false;
+            break;
+        }
+
+        const XrSpaceLocationFlags locationFlags = inputs.shared.poseLocation[side].locationFlags;
+        if (!(locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) || !(locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+            posesValid = false;
+            break;
+        }
+    }
+    debugState.arePosesValid = posesValid;
+
+    debugState.isEngageable = debugState.isFirstPerson && debugState.isTwoHandedWeaponType && debugState.isWeaponDrawn && debugState.isLeftHandEmpty && posesValid;
+    return debugState.isEngageable;
 }
 
 static bool isDroppable(std::string actorName) {
@@ -172,6 +216,10 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
         sead::FixedSafeString40 actorName = getMemory<sead::FixedSafeString40>(actorPtr + offsetof(ActorWiiU, name));
         char* boneName = (char*)s_memoryBaseAddress + boneNamePtr;
         if (actorName.getLE() == "GameROMPlayer" && (strcmp(boneName, "Weapon_L") == 0 || strcmp(boneName, "Weapon_R") == 0)) {
+            const OpenXR::EyeSide side = strcmp(boneName, "Weapon_L") == 0 ? OpenXR::EyeSide::LEFT : OpenXR::EyeSide::RIGHT;
+            m_heldWeapons[side] = targetActorPtr;
+            m_heldWeaponsLastUpdate[side] = 0;
+
             Weapon targetActor = {};
             readMemory(targetActorPtr, &targetActor);
 
@@ -227,6 +275,8 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
 
         Weapon targetActor = {};
         readMemory(targetActorPtr, &targetActor);
+
+        s_handWeaponTypes[side] = targetActor.type.getLE();
 
         //Fetch data for inputs handling
         auto gameState = VRManager::instance().XR->m_gameState.load();
@@ -390,6 +440,8 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     motionAnalyser.ApplyProfile(GetSettings().GetSwingSensitivity());
     motionAnalyser.Update(inputs.shared.poseLocation[motionIndex], inputs.shared.poseVelocity[motionIndex], headset.value(), inputs.shared.inputTime);
 
+    const bool isTwoHandGrip = motionIndex == OpenXR::EyeSide::RIGHT && IsTwoHandGripEngaged();
+
     // Use the analysed motion to determine whether the weapon is swinging or stabbing
     if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
         motionAnalyser.SetHitboxEnabled(true);
@@ -400,7 +452,7 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
         // Weak motions stay light; proper swings ramp up closer to full damage.
         const float power = motionAnalyser.GetSwingPower();
-        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale();
+        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale() * (isTwoHandGrip ? TWO_HAND_GRIP_DAMAGE_BONUS : 1.0f);
 
         writeMemory(weaponPtr, &weapon);
     }
@@ -416,18 +468,23 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
     if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
         float rumbleVelocity = std::max(0.0f, motionAnalyser.GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
 
-        const RumbleParameters rumbleParams = {
-            false,
-            1,
-            RumbleType::Fixed,
-            0.0f,
-            false,
-            0.001,
-            0.5f * rumbleVelocity,
-            0.7f * rumbleVelocity
-        };
-         
-        VRManager::instance().XR->GetRumbleManager()->enqueueInputsRumbleCommand(rumbleParams);
+        // Two-hand grips rumble both controllers; the pair must be prioritized since non-prioritized commands are dropped while the queue is non-empty.
+        const int rumbleHands[2] = { 1, 0 };
+        const int rumbleHandCount = isTwoHandGrip ? 2 : 1;
+        for (int i = 0; i < rumbleHandCount; i++) {
+            const RumbleParameters rumbleParams = {
+                isTwoHandGrip,
+                rumbleHands[i],
+                RumbleType::Fixed,
+                0.0f,
+                false,
+                0.001,
+                0.5f * rumbleVelocity,
+                0.7f * rumbleVelocity
+            };
+
+            VRManager::instance().XR->GetRumbleManager()->enqueueInputsRumbleCommand(rumbleParams);
+        }
     }
 }
 

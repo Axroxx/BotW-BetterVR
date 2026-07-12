@@ -235,6 +235,7 @@ static constexpr float kPreviewOriginMaxSnapDistanceSq = 1.0f;
 static constexpr float kPreviewAimDistance = 100.0f;
 static constexpr float kLaunchTargetDistance = 100.0f;
 static constexpr float kMinimumArrowSpeed = 0.01f;
+static constexpr float kMinimumBowDrawAmount = 0.001f;
 static constexpr uint64_t kActiveSnapshotLifetimeMs = 1500;
 static constexpr uint64_t kPendingShotOverrideLifetimeMs = 250;
 static constexpr uint32_t kPresetDefaultMaxFrames = 48;
@@ -246,7 +247,6 @@ static constexpr float kDefaultVfrScale = 1.0f;
 static constexpr float kPreviewImmediateFallRange = 10.0f;
 static constexpr uint32_t kActorParamPtrOffset = 0x39C;
 static constexpr uint32_t kActorParamGParamListOffset = 0x78;
-static constexpr uint32_t kWeaponFallbackOriginOffset = 0x204;
 static constexpr uint32_t kWeaponAttackPosOffset = 0x770;
 static constexpr uint32_t kWeaponTargetPosOffset = 0x77C;
 static constexpr uint32_t kWeaponAttackPosValidOffset = 0x7A0;
@@ -382,7 +382,7 @@ static uint32_t GetHeldLeftBowWeaponPtr() {
     return weapon.type.getLE() == WeaponType::Bow ? weaponPtr : 0;
 }
 
-static bool TryReadWeaponAttackOrigin(uint32_t weaponPtr, glm::vec3& outOrigin) {
+static bool TryReadNativeWeaponAttackOrigin(uint32_t weaponPtr, glm::vec3& outOrigin) {
     outOrigin = glm::vec3(0.0f);
     if (weaponPtr == 0) {
         return false;
@@ -390,19 +390,33 @@ static bool TryReadWeaponAttackOrigin(uint32_t weaponPtr, glm::vec3& outOrigin) 
 
     uint8_t attackPosValid = 0;
     CemuHooks::readMemory(weaponPtr + kWeaponAttackPosValidOffset, &attackPosValid);
-
-    BEVec3 beOrigin = {};
-    if (attackPosValid != 0) {
-        CemuHooks::readMemory(weaponPtr + kWeaponAttackPosOffset, &beOrigin);
-        outOrigin = beOrigin.getLE();
-        if (IsFiniteVec3(outOrigin)) {
-            return true;
-        }
+    if (attackPosValid == 0) {
+        return false;
     }
 
-    CemuHooks::readMemory(weaponPtr + kWeaponFallbackOriginOffset, &beOrigin);
+    BEVec3 beOrigin = {};
+    CemuHooks::readMemory(weaponPtr + kWeaponAttackPosOffset, &beOrigin);
     outOrigin = beOrigin.getLE();
     return IsFiniteVec3(outOrigin);
+}
+
+static bool TryReadWeaponActorPosition(uint32_t weaponPtr, glm::vec3& outPosition) {
+    outPosition = glm::vec3(0.0f);
+    if (weaponPtr == 0) {
+        return false;
+    }
+
+    BEMatrix34 actorMtx = {};
+    CemuHooks::readMemory(weaponPtr + kWeaponActorMtxOffset, &actorMtx);
+    outPosition = actorMtx.getPos().getLE();
+    return IsFiniteVec3(outPosition);
+}
+
+static bool TryReadWeaponAttackOrigin(uint32_t weaponPtr, glm::vec3& outOrigin) {
+    if (TryReadNativeWeaponAttackOrigin(weaponPtr, outOrigin)) {
+        return true;
+    }
+    return TryReadWeaponActorPosition(weaponPtr, outOrigin);
 }
 
 static bool TryReadWeaponTargetPos(uint32_t weaponPtr, glm::vec3& outTargetPos) {
@@ -529,9 +543,11 @@ static bool TryReadLiveBowState(LiveBowState& outState) {
 }
 
 static glm::vec3 RemoveHeadsetHorizontalOffset(glm::vec3 trackedPos) {
-    const glm::vec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
-    trackedPos.x -= appliedHeadPos.x;
-    trackedPos.z -= appliedHeadPos.z;
+    if (CemuHooks::IsFirstPerson()) {
+        const glm::vec3 appliedHeadPos = CemuHooks::GetAppliedRoomscaleHeadPosition();
+        trackedPos.x -= appliedHeadPos.x;
+        trackedPos.z -= appliedHeadPos.z;
+    }
     return trackedPos;
 }
 
@@ -581,13 +597,13 @@ static bool TryGetControllerWorldPose(const OpenXR::InputState& inputs, OpenXR::
     return IsFiniteVec3(outPosition) && IsFiniteVec3(outForward);
 }
 
-static bool TryGetGameplayCameraCenterPose(glm::vec3& outPosition, glm::vec3& outForward) {
+static bool TryGetGameplayCameraCenterPose(glm::vec3& outPosition, glm::vec3& outForward, long frameIdx = -1) {
     auto* renderer = VRManager::instance().XR->GetRenderer();
     if (renderer == nullptr) {
         return false;
     }
 
-    std::optional<glm::fmat4> middlePoseOpt = renderer->GetMiddlePose();
+    std::optional<glm::fmat4> middlePoseOpt = renderer->GetMiddlePose(frameIdx);
     if (!middlePoseOpt.has_value()) {
         return false;
     }
@@ -1144,7 +1160,7 @@ static const char* GetBowParamActionKindName(BowParamActionKind actionKind) {
     }
 }
 
-static bool TryBuildBowVisualizationState(BowVisualizationState& outState) {
+static bool TryBuildBowVisualizationState(BowVisualizationState& outState, long cameraFrameIdx = -1) {
     outState = {};
 
     LiveBowState liveBowState = {};
@@ -1160,43 +1176,81 @@ static bool TryBuildBowVisualizationState(BowVisualizationState& outState) {
 
     const glm::vec3 candidateTargetPos = liveBowState.targetPos;
     const bool hasCandidateTargetPos = liveBowState.hasTargetPos;
-    PoseFallbackState fallbackPose = {};
-    TryBuildFallbackLaunchPose(liveBowState, hasCandidateTargetPos, candidateTargetPos, true, fallbackPose);
+    if (CemuHooks::IsThirdPerson()) {
+        if (GetSettings().ShouldAimThirdPersonBowFromCamera()) {
+            glm::vec3 cameraPosition = glm::vec3(0.0f);
+            glm::vec3 cameraForward = glm::vec3(0.0f, 0.0f, -1.0f);
+            if (!TryGetGameplayCameraCenterPose(cameraPosition, cameraForward, cameraFrameIdx)) {
+                Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Third-person camera pose unavailable");
+                return false;
+            }
 
-    if (fallbackPose.valid) {
-        outState.launchOrigin = fallbackPose.origin;
-        outState.originSource = fallbackPose.originSource;
+            outState.launchOrigin = cameraPosition;
+            outState.originSource = BowVisualizationOriginSource::CameraPose;
+            outState.launchDirection = cameraForward;
+            outState.directionSource = BowVisualizationDirectionSource::CameraForward;
+        }
+        else {
+            glm::vec3 bowPosition = glm::vec3(0.0f);
+            glm::vec3 bowForward = glm::vec3(0.0f);
+            const bool hasBowPosition = TryReadWeaponActorPosition(liveBowState.weaponPtr, bowPosition);
+            const bool hasBowForward = TryGetBowEntityWorldForward(bowForward);
+            if (!hasBowPosition || !hasBowForward) {
+                Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Third-person bow pose unavailable (hasPosition={}, hasForward={})", hasBowPosition, hasBowForward);
+                return false;
+            }
+
+            outState.launchOrigin = bowPosition;
+            outState.originSource = BowVisualizationOriginSource::WeaponAttackPos;
+            outState.launchDirection = bowForward;
+            outState.directionSource = BowVisualizationDirectionSource::BowEntityForward;
+        }
+
         outState.hasLaunchOrigin = true;
-    }
-    else if (liveBowState.hasOrigin) {
-        outState.launchOrigin = liveBowState.origin;
-        outState.originSource = BowVisualizationOriginSource::WeaponAttackPos;
-        outState.hasLaunchOrigin = true;
-    }
-
-    if (fallbackPose.valid && fallbackPose.hasTargetPos) {
-        outState.targetPos = fallbackPose.targetPos;
-        outState.hasTargetPos = true;
-    }
-    else if (liveBowState.hasTargetPos) {
-        outState.targetPos = liveBowState.targetPos;
-        outState.hasTargetPos = true;
-    }
-
-    if (fallbackPose.valid && HasFiniteDirection(fallbackPose.direction)) {
-        outState.launchDirection = glm::normalize(fallbackPose.direction);
-        outState.directionSource = fallbackPose.directionSource;
         outState.hasLaunchDirection = true;
-    }
-    else if (outState.hasTargetPos && outState.hasLaunchOrigin && TryResolveDirectionToTarget(outState.launchOrigin, outState.targetPos, outState.launchDirection)) {
-        outState.directionSource = BowVisualizationDirectionSource::TargetPos;
-        outState.hasLaunchDirection = true;
-    }
-
-    if (!outState.hasTargetPos && outState.hasLaunchOrigin && outState.hasLaunchDirection) {
         outState.targetPos = outState.launchOrigin + outState.launchDirection * kLaunchTargetDistance;
         outState.hasTargetPos = true;
         outState.usedSyntheticTargetPos = true;
+    }
+    else {
+        PoseFallbackState fallbackPose = {};
+        TryBuildFallbackLaunchPose(liveBowState, hasCandidateTargetPos, candidateTargetPos, true, fallbackPose);
+
+        if (fallbackPose.valid) {
+            outState.launchOrigin = fallbackPose.origin;
+            outState.originSource = fallbackPose.originSource;
+            outState.hasLaunchOrigin = true;
+        }
+        else if (liveBowState.hasOrigin) {
+            outState.launchOrigin = liveBowState.origin;
+            outState.originSource = BowVisualizationOriginSource::WeaponAttackPos;
+            outState.hasLaunchOrigin = true;
+        }
+
+        if (fallbackPose.valid && fallbackPose.hasTargetPos) {
+            outState.targetPos = fallbackPose.targetPos;
+            outState.hasTargetPos = true;
+        }
+        else if (liveBowState.hasTargetPos) {
+            outState.targetPos = liveBowState.targetPos;
+            outState.hasTargetPos = true;
+        }
+
+        if (fallbackPose.valid && HasFiniteDirection(fallbackPose.direction)) {
+            outState.launchDirection = glm::normalize(fallbackPose.direction);
+            outState.directionSource = fallbackPose.directionSource;
+            outState.hasLaunchDirection = true;
+        }
+        else if (outState.hasTargetPos && outState.hasLaunchOrigin && TryResolveDirectionToTarget(outState.launchOrigin, outState.targetPos, outState.launchDirection)) {
+            outState.directionSource = BowVisualizationDirectionSource::TargetPos;
+            outState.hasLaunchDirection = true;
+        }
+
+        if (!outState.hasTargetPos && outState.hasLaunchOrigin && outState.hasLaunchDirection) {
+            outState.targetPos = outState.launchOrigin + outState.launchDirection * kLaunchTargetDistance;
+            outState.hasTargetPos = true;
+            outState.usedSyntheticTargetPos = true;
+        }
     }
 
     outState.launchSpeed = liveBowState.launchSpeed;
@@ -1287,7 +1341,7 @@ static uint32_t ArcGradientColor(float t, float fallFraction) {
 static void DrawAimingArc(const AimingArcCache& cache) {
     const uint32_t targetColor = DebugDrawColor(100, 180, 255, 100);
     const uint32_t fallMarkerColor = DebugDrawColor(255, 52, 36, 200);
-    constexpr float kThickness = 3.2f;
+    constexpr float kThickness = 1.5f;
     constexpr bool kPreviewXray = false;
 
     const float alphaScale = GetSettings().GetBowArcTransparency();
@@ -1319,7 +1373,7 @@ static void DrawAimingArc(const AimingArcCache& cache) {
     }
 }
 
-void QueueBowAimingArcPreview(bool isBowAimingActive) {
+void QueueBowAimingArcPreview(bool isBowAimingActive, long frameIdx) {
     const bool hasHeldBow = GetHeldLeftBowWeaponPtr() != 0;
     if (!isBowAimingActive || !hasHeldBow) {
         s_aimingArcCache = {};
@@ -1327,14 +1381,19 @@ void QueueBowAimingArcPreview(bool isBowAimingActive) {
     }
 
     BowVisualizationState launchState = {};
-    if (TryBuildBowVisualizationState(launchState) && launchState.hasLaunchOrigin && launchState.hasLaunchDirection && launchState.actionKind == BowParamActionKind::Move) {
+    if (!TryBuildBowVisualizationState(launchState, frameIdx) || launchState.drawAmount <= kMinimumBowDrawAmount) {
+        s_aimingArcCache = {};
+        return;
+    }
+
+    if (launchState.hasLaunchOrigin && launchState.hasLaunchDirection && launchState.actionKind == BowParamActionKind::Move) {
         AimingArcCache cache = {};
         if (BuildPreviewTrajectory(launchState, cache.points, cache.pointCount, cache.firstFallIndex)) {
             cache.valid = true;
             cache.hasTargetPos = launchState.hasTargetPos && !launchState.usedSyntheticTargetPos;
             cache.targetPos = launchState.targetPos;
             s_aimingArcCache = cache;
-            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Rendering {} arc points (firstFall={}, draw={:.3f}, atRange={:.1f})", cache.pointCount, cache.firstFallIndex, launchState.drawAmount, launchState.atRange);
+            Log::print<ARROW_SHOT_CAPTURE>("[BowViz] Rendering {} arc points (origin={}, direction={}, firstFall={}, draw={:.3f}, atRange={:.1f})", cache.pointCount, launchState.launchOrigin, launchState.launchDirection, cache.firstFallIndex, launchState.drawAmount, launchState.atRange);
         }
         else {
             s_aimingArcCache = {};
@@ -1394,9 +1453,9 @@ void CemuHooks::hook_CaptureArrowShootDecision(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_OverrideArrowShotTransform(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = 0x03486CD4;
 
+    ClearPendingShotOverride();
     BEMatrix34 transform = {};
     readMemory(hCPU->gpr[4], &transform);
-    ClearPendingShotOverride();
 
     if (TryGetMatchingPlayerPreviewSnapshot(hCPU->gpr[30])) {
         BowVisualizationState launchState = {};

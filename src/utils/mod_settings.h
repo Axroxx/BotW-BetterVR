@@ -756,6 +756,7 @@ struct ModSettings {
     EnumSetting<CameraMode> cameraMode = EnumSetting<CameraMode>("CameraMode", CameraMode::FIRST_PERSON, ModSettings::toString, { CameraMode::FIRST_PERSON, CameraMode::THIRD_PERSON });
     EnumSetting<PlayMode> playMode = EnumSetting<PlayMode>("PlayMode", PlayMode::STANDING, ModSettings::toString, { PlayMode::STANDING, PlayMode::SEATED });
     FloatSetting<float> thirdPlayerDistance = FloatSetting<float>("ThirdPlayerDistance", 0.5f, 0.0f);
+    BoolSetting thirdPersonBowCameraAim = BoolSetting("ThirdPersonBowCameraAim", true);
     EnumSetting<EventMode> cutsceneCameraMode = EnumSetting<EventMode>("CutsceneCameraMode", EventMode::FOLLOW_DEFAULT_EVENT_SETTINGS, ModSettings::toString, { EventMode::ALWAYS_FIRST_PERSON, EventMode::FOLLOW_DEFAULT_EVENT_SETTINGS, EventMode::ALWAYS_THIRD_PERSON });
     BoolSetting useBlackBarsForCutscenes = BoolSetting("UseBlackBarsForCutscenes", false);
 
@@ -773,6 +774,7 @@ struct ModSettings {
     BoolSetting debugShowRoomscalePhysics = BoolSetting("DebugShowRoomscalePhysics", false);
     BoolSetting debugShowRaycastLines = BoolSetting("DebugShowRaycastLines", false);
     BoolSetting alwaysPreventFirstPersonCutsceneCameraMovement = BoolSetting("AlwaysPreventFirstPersonCutsceneCameraMovement", false);
+    BoolSetting preventFirstPersonRagdoll = BoolSetting("PreventFirstPersonRagdoll", true);
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR, PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
@@ -810,6 +812,7 @@ struct ModSettings {
             &cameraMode,
             &playMode,
             &thirdPlayerDistance,
+            &thirdPersonBowCameraAim,
             &cutsceneCameraMode,
             &useBlackBarsForCutscenes,
             &playerHeightOffset,
@@ -823,6 +826,7 @@ struct ModSettings {
             &debugShowRaycastLines,
             &debugShowRoomscalePhysics,
             &alwaysPreventFirstPersonCutsceneCameraMovement,
+            &preventFirstPersonRagdoll,
             &buggyAngularVelocity,
             &performanceOverlay,
             &performanceOverlayFrequency,
@@ -891,7 +895,9 @@ struct ModSettings {
     bool UseBlackBarsForCutscenes() const { return useBlackBarsForCutscenes; }
 
     float GetBowArcTransparency() const { return bowArcTransparency; }
+    bool ShouldAimThirdPersonBowFromCamera() const { return thirdPersonBowCameraAim; }
     bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
+    bool ShouldPreventFirstPersonRagdoll() const { return preventFirstPersonRagdoll; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
@@ -929,6 +935,7 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Walking Direction: {}\n", toDisplayString(GetWalkingDirection()));
         std::format_to(std::back_inserter(buffer), " - Snap Turn Angle: {} deg\n", GetSnapTurnAngle());
         std::format_to(std::back_inserter(buffer), " - Smooth Turn Speed: {} deg/s\n", GetSmoothTurnSpeed());
+        std::format_to(std::back_inserter(buffer), " - Prevent Ragdolling In First-Person: {}\n", ShouldPreventFirstPersonRagdoll() ? "Yes" : "No");
         return buffer;
     }
 };

@@ -156,7 +156,7 @@ void RND_Renderer::EndFrame() {
 
     const long hudFrameIdx = SelectNewestHudReadyFrame();
 
-    QueueBowAimingArcPreview(Layer2D::IsBowAimingActive());
+    QueueBowAimingArcPreview(Layer2D::IsBowAimingActive(), hudFrameIdx);
     DebugDrawRenderData debugDrawData = hudFrameIdx != -1 ? DebugDraw::instance().TakeRenderData(hudFrameIdx) : DebugDraw::instance().TakeRenderData();
 
     const bool isFadeVisible = CemuHooks::IsAnyFadeScreenVisible();

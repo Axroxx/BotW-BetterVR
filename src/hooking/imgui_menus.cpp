@@ -739,6 +739,9 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
         DrawSettingRow(windowWidth, "Camera Distance", [&]() {
             settings.thirdPlayerDistance.AddSliderToGUI(changed, 0.5f, 0.65f);
         });
+        DrawSettingRow(windowWidth, "Shoot Arrows From Camera", [&]() {
+            settings.thirdPersonBowCameraAim.AddToGUI(changed);
+        });
     }
     else {
         DrawSettingRow(windowWidth, "Height Offset", [&]() {
@@ -881,6 +884,10 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
             settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(changed);
         });
 
+        DrawSettingRow(windowWidth, "Prevent Ragdolling In First-Person Mode", [&]() {
+            settings.preventFirstPersonRagdoll.AddToGUI(changed);
+        });
+
         DrawSettingRow(windowWidth, "Enable Debugger Tools (Reduces Performance)", [&]() {
             bool enableDebuggerTools = settings.enableDebuggerTools;
             if (ImGui::Checkbox("##EnableDebuggerTools", &enableDebuggerTools)) {
@@ -919,6 +926,29 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
 }
 
 void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::SeparatorText("Two-Hand Grip");
+    {
+        const auto& gripDebug = CemuHooks::s_twoHandGripDebug;
+        auto drawFlagText = [](const char* label, bool value) {
+            ImGui::TextColored(value ? ImVec4(0.4f, 1.0f, 0.4f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s: %s", label, value ? "yes" : "no");
+        };
+        drawFlagText("First person", gripDebug.isFirstPerson);
+        drawFlagText("Two-handed weapon type", gripDebug.isTwoHandedWeaponType);
+        ImGui::SameLine();
+        ImGui::Text("(type %u)", (uint32_t)gripDebug.rightWeaponType);
+        drawFlagText("Weapon drawn in right hand", gripDebug.isWeaponDrawn);
+        drawFlagText("Left hand empty", gripDebug.isLeftHandEmpty);
+        drawFlagText("Controller poses valid", gripDebug.arePosesValid);
+        drawFlagText("Engageable", gripDebug.isEngageable);
+        drawFlagText("Blade axis solved", gripDebug.isBladeAxisValid);
+        ImGui::SameLine();
+        ImGui::Text("(model axis %d, hand-frame %.2f %.2f %.2f)", gripDebug.bladeModelAxisIdx, gripDebug.bladeAxisInHand.x, gripDebug.bladeAxisInHand.y, gripDebug.bladeAxisInHand.z);
+        drawFlagText("Engaged", gripDebug.isEngaged);
+        ImGui::Text("Hand separation: %.2f m", gripDebug.handSeparation);
+        ImGui::Text("Skl_Root passes: %u", gripDebug.skelRootPasses);
+    }
+
     auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get();
     if (entityDebugger != nullptr) {
         ImGui::Dummy(ImVec2(0.0f, 10.0f));

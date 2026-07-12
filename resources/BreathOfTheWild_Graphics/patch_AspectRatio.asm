@@ -10,10 +10,6 @@ aspectRatio:
 aspectRatio_Inventory:
 .float (16.0/9.0)
 
-grassCulling: ; The grass is calculated in a weird way, but this fix seems to work. So for safety, only enable it for ultrawide resolutions.
-.float (($ultrawideHUDMode != 0)*(($gameWidth/$gameHeight) / ($width/$height))) + (($ultrawideHUDMode == 0)*1.0)
-
-
 [BotW_AspectRatio_V208]
 moduleMatches = 0x6267BFD0
 
@@ -33,15 +29,6 @@ moduleMatches = 0x6267BFD0
 ; 3D Rendering (calculated every frame)
 0x0386D01C = lis r28, aspectRatio@ha
 0x0386D020 = lfs f12, aspectRatio@l(r28)
-
-; Grass Culling (calculated every frame)
-0x035b0a30 = lis r5, grassCulling@ha
-0x035b0a38 = lfs f11, grassCulling@l(r5)
-
-; 2nd Type Of Grass Culling (calculated every frame)
-; Still kinda unsure how this should be calculated but it works
-0x1047BFB8 = .float (($ultrawideHUDMode != 0)*(120*0.5) + (($ultrawideHUDMode == 0)*(120)))
-
 
 [BotW_AspectRatio_V176V192]
 moduleMatches = 0xFD091F9F,0xD472D8A5

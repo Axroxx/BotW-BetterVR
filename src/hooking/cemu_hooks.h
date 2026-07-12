@@ -114,8 +114,33 @@ public:
     static std::array<class WeaponMotionAnalyser, 2> m_motionAnalyzers;
     static std::array<uint32_t, 2> m_heldWeapons;
     static std::array<uint32_t, 2> m_heldWeaponsLastUpdate;
+    static std::array<WeaponType, 2> s_handWeaponTypes;
+
+    // Master switch for the experimental two-handed grip. Flip to true to re-enable the whole
+    // feature (grip geometry, damage bonus, dual rumble); false fully disables it while keeping
+    // all of the code in place.
+    static constexpr bool s_twoHandGripEnabled = false;
+
+    // live diagnostics for the two-handed grip, shown in the ImGui debug tab
+    struct TwoHandGripDebugState {
+        bool isFirstPerson = false;
+        WeaponType rightWeaponType = WeaponType::UnknownWeapon;
+        bool isTwoHandedWeaponType = false;
+        bool isWeaponDrawn = false;
+        bool isLeftHandEmpty = false;
+        bool arePosesValid = false;
+        bool isEngageable = false;
+        bool isBladeAxisValid = false;
+        int bladeModelAxisIdx = -1;
+        glm::fvec3 bladeAxisInHand = glm::fvec3(0.0f);
+        float handSeparation = 0.0f;
+        bool isEngaged = false;
+        uint32_t skelRootPasses = 0;
+    };
+    static TwoHandGripDebugState s_twoHandGripDebug;
     static std::atomic_uint32_t s_recordingOutputMode;
     static uint32_t s_playerAddress;
+    static uint32_t s_damageStateNameAddress;
     static uint32_t s_playerMtxAddress;
     static uint32_t s_cameraMtxAddress;
     static glm::fvec3 s_playerPos;
@@ -156,6 +181,7 @@ public:
     static std::optional<HybridEventSettings> GetFirstPersonSettingsForActiveEvent();
     static bool IsFirstPerson();
     static bool IsThirdPerson();
+    static bool IsTwoHandGripEngaged();
     static bool UseBlackBarsDuringEvents();
     static bool IsScreenOpen(ScreenId screen);
     static bool IsScreenVisible(ScreenId screen);
