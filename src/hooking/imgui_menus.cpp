@@ -764,27 +764,8 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
         });
 
         DrawSettingRow(windowWidth, "Turn Mode", [&]() {
-            static const char* kSnapLabels[] = { "Smooth", "30 deg Snap (Recommended)", "45 deg Snap", "60 deg Snap" };
-            static const int32_t kSnapValues[] = { 0, 30, 45, 60 };
-            int current = settings.snapTurnAngle;
-            int idx = 1;
-            for (int i = 0; i < 4; ++i) {
-                if (current == kSnapValues[i]) {
-                    idx = i;
-                    break;
-                }
-            }
-            if (ImGui::Combo("##SnapTurnAngle", &idx, kSnapLabels, 4)) {
-                settings.snapTurnAngle = kSnapValues[idx];
-                *changed = true;
-            }
+            settings.turnMode.AddComboToGUI(changed, ModSettings::toDisplayString);
         });
-
-        if (settings.GetSnapTurnAngle() == 0) {
-            DrawSettingRow(windowWidth, "Smooth Turn Speed", [&]() {
-                settings.smoothTurnSpeed.AddToGUI(changed, windowWidth.x, 30.0f, 300.0f, [](float) { return "%.0f deg/s"; });
-            });
-        }
     }
 
     ImGui::Spacing();

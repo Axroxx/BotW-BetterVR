@@ -47,6 +47,7 @@ static void Settings_ReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
     }
     std::string nameStr = std::string(nameView);
     const char* name = nameStr.c_str();
+
     auto options = s->GetOptions();
     for (ModSettingBase* option : options) {
         if (stricmp(option->name, name) == 0) {

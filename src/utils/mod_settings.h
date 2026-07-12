@@ -572,6 +572,15 @@ enum class SwingSensitivity : int32_t {
     SWING_CUSTOM = 2,
 };
 
+enum class TurnMode : int32_t {
+    SMOOTH_SLOW = 0,
+    SMOOTH_NORMAL = 1,
+    SMOOTH_FAST = 2,
+    SNAP_30 = 3,
+    SNAP_45 = 4,
+    SNAP_60 = 5,
+};
+
 struct ModSettings {
     static const char* toString(EventMode eventMode) {
         switch (eventMode) {
@@ -749,6 +758,44 @@ struct ModSettings {
         }
     }
 
+    static const char* toString(TurnMode turnMode) {
+        switch (turnMode) {
+            case TurnMode::SMOOTH_SLOW:
+                return "SMOOTH_SLOW";
+            case TurnMode::SMOOTH_NORMAL:
+                return "SMOOTH_NORMAL";
+            case TurnMode::SMOOTH_FAST:
+                return "SMOOTH_FAST";
+            case TurnMode::SNAP_30:
+                return "SNAP_30";
+            case TurnMode::SNAP_45:
+                return "SNAP_45";
+            case TurnMode::SNAP_60:
+                return "SNAP_60";
+            default:
+                return "";
+        }
+    }
+
+    static const char* toDisplayString(TurnMode turnMode) {
+        switch (turnMode) {
+            case TurnMode::SMOOTH_SLOW:
+                return "Smooth Turn (Slow)";
+            case TurnMode::SMOOTH_NORMAL:
+                return "Smooth Turn (Normal)";
+            case TurnMode::SMOOTH_FAST:
+                return "Smooth Turn (Fast)";
+            case TurnMode::SNAP_30:
+                return "30 deg Snap (Recommended)";
+            case TurnMode::SNAP_45:
+                return "45 deg Snap";
+            case TurnMode::SNAP_60:
+                return "60 deg Snap";
+            default:
+                return "";
+        }
+    }
+
     static constexpr float kDefaultAxisThreshold = 0.5f;
     static constexpr float kDefaultStickDeadzone = 0.15f;
 
@@ -787,8 +834,7 @@ struct ModSettings {
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
     FloatSetting<float> stickDeadzone = FloatSetting<float>("StickDeadzone", kDefaultStickDeadzone, 0.0f, 1.0f);
     EnumSetting<WalkingDirection> walkingDirection = EnumSetting<WalkingDirection>("WalkingDirection", WalkingDirection::CAMERA, ModSettings::toString, { WalkingDirection::CAMERA, WalkingDirection::CONTROLLER });
-    IntSetting<int32_t> snapTurnAngle = IntSetting<int32_t>("SnapTurnAngle", 30, 0, 60);
-    FloatSetting<float> smoothTurnSpeed = FloatSetting<float>("SmoothTurnSpeed", 120.0f, 30.0f, 300.0f);
+    EnumSetting<TurnMode> turnMode = EnumSetting<TurnMode>("TurnMode", TurnMode::SNAP_30, ModSettings::toString, { TurnMode::SMOOTH_SLOW, TurnMode::SMOOTH_NORMAL, TurnMode::SMOOTH_FAST, TurnMode::SNAP_30, TurnMode::SNAP_45, TurnMode::SNAP_60 });
     EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_EASY, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_CUSTOM });
     FloatSetting<float> customStabSpeedThreshold = FloatSetting<float>("CustomStabSpeedThreshold", 0.05f, 0.01f, 0.50f);
     FloatSetting<float> customStabAccThreshold = FloatSetting<float>("CustomStabAccThreshold", 7.0f, 1.0f, 15.0f);
@@ -838,8 +884,7 @@ struct ModSettings {
             &axisThreshold,
             &stickDeadzone,
             &walkingDirection,
-            &snapTurnAngle,
-            &smoothTurnSpeed,
+            &turnMode,
             &swingSensitivity,
             &customStabSpeedThreshold,
             &customStabAccThreshold,
@@ -904,8 +949,22 @@ struct ModSettings {
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }
     WalkingDirection GetWalkingDirection() const { return walkingDirection; }
-    int32_t GetSnapTurnAngle() const { return snapTurnAngle; }
-    float GetSmoothTurnSpeed() const { return smoothTurnSpeed; }
+    int32_t GetSnapTurnAngle() const {
+        switch (turnMode.load()) {
+            case TurnMode::SNAP_30: return 30;
+            case TurnMode::SNAP_45: return 45;
+            case TurnMode::SNAP_60: return 60;
+            default: return 0;
+        }
+    }
+    float GetSmoothTurnSpeed() const {
+        switch (turnMode.load()) {
+            case TurnMode::SMOOTH_SLOW: return 60.0f;
+            case TurnMode::SMOOTH_NORMAL: return 120.0f;
+            case TurnMode::SMOOTH_FAST: return 240.0f;
+            default: return 0.0f;
+        }
+    }
     float GetWeaponDamageOutputScale() const { return GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM ? customDamageOutputScale : 1.0f; }
 
     bool IsDebuggingToolsEnabled() const;
@@ -936,8 +995,7 @@ struct ModSettings {
         std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
         std::format_to(std::back_inserter(buffer), " - Weapon Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
         std::format_to(std::back_inserter(buffer), " - Walking Direction: {}\n", toDisplayString(GetWalkingDirection()));
-        std::format_to(std::back_inserter(buffer), " - Snap Turn Angle: {} deg\n", GetSnapTurnAngle());
-        std::format_to(std::back_inserter(buffer), " - Smooth Turn Speed: {} deg/s\n", GetSmoothTurnSpeed());
+        std::format_to(std::back_inserter(buffer), " - Turn Mode: {}\n", toDisplayString(turnMode.load()));
         std::format_to(std::back_inserter(buffer), " - Prevent Ragdolling In First-Person: {}\n", ShouldPreventFirstPersonRagdoll() ? "Yes" : "No");
         return buffer;
     }
