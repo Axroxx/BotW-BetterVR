@@ -34,10 +34,10 @@ While more integrated solutions are being found out, there's probably ways to se
 
 ### Current Limitations & Known Issues
 
-- [Should Be Fixed] There's a small chance that the screen stays black after exiting any menus, which requires restarting the game to continue.
+- There's a small chance that the screen stays black after exiting any menus, which requires restarting the game to continue.
 - Climbing ladders require jumping up the ladder to go up and you have to look at the ladder.
 - You can get stuck behind ladders sometimes, especially when you stop moving at the very top of the ladder while climbing down. So keep moving at the start!
-- It'll lack some comfort options for now, like a left-handed mode or snap turning. These will be added later.
+- It'll lack some comfort options for now, like a left-handed mode ~~or snap turning~~ (added).
 
 ### Mod Installation
 
