@@ -55,6 +55,7 @@ inline std::mutex g_launcherLogMutex;
 
 namespace UpdateChecker {
     void CheckForUpdates(const LauncherPaths& paths);
+    bool CheckCemuVersion(const LauncherPaths& paths);
 }
 
 OpenXRProbeResult ProbeOpenXR();

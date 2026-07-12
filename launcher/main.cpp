@@ -1190,6 +1190,10 @@ int wmain(int argc, wchar_t** argv) {
             return 1;
         }
 
+        if (!UpdateChecker::CheckCemuVersion(paths)) {
+            return 1;
+        }
+
         UpdateChecker::CheckForUpdates(paths);
 
         if (!EnsureOpenXRRuntimeReady()) {

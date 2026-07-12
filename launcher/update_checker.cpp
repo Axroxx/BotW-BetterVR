@@ -3,6 +3,7 @@
 #include "launcher_common.h"
 
 #pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "version.lib")
 #include <winhttp.h>
 
 namespace UpdateChecker {
@@ -85,6 +86,94 @@ namespace UpdateChecker {
 
         file << version;
     }
+
+    struct CemuVersion {
+        uint32_t major = 0;
+        uint32_t minor = 0;
+        uint32_t build = 0;
+        uint32_t revision = 0;
+    };
+
+    std::string FormatCemuVersion(const CemuVersion& version) {
+        return std::to_string(version.major) + "." + std::to_string(version.minor) + "." + std::to_string(version.build) + "." + std::to_string(version.revision);
+    }
+
+    std::optional<CemuVersion> GetCemuFileVersion(const fs::path& exePath) {
+        const DWORD versionInfoSize = GetFileVersionInfoSizeW(exePath.c_str(), nullptr);
+        if (versionInfoSize == 0) {
+            LogLine("Cemu version check: GetFileVersionInfoSizeW failed for " + Narrow(exePath));
+            return std::nullopt;
+        }
+
+        std::vector<BYTE> versionInfo(versionInfoSize);
+        if (!GetFileVersionInfoW(exePath.c_str(), 0, versionInfoSize, versionInfo.data())) {
+            LogLine("Cemu version check: GetFileVersionInfoW failed for " + Narrow(exePath));
+            return std::nullopt;
+        }
+
+        VS_FIXEDFILEINFO* fixedFileInfo = nullptr;
+        UINT fixedFileInfoSize = 0;
+        if (!VerQueryValueW(versionInfo.data(), L"\\", reinterpret_cast<LPVOID*>(&fixedFileInfo), &fixedFileInfoSize) || fixedFileInfo == nullptr) {
+            LogLine("Cemu version check: VerQueryValueW failed for " + Narrow(exePath));
+            return std::nullopt;
+        }
+
+        CemuVersion version;
+        version.major = HIWORD(fixedFileInfo->dwProductVersionMS);
+        version.minor = LOWORD(fixedFileInfo->dwProductVersionMS);
+        version.build = HIWORD(fixedFileInfo->dwProductVersionLS);
+        version.revision = LOWORD(fixedFileInfo->dwProductVersionLS);
+        return version;
+    }
+
+    bool IsZeroCemuVersion(const CemuVersion& version) {
+        return version.major == 0 && version.minor == 0 && version.build == 0 && version.revision == 0;
+    }
+
+    bool CheckCemuVersion(const LauncherPaths& paths) {
+        const std::optional<CemuVersion> version = GetCemuFileVersion(paths.cemuExe);
+        if (!version.has_value()) {
+            LogLine("Cemu version check: could not determine Cemu version, allowing launch");
+            return true;
+        }
+
+        if (IsZeroCemuVersion(*version)) {
+            LogLine("Cemu version check: version is 0.0.0.0 (likely local build), allowing launch");
+            return true;
+        }
+
+        const std::string versionString = FormatCemuVersion(*version);
+        LogLine("Cemu version: " + versionString);
+
+        if (version->major < 2) {
+            std::string message;
+            message += "You are running Cemu ";
+            message += versionString;
+            message += " (1.x), which is incompatible with BetterVR.\n\n";
+            message += "Please update to Cemu 2.6 or newer.\n";
+            message += "It is strongly recommended to set up Cemu 2.6 from scratch:\n";
+            message += "https://cemu.cfw.guide/";
+            ShowErrorMessage(message);
+            return false;
+        }
+
+        if (version->major == 2 && version->minor < 4) {
+            std::string message;
+            message += "You are running Cemu ";
+            message += versionString;
+            message += ", which is older than Cemu 2.4 and hasn't been tested to work.\n\n";
+            message += "It's recommended to update Cemu.\n\n";
+            message += "Launch Cemu anyway?";
+            const int choice = MessageBoxA(nullptr, message.c_str(), "BetterVR Launcher - Outdated Cemu", MB_YESNO | MB_ICONWARNING);
+            if (choice != IDYES) {
+                LogLine("Cemu version check: user declined to launch outdated Cemu");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void CheckForUpdates(const LauncherPaths& paths) {
 #ifndef _DEBUG
         std::thread([paths]() {
