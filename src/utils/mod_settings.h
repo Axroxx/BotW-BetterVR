@@ -834,7 +834,7 @@ struct ModSettings {
     FloatSetting<float> axisThreshold = FloatSetting<float>("AxisThreshold", kDefaultAxisThreshold, 0.0f, 1.0f);
     FloatSetting<float> stickDeadzone = FloatSetting<float>("StickDeadzone", kDefaultStickDeadzone, 0.0f, 1.0f);
     EnumSetting<WalkingDirection> walkingDirection = EnumSetting<WalkingDirection>("WalkingDirection", WalkingDirection::CAMERA, ModSettings::toString, { WalkingDirection::CAMERA, WalkingDirection::CONTROLLER });
-    EnumSetting<TurnMode> turnMode = EnumSetting<TurnMode>("TurnMode", TurnMode::SNAP_30, ModSettings::toString, { TurnMode::SMOOTH_SLOW, TurnMode::SMOOTH_NORMAL, TurnMode::SMOOTH_FAST, TurnMode::SNAP_30, TurnMode::SNAP_45, TurnMode::SNAP_60 });
+    EnumSetting<TurnMode> turnMode = EnumSetting<TurnMode>("TurnMode", TurnMode::SMOOTH_NORMAL, ModSettings::toString, { TurnMode::SMOOTH_SLOW, TurnMode::SMOOTH_NORMAL, TurnMode::SMOOTH_FAST, TurnMode::SNAP_30, TurnMode::SNAP_45, TurnMode::SNAP_60 });
     EnumSetting<SwingSensitivity> swingSensitivity = EnumSetting<SwingSensitivity>("SwingSensitivity", SwingSensitivity::SWING_NORMAL, ModSettings::toString, { SwingSensitivity::SWING_EASY, SwingSensitivity::SWING_NORMAL, SwingSensitivity::SWING_CUSTOM });
     FloatSetting<float> customStabSpeedThreshold = FloatSetting<float>("CustomStabSpeedThreshold", 0.05f, 0.01f, 0.50f);
     FloatSetting<float> customStabAccThreshold = FloatSetting<float>("CustomStabAccThreshold", 7.0f, 1.0f, 15.0f);
