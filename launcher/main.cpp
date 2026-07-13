@@ -674,6 +674,10 @@ static bool WriteTemporaryDownloadedGraphicsFile(const fs::path& path, const uns
 }
 
 static void CleanupDownloadedGraphicsOverrideFiles(const LauncherPaths& paths) {
+    if (!fs::exists(paths.downloadedGraphicsSubfolder)) {
+        return;
+    }
+
     for (size_t index = 0; index < EmbeddedAssets::AssetCount; ++index) {
         const EmbeddedAssets::Asset& asset = EmbeddedAssets::Assets[index];
         if (asset.kind != EmbeddedAssets::AssetKind::DownloadedGraphics) {
