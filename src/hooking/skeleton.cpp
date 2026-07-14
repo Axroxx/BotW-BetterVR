@@ -291,9 +291,7 @@ static glm::fvec3 RemoveHeadsetHorizontalOffset(glm::fvec3 trackedPos) {
 
 // handle off-hand grab for two-handed weapons
 static constexpr uint32_t TWO_HAND_WEAPON_ACTOR_MTX_OFFSET = 0x1F8;
-static constexpr float TWO_HAND_MIN_HAND_SEPARATION = 0.10f;
-static constexpr float TWO_HAND_LARGE_SWORD_MAX_GRAB_DISTANCE = 0.22f;
-static constexpr float TWO_HAND_SPEAR_MAX_GRAB_DISTANCE = 0.55f;
+static constexpr float TWO_HAND_MIN_HAND_SEPARATION = 0.05f; // numerical floor for the grip axis (rearToLeft/sep); off-hand reach is otherwise gated by the weapon AABB, not by distance from the primary hand
 static constexpr float TWO_HAND_BLADE_AXIS_SMOOTHING = 0.15f;
 static constexpr float TWO_HAND_GRAB_AABB_MARGIN = 0.04f;
 
@@ -601,19 +599,18 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
             }
         }
 
-        const glm::mat4 leftHandWorld = calcHandWorldMat(OpenXR::EyeSide::LEFT);
+        const glm::mat4 leftHandWorld = calcHandWorldMat(EyeSide::LEFT);
         const glm::vec3 rearPos = glm::vec3(rightHandWorld[3]);
         const glm::vec3 leftPos = glm::vec3(leftHandWorld[3]);
 
         // handle off-hand weapon grab latching
-        const bool leftGripHeld = s_twoHandGripEnabled && IsTwoHandGripEngaged() && inputs.inGame.grab[OpenXR::EyeSide::LEFT].currentState > TwoHandGripButtonThreshold;
+        const bool leftGripHeld = s_twoHandGripEnabled && IsTwoHandGripEngaged() && inputs.inGame.grab[EyeSide::LEFT].currentState > TwoHandGripButtonThreshold;
         if (leftGripHeld && !s_twoHandGripButtonHeld && s_bladeAxisValid && IsPointInsideWeaponAABB(rightWeaponPtr, leftPos)) {
             const glm::vec3 grabOffsetWorld = leftPos - rearPos;
             const float grabSeparation = glm::length(grabOffsetWorld);
-            const float maxGrabDistance = s_handWeaponTypes[OpenXR::EyeSide::RIGHT] == WeaponType::Spear ? TWO_HAND_SPEAR_MAX_GRAB_DISTANCE : TWO_HAND_LARGE_SWORD_MAX_GRAB_DISTANCE;
-            if (grabSeparation > TWO_HAND_MIN_HAND_SEPARATION && grabSeparation <= maxGrabDistance) {
+            if (grabSeparation > TWO_HAND_MIN_HAND_SEPARATION) {
                 s_twoHandGripLatched = true;
-                CemuHooks::s_twoHandGripConsumesGrabInput = true;
+                s_twoHandGripConsumesGrabInput = true;
                 s_latchedGripOffsetInRightHand = glm::inverse(rightHandRotWorld) * grabOffsetWorld;
                 s_latchedBladeDirectionSign = glm::dot(rightHandRotWorld * s_bladeAxisInHand, grabOffsetWorld) >= 0.0f ? 1.0f : -1.0f;
             }
@@ -627,7 +624,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
             const glm::vec3 rearToLeft = leftPos - rearPos;
             const float handSeparation = glm::length(rearToLeft);
             if (handSeparation > TWO_HAND_MIN_HAND_SEPARATION) {
-                s_lastGripAxisWorld = rearToLeft / handSeparation; // both hands steer the direction
+                s_lastGripAxisWorld = rearToLeft / handSeparation; // calculate double-handed steering direction
             }
 
             const glm::vec3 bladeDir = s_lastGripAxisWorld;
