@@ -81,6 +81,7 @@ using Microsoft::WRL::ComPtr;
 #undef GLM_ENABLE_EXPERIMENTAL
 
 #define ENABLE_VK_ROBUSTNESS 0
+#define ENABLE_VK_DEVICE_FAULT 1
 
 #include "font_kenney.h"
 

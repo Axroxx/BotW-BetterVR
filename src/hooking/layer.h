@@ -1,6 +1,8 @@
 #pragma once
 
 namespace VRLayer {
+    void LogDeviceFaultInfo();
+
     class VkInstanceOverrides {
     public:
         static VkResult CreateInstance(PFN_vkCreateInstance createInstanceFunc, const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkInstance* pInstance);

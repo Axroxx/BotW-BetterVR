@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "layer.h"
 #include "instance.h"
-#include <cstring>
+
+
+static bool s_deviceFaultLoggingEnabled = false;
 
 #ifdef _DEBUG
 static VkInstance s_debugMessengerInstance = VK_NULL_HANDLE;
@@ -226,8 +228,10 @@ const std::vector<std::string> additionalDeviceExtensions = {
     VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
     VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-#if ENABLE_VK_ROBUSTNESS
+#if ENABLE_VK_DEVICE_FAULT
     VK_EXT_DEVICE_FAULT_EXTENSION_NAME,
+#endif
+#if ENABLE_VK_ROBUSTNESS
     VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
     VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME
 #endif
@@ -268,11 +272,20 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
     VkPhysicalDeviceFeatures2 supportedFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     supportedFeatures.pNext = &supportedTimelineSemaphoreFeatures;
 
+    void* supportedChainTail = &supportedTimelineSemaphoreFeatures;
+
 #if ENABLE_VK_ROBUSTNESS
     VkPhysicalDeviceImageRobustnessFeatures supportedImageRobustnessFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES };
     VkPhysicalDeviceRobustness2FeaturesEXT supportedRobustness2Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
-    supportedTimelineSemaphoreFeatures.pNext = &supportedImageRobustnessFeatures;
+    static_cast<VkBaseOutStructure*>(supportedChainTail)->pNext = reinterpret_cast<VkBaseOutStructure*>(&supportedImageRobustnessFeatures);
     supportedImageRobustnessFeatures.pNext = &supportedRobustness2Features;
+    supportedChainTail = &supportedRobustness2Features;
+#endif
+
+#if ENABLE_VK_DEVICE_FAULT
+    VkPhysicalDeviceFaultFeaturesEXT supportedFaultFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
+    static_cast<VkBaseOutStructure*>(supportedChainTail)->pNext = reinterpret_cast<VkBaseOutStructure*>(&supportedFaultFeatures);
+    supportedChainTail = &supportedFaultFeatures;
 #endif
 
     pDispatch.GetPhysicalDeviceFeatures2(gpu, &supportedFeatures);
@@ -281,6 +294,7 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
     bool timelineSemaphoresEnabled = false;
     bool imageRobustnessEnabled = false;
     bool robustness2Enabled = false;
+    bool deviceFaultEnabled = false;
     const void* current_pNext = pCreateInfo->pNext;
     while (current_pNext) {
         const VkBaseInStructure* base = static_cast<const VkBaseInStructure*>(current_pNext);
@@ -293,6 +307,11 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
         }
         if (base->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT) {
             robustness2Enabled = true;
+        }
+#endif
+#if ENABLE_VK_DEVICE_FAULT
+        if (base->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT) {
+            deviceFaultEnabled = true;
         }
 #endif
         current_pNext = base->pNext;
@@ -309,7 +328,18 @@ VkResult VRLayer::VkInstanceOverrides::CreateDevice(const vkroots::VkPhysicalDev
     createRobustness2Features.robustImageAccess2 = true;
     createRobustness2Features.nullDescriptor = true;
 
+    VkPhysicalDeviceFaultFeaturesEXT createFaultFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
+    createFaultFeatures.deviceFault = true;
+
     void* nextChain = const_cast<void*>(pCreateInfo->pNext);
+
+#if ENABLE_VK_DEVICE_FAULT
+    if (!deviceFaultEnabled && isExtensionSupported(VK_EXT_DEVICE_FAULT_EXTENSION_NAME) && supportedFaultFeatures.deviceFault) {
+        createFaultFeatures.pNext = nextChain;
+        nextChain = &createFaultFeatures;
+        s_deviceFaultLoggingEnabled = true;
+    }
+#endif
 
 #if ENABLE_VK_ROBUSTNESS
     if (!robustness2Enabled && isExtensionSupported(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
@@ -403,6 +433,63 @@ void VRLayer::VkDeviceOverrides::DestroyDevice(const vkroots::VkDeviceDispatch& 
     PFN_vkDestroyDevice ptr_vkDestroyDeviceFn = (PFN_vkDestroyDevice)pDispatch.GetDeviceProcAddr(device, "vkDestroyDevice");
     vkroots::tables::DestroyDispatchTable(device);
     ptr_vkDestroyDeviceFn(device, pAllocator);
+}
+
+void VRLayer::LogDeviceFaultInfo() {
+    if (!s_deviceFaultLoggingEnabled) {
+        return;
+    }
+
+    static std::atomic<bool> s_alreadyReported = false;
+    if (s_alreadyReported.exchange(true)) {
+        return;
+    }
+
+    RND_Vulkan* vk = VRManager::instance().VK.get();
+    if (!vk) {
+        return;
+    }
+    const vkroots::VkDeviceDispatch* dispatch = vk->GetDeviceDispatch();
+    VkDevice device = vk->GetDevice();
+    if (!dispatch || device == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkDeviceFaultCountsEXT faultCounts = { VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
+    VkResult result = dispatch->GetDeviceFaultInfoEXT(device, &faultCounts, nullptr);
+    if (result < 0) {
+        Log::print<ERROR>("vkGetDeviceFaultInfoEXT failed to report fault counts with error {}", result);
+        return;
+    }
+
+    std::vector<VkDeviceFaultAddressInfoEXT> addressInfos(faultCounts.addressInfoCount);
+    std::vector<VkDeviceFaultVendorInfoEXT> vendorInfos(faultCounts.vendorInfoCount);
+    faultCounts.vendorBinarySize = 0;
+
+    VkDeviceFaultInfoEXT faultInfo = { VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT };
+    faultInfo.pAddressInfos = addressInfos.empty() ? nullptr : addressInfos.data();
+    faultInfo.pVendorInfos = vendorInfos.empty() ? nullptr : vendorInfos.data();
+    faultInfo.pVendorBinaryData = nullptr;
+
+    result = dispatch->GetDeviceFaultInfoEXT(device, &faultCounts, &faultInfo);
+    if (result < 0) {
+        Log::print<ERROR>("vkGetDeviceFaultInfoEXT failed to report fault info with error {}", result);
+        return;
+    }
+
+    Log::print<ERROR>("VK_EXT_device_fault reports {}", faultInfo.description);
+    for (uint32_t i = 0; i < faultCounts.addressInfoCount; i++) {
+        const VkDeviceFaultAddressInfoEXT& addressInfo = addressInfos[i];
+        uint64_t alignedAddress = addressInfo.addressPrecision ? (addressInfo.reportedAddress & ~(addressInfo.addressPrecision - 1)) : addressInfo.reportedAddress;
+        Log::print<ERROR>(" - Address fault: {} at 0x{:X} (precision 0x{:X}, aligned 0x{:X})", vkroots::helpers::enumString(addressInfo.addressType), addressInfo.reportedAddress, addressInfo.addressPrecision, alignedAddress);
+    }
+    for (uint32_t i = 0; i < faultCounts.vendorInfoCount; i++) {
+        const VkDeviceFaultVendorInfoEXT& vendorInfo = vendorInfos[i];
+        Log::print<ERROR>(" - Vendor fault: {} (code 0x{:X}, data 0x{:X})", vendorInfo.description, vendorInfo.vendorFaultCode, vendorInfo.vendorFaultData);
+    }
+    if (faultCounts.addressInfoCount == 0 && faultCounts.vendorInfoCount == 0) {
+        Log::print<ERROR>("The driver did not report any address or vendor fault details.");
+    }
 }
 
 VKROOTS_DEFINE_LAYER_INTERFACES(VRLayer::VkInstanceOverrides, VRLayer::VkDeviceOverrides);

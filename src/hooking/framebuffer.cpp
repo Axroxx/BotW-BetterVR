@@ -545,6 +545,9 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
 
     if (result != VK_SUCCESS) {
         Log::print<ERROR>("QueueSubmit failed with error {}", result);
+        if (result == VK_ERROR_DEVICE_LOST) {
+            LogDeviceFaultInfo();
+        }
     }
 
     return result;
@@ -561,5 +564,11 @@ VkResult VkDeviceOverrides::QueuePresentKHR(const vkroots::VkQueueDispatch& pDis
         renderer->StartFrame();
     }
 
-    return pDispatch.QueuePresentKHR(queue, pPresentInfo);
+    VkResult result = pDispatch.QueuePresentKHR(queue, pPresentInfo);
+    if (result == VK_ERROR_DEVICE_LOST) {
+        Log::print<ERROR>("QueuePresentKHR failed with error {}", result);
+        LogDeviceFaultInfo();
+    }
+
+    return result;
 }
