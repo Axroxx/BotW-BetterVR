@@ -1280,6 +1280,14 @@ static bool TryGetGuardDirection(glm::fvec3& outDirection) {
 }
 
 void CemuHooks::hook_OverrideThrowDirection(PPCInterpreter_t* hCPU) {
+    if (IsThirdPerson()) {
+        float dirX = 0.0f;
+        readMemoryBE(hCPU->gpr[31] + 0x1570, &dirX);
+        hCPU->fpr[10].fp0 = dirX; // original instruction: lfs f10, 0x1570(r31)
+        hCPU->instructionPointer = 0x02C9172C;
+        return;
+    }
+
     hCPU->instructionPointer = 0x02C91744;
 
     glm::fvec3 throwDir = glm::fvec3(0.0f, 0.0f, 1.0f);
