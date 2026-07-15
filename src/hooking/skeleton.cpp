@@ -270,6 +270,84 @@ static glm::vec3 s_manualBodyOffset = glm::vec3(0.0f, 0.0f, -0.075f);
 static glm::mat4 s_handCorrectionRotationLeft = glm::mat4(1.0f);
 static glm::mat4 s_handCorrectionRotationRight = glm::mat4(1.0f);
 static glm::fquat s_rightToLeftCorrectedHandRot = glm::identity<glm::fquat>();
+static constexpr float MaximumGameHandSeparationSq = 4.0f;
+static constexpr std::array<std::array<const char*, 5>, 2> BowDrawArmChainBoneNames = { {
+    { "Clavicle_L", "Arm_1_L", "Arm_2_L", "Wrist_L", "Weapon_L" },
+    { "Clavicle_R", "Arm_1_R", "Arm_2_R", "Wrist_R", "Weapon_R" }
+} };
+static constexpr uint32_t BowDrawArmChainRequiredMask = 0b01110;
+static std::array<std::array<glm::mat4, 5>, 2> s_gameAnimArmChainLocals = {};
+static std::array<uint32_t, 2> s_gameAnimArmChainSeenMasks = { 0, 0 };
+static glm::mat4 s_gameLeftToRightWeaponMtx = glm::identity<glm::mat4>();
+static bool s_gameLeftToRightWeaponMtxValid = false;
+
+static bool IsFiniteMatrix(const glm::mat4& matrix) {
+    for (int column = 0; column < 4; column++) {
+        for (int row = 0; row < 4; row++) {
+            if (!std::isfinite(matrix[column][row]))
+                return false;
+        }
+    }
+    return true;
+}
+
+static void UpdateGameBowDrawRelativeTransform() {
+    if (!s_skeletonParsed)
+        return;
+
+    std::array<glm::mat4, 2> gameWeaponMtxs = { glm::identity<glm::mat4>(), glm::identity<glm::mat4>() };
+    for (uint32_t sideIdx = 0; sideIdx < 2; sideIdx++) {
+        if ((s_gameAnimArmChainSeenMasks[sideIdx] & BowDrawArmChainRequiredMask) != BowDrawArmChainRequiredMask)
+            return;
+
+        for (uint32_t chainIdx = 0; chainIdx < BowDrawArmChainBoneNames[sideIdx].size(); chainIdx++) {
+            if (s_gameAnimArmChainSeenMasks[sideIdx] & (1u << chainIdx)) {
+                gameWeaponMtxs[sideIdx] = gameWeaponMtxs[sideIdx] * s_gameAnimArmChainLocals[sideIdx][chainIdx];
+            }
+            else {
+                Bone* restBone = s_skeleton.GetBone(BowDrawArmChainBoneNames[sideIdx][chainIdx]);
+                if (restBone == nullptr)
+                    return;
+                gameWeaponMtxs[sideIdx] = gameWeaponMtxs[sideIdx] * restBone->localMatrix;
+            }
+        }
+    }
+
+    // Preserve the game's right-hand placement in the left attachment bone's coordinate frame.
+    const glm::mat4 relativeMtx = glm::inverse(gameWeaponMtxs[OpenXR::EyeSide::LEFT]) * gameWeaponMtxs[OpenXR::EyeSide::RIGHT];
+    if (!IsFiniteMatrix(relativeMtx) || glm::length2(glm::vec3(relativeMtx[3])) > MaximumGameHandSeparationSq)
+        return;
+
+    s_gameLeftToRightWeaponMtx = relativeMtx;
+    s_gameLeftToRightWeaponMtxValid = true;
+}
+
+static constexpr float BowFullDrawPullDistance = 0.30f;
+static constexpr float BowSnapMaxEngageDistance = 0.35f;
+static bool s_bowSnapTriggerHeld = false;
+static bool s_bowSnapEngaged = false;
+
+struct BowPullState {
+    bool valid = false;
+    float engageSeparation = 0.0f;
+    float ratio = 0.0f;
+};
+static BowPullState s_bowPull;
+
+static float GetBowDrawSnapWeight() {
+    if (!s_bowSnapEngaged || !s_bowPull.valid)
+        return 0.0f;
+
+    const float weight = s_bowPull.ratio;
+    return weight * weight * (3.0f - 2.0f * weight);
+}
+
+static glm::mat4 BlendTransforms(const glm::mat4& fromMtx, const glm::mat4& toMtx, float weight) {
+    const glm::fquat fromRot = glm::quat_cast(glm::mat3(fromMtx));
+    const glm::fquat toRot = glm::quat_cast(glm::mat3(toMtx));
+    const glm::vec3 blendedPos = glm::mix(glm::vec3(fromMtx[3]), glm::vec3(toMtx[3]), weight);
+    return glm::translate(glm::identity<glm::mat4>(), blendedPos) * glm::mat4_cast(glm::slerp(fromRot, toRot, weight));
+}
 
 static glm::fquat ExtractPlayerBodyYaw(const glm::fmat4& sourceMtx) {
     glm::fquat sourceRot = glm::quat_cast(sourceMtx);
@@ -401,9 +479,18 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     std::string boneName((char*)(s_memoryBaseAddress + boneNamePtr));
     const bool isLeft = boneName.ends_with("_L");
     const OpenXR::EyeSide side = isLeft ? OpenXR::EyeSide::LEFT : OpenXR::EyeSide::RIGHT;
+    // capture the game's animated arm pose before it gets overwritten below
+    for (uint32_t chainIdx = 0; chainIdx < BowDrawArmChainBoneNames[side].size(); chainIdx++) {
+        if (boneName == BowDrawArmChainBoneNames[side][chainIdx]) {
+            s_gameAnimArmChainLocals[side][chainIdx] = glm::mat4(getMemory<BEMatrix34>(matrixPtr).getLEMatrix());
+            s_gameAnimArmChainSeenMasks[side] |= 1u << chainIdx;
+            break;
+        }
+    }
 
     // reset grip state on root to prevent stranding on tracking loss
     if (boneName == "Skl_Root") {
+        UpdateGameBowDrawRelativeTransform();
         s_twoHandGrip = {};
         CemuHooks::s_twoHandGripActive = false;
     }
@@ -451,16 +538,6 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    const auto& pose = inputs.shared.poseLocation[side];
-    glm::fvec3 controllerPos = glm::fvec3();
-    glm::fquat controllerRot = glm::identity<glm::fquat>();
-    if (pose.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) {
-        controllerPos = ToGLM(pose.pose.position);
-        controllerPos = RemoveHeadsetHorizontalOffset(controllerPos);
-    }
-    if (pose.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)
-        controllerRot = ToGLM(pose.pose.orientation);
-
     // one-time skeleton and hand correction initialization
     if (!s_skeletonParsed) {
         s_skeleton.Parse(SKELETON_DATA);
@@ -488,19 +565,32 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     if (boneIndex == -1)
         return;
 
-    // compute the controller target in model space
-    auto calcControllerTargetModel = [&]() -> glm::mat4 {
-        glm::mat4 handCorrectionMtx = isLeft ? s_handCorrectionRotationLeft : s_handCorrectionRotationRight;
+    // compute a controller target in model space
+    auto calcControllerTargetModelForSide = [&](OpenXR::EyeSide handSide) -> glm::mat4 {
+        const auto& handPose = inputs.shared.poseLocation[handSide];
+        glm::fvec3 controllerPos = glm::fvec3();
+        glm::fquat controllerRot = glm::identity<glm::fquat>();
+        if (handPose.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
+            controllerPos = RemoveHeadsetHorizontalOffset(ToGLM(handPose.pose.position));
+        if (handPose.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)
+            controllerRot = ToGLM(handPose.pose.orientation);
+
+        const bool targetIsLeft = handSide == OpenXR::EyeSide::LEFT;
+        glm::mat4 handCorrectionMtx = targetIsLeft ? s_handCorrectionRotationLeft : s_handCorrectionRotationRight;
         glm::mat4 controllerMat = glm::translate(glm::identity<glm::mat4>(), controllerPos) * glm::mat4_cast(controllerRot) * handCorrectionMtx;
         glm::mat4 targetWorld = cameraMtx * controllerMat;
 
-        const char* weaponName = isLeft ? "Weapon_L" : "Weapon_R";
+        const char* weaponName = targetIsLeft ? "Weapon_L" : "Weapon_R";
         if (Bone* weapon = s_skeleton.GetBone(weaponName)) {
             glm::vec3 weaponOffset = glm::vec3(weapon->localMatrix[3]);
             targetWorld = targetWorld * glm::translate(glm::identity<glm::mat4>(), -weaponOffset);
         }
 
         return glm::inverse(playerMtx4) * targetWorld;
+    };
+
+    auto calcControllerTargetModel = [&]() -> glm::mat4 {
+        return calcControllerTargetModelForSide(side);
     };
 
     auto calcTwoHandGripTargetModel = [&]() -> glm::mat4 {
@@ -515,6 +605,46 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         }
 
         return glm::inverse(playerMtx4) * targetWorld;
+    };
+
+    auto calcBowDrawTargetModel = [&]() -> std::optional<glm::mat4> {
+        if (!s_arrowNockedInRightHand || s_handWeaponTypes[OpenXR::EyeSide::LEFT] != WeaponType::Bow || !s_gameLeftToRightWeaponMtxValid || !inputs.shared.pose[OpenXR::EyeSide::LEFT].isActive)
+            return std::nullopt;
+
+        Bone* leftWeapon = s_skeleton.GetBone("Weapon_L");
+        Bone* rightWeapon = s_skeleton.GetBone("Weapon_R");
+        if (leftWeapon == nullptr || rightWeapon == nullptr)
+            return std::nullopt;
+
+        const glm::mat4 leftWristTargetMtx = calcControllerTargetModelForSide(OpenXR::EyeSide::LEFT);
+        const glm::mat4 leftWeaponTargetMtx = leftWristTargetMtx * leftWeapon->localMatrix;
+        // Re-anchor the original hand-to-hand transform at the VR-controlled left hand.
+        const glm::mat4 rightWeaponTargetMtx = leftWeaponTargetMtx * s_gameLeftToRightWeaponMtx;
+        return rightWeaponTargetMtx * glm::inverse(rightWeapon->localMatrix);
+    };
+
+    auto calcBowRightWristTargetModel = [&]() -> std::optional<glm::mat4> {
+        if (isLeft)
+            return std::nullopt;
+
+        const float bowSnapWeight = GetBowDrawSnapWeight();
+        if (bowSnapWeight <= 0.0f)
+            return std::nullopt;
+
+        const std::optional<glm::mat4> bowTargetMtx = calcBowDrawTargetModel();
+        if (!bowTargetMtx.has_value())
+            return std::nullopt;
+
+        if (bowSnapWeight >= 1.0f)
+            return bowTargetMtx;
+
+        return BlendTransforms(calcControllerTargetModel(), bowTargetMtx.value(), bowSnapWeight);
+    };
+
+    auto calcHandTargetModel = [&]() -> glm::mat4 {
+        if (const std::optional<glm::mat4> bowTargetMtx = calcBowRightWristTargetModel(); bowTargetMtx.has_value())
+            return bowTargetMtx.value();
+        return s_twoHandGrip.engaged ? calcTwoHandGripTargetModel() : calcControllerTargetModel();
     };
 
     glm::mat4 calculatedLocalMat = s_skeleton.GetBone(boneIndex)->localMatrix;
@@ -647,6 +777,28 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
 
         CemuHooks::s_twoHandGripActive = s_twoHandGrip.engaged;
 
+        // the trigger starts the draw, pulling the arrow hand away from the bow hand charges it
+        const bool bowTriggerHeld = inputs.inGame.useRightItem.currentState;
+        const bool bowInLeftHand = s_handWeaponTypes[EyeSide::LEFT] == WeaponType::Bow;
+        const float bowHandSeparation = glm::distance(rearPos, leftPos);
+        if (bowTriggerHeld && !s_bowSnapTriggerHeld) {
+            const std::optional<glm::mat4> bowStartTargetMtx = calcBowDrawTargetModel();
+            const glm::vec3 controllerHandPos = glm::vec3(calcControllerTargetModelForSide(EyeSide::RIGHT)[3]);
+            s_bowSnapEngaged = bowStartTargetMtx.has_value() && glm::distance(glm::vec3(bowStartTargetMtx.value()[3]), controllerHandPos) <= BowSnapMaxEngageDistance;
+            s_bowPull = { bowInLeftHand, bowHandSeparation, 0.0f };
+        }
+        else if (!bowTriggerHeld) {
+            s_bowSnapEngaged = false;
+        }
+        else if (s_bowPull.valid) {
+            s_bowPull.ratio = glm::clamp((bowHandSeparation - s_bowPull.engageSeparation) / BowFullDrawPullDistance, 0.0f, 1.0f);
+        }
+
+        if (!bowInLeftHand)
+            s_bowPull.valid = false;
+
+        s_bowSnapTriggerHeld = bowTriggerHeld;
+
         s_lastAppliedRightWristRot = s_twoHandGrip.engaged ? s_twoHandGrip.rightGripRotWorld : rightHandRotWorld;
         s_lastAppliedRightWristRotValid = true;
 
@@ -654,7 +806,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    // solve upper arm IK so the arms reach the VR controllers
+    // solve upper arm IK so the arms reach their active controller, grip, or bow target
     if (boneName == "Arm_1_L" || boneName == "Arm_1_R" || boneName == "Elbow_L" || boneName == "Elbow_R" || boneName == "Wrist_Assist_L" || boneName == "Wrist_Assist_R") {
 
         int arm1Index = s_skeleton.GetBoneIndex(isLeft ? "Arm_1_L" : "Arm_1_R");
@@ -662,7 +814,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         int wristIndex = s_skeleton.GetBoneIndex(isLeft ? "Wrist_L" : "Wrist_R");
 
         if (arm1Index != -1 && arm2Index != -1 && wristIndex != -1) {
-            glm::vec3 targetPos = glm::vec3((s_twoHandGrip.engaged ? calcTwoHandGripTargetModel() : calcControllerTargetModel())[3]);
+            glm::vec3 targetPos = glm::vec3(calcHandTargetModel()[3]);
 
             // pole vector (elbow hint): left-down-back / right-down-back, rotated by body yaw
             glm::vec3 poleDir = isLeft ? glm::vec3(1.0f, -1.0f, -0.5f) : glm::vec3(-1.0f, -1.0f, -0.5f);
@@ -674,9 +826,9 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         }
     }
 
-    // align wrists with controller or two-handed grip
+    // align wrists with the same target used by the arm solver
     if (boneName == "Wrist_L" || boneName == "Wrist_R" || boneName == "Wrist_Assist_L" || boneName == "Wrist_Assist_R") {
-        calculatedLocalMat = s_skeleton.CalculateLocalMatrixFromWorld(boneIndex, s_twoHandGrip.engaged ? calcTwoHandGripTargetModel() : calcControllerTargetModel());
+        calculatedLocalMat = s_skeleton.CalculateLocalMatrixFromWorld(boneIndex, calcHandTargetModel());
     }
 
     writeBoneMatrix(glm::mat4x3(calculatedLocalMat), boneScale);

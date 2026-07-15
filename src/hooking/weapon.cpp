@@ -9,6 +9,7 @@ std::array<WeaponMotionAnalyser, 2> CemuHooks::m_motionAnalyzers = {};
 std::array<uint32_t, 2> CemuHooks::m_heldWeapons = { 0, 0 };
 std::array<uint32_t, 2> CemuHooks::m_heldWeaponsLastUpdate = { 0, 0 };
 std::array<WeaponType, 2> CemuHooks::s_handWeaponTypes = { WeaponType::UnknownWeapon, WeaponType::UnknownWeapon };
+bool CemuHooks::s_arrowNockedInRightHand = false;
 bool CemuHooks::s_twoHandGripActive = false;
 bool CemuHooks::s_twoHandGripConsumesGrabInput = false;
 
@@ -219,8 +220,11 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
                 const bool isSlateRune = targetActor.name.getLE() == "Item_Conductor";
                 RND_Renderer::Layer2D::SetBowAimingActive(isBow || isSlateRune);
             }
-            else if (targetActor.name.getLE() == "Item_Magnetglove") {
-                RND_Renderer::Layer2D::SetBowAimingActive(true);
+            else {
+                const std::string targetActorName = targetActor.name.getLE();
+                s_arrowNockedInRightHand = targetActorName.contains("Arrow");
+                if (targetActorName == "Item_Magnetglove")
+                    RND_Renderer::Layer2D::SetBowAimingActive(true);
             }
         }
     }

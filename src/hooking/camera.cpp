@@ -934,6 +934,7 @@ void CemuHooks::hook_EndCameraSide(PPCInterpreter_t* hCPU) {
         if (m_heldWeaponsLastUpdate[1] >= 6) {
             m_heldWeapons[1] = 0;
             s_handWeaponTypes[1] = WeaponType::UnknownWeapon;
+            s_arrowNockedInRightHand = false;
         }
     }
 

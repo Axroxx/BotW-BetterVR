@@ -115,6 +115,7 @@ public:
     static std::array<uint32_t, 2> m_heldWeapons;
     static std::array<uint32_t, 2> m_heldWeaponsLastUpdate;
     static std::array<WeaponType, 2> s_handWeaponTypes;
+    static bool s_arrowNockedInRightHand;
 
     static constexpr bool s_twoHandGripEnabled = true;
     static constexpr float TwoHandGripButtonThreshold = 0.5f;
