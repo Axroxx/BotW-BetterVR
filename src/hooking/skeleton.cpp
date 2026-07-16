@@ -326,6 +326,7 @@ static constexpr float BowFullDrawPullDistance = 0.30f;
 static constexpr float BowSnapMaxEngageDistance = 0.35f;
 static bool s_bowSnapTriggerHeld = false;
 static bool s_bowSnapEngaged = false;
+static bool s_arrowNearBowStart = false;
 
 struct BowPullState {
     bool valid = false;
@@ -333,6 +334,14 @@ struct BowPullState {
     float ratio = 0.0f;
 };
 static BowPullState s_bowPull;
+
+bool CemuHooks::IsBowDrawEngaged() {
+    return s_bowSnapEngaged;
+}
+
+bool CemuHooks::IsArrowNearBowStart() {
+    return IsFirstPerson() && s_arrowNearBowStart;
+}
 
 static float GetBowDrawSnapWeight() {
     if (!s_bowSnapEngaged || !s_bowPull.valid)
@@ -781,10 +790,15 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         const bool bowTriggerHeld = inputs.inGame.useRightItem.currentState;
         const bool bowInLeftHand = s_handWeaponTypes[EyeSide::LEFT] == WeaponType::Bow;
         const float bowHandSeparation = glm::distance(rearPos, leftPos);
+
+        const std::optional<glm::mat4> bowStartTargetMtx = calcBowDrawTargetModel();
+        const glm::vec3 controllerHandPos = glm::vec3(calcControllerTargetModelForSide(EyeSide::RIGHT)[3]);
+        s_arrowNearBowStart = bowStartTargetMtx.has_value() &&
+            (inputs.shared.poseLocation[OpenXR::EyeSide::RIGHT].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+            glm::distance(glm::vec3(bowStartTargetMtx.value()[3]), controllerHandPos) <= BowSnapMaxEngageDistance;
+
         if (bowTriggerHeld && !s_bowSnapTriggerHeld) {
-            const std::optional<glm::mat4> bowStartTargetMtx = calcBowDrawTargetModel();
-            const glm::vec3 controllerHandPos = glm::vec3(calcControllerTargetModelForSide(EyeSide::RIGHT)[3]);
-            s_bowSnapEngaged = bowStartTargetMtx.has_value() && glm::distance(glm::vec3(bowStartTargetMtx.value()[3]), controllerHandPos) <= BowSnapMaxEngageDistance;
+            s_bowSnapEngaged = s_arrowNearBowStart;
             s_bowPull = { bowInLeftHand, bowHandSeparation, 0.0f };
         }
         else if (!bowTriggerHeld) {
@@ -794,8 +808,10 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
             s_bowPull.ratio = glm::clamp((bowHandSeparation - s_bowPull.engageSeparation) / BowFullDrawPullDistance, 0.0f, 1.0f);
         }
 
-        if (!bowInLeftHand)
+        if (!bowInLeftHand) {
             s_bowPull.valid = false;
+            s_arrowNearBowStart = false;
+        }
 
         s_bowSnapTriggerHeld = bowTriggerHeld;
 

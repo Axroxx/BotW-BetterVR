@@ -1073,24 +1073,19 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     static uint32_t s_lastLoggedCameraVtbl = 0;
     static uint32_t s_lastLoggedCameraInstance = 0;
     static uint32_t s_lastLoggedCameraChaseInstance = 0;
-    bool vtblChanged = currentCameraVtbl != s_lastLoggedCameraVtbl;
-    bool cameraInstanceChanged = currCameraInstance != s_lastLoggedCameraInstance;
-    bool cameraChaseInstanceChanged = cameraChaseInstance != s_lastLoggedCameraChaseInstance;
-    if (vtblChanged || cameraInstanceChanged || cameraChaseInstanceChanged) {
-        Log::print<INFO>("Camera changed (vtbl={:#X}, camera={:#X}, chase={:#X}, vtbl_changed={}, camera_changed={}, chase_changed={})", currentCameraVtbl, currCameraInstance, cameraChaseInstance, vtblChanged, cameraInstanceChanged, cameraChaseInstanceChanged);
+
+    const bool isSnapTurnCamera = currentCameraVtbl == kCameraChaseVtbl || currentCameraVtbl == kCameraTailVtbl;
+
+    if (currentCameraVtbl != s_lastLoggedCameraVtbl ||
+        currCameraInstance != s_lastLoggedCameraInstance ||
+        cameraChaseInstance != s_lastLoggedCameraChaseInstance) {
+        Log::print<INFO>("Camera changed (vtbl={:#X}, camera={:#X}, chase={:#X}, snapTurnActive={})", currentCameraVtbl, currCameraInstance, cameraChaseInstance, isSnapTurnCamera);
         s_lastLoggedCameraVtbl = currentCameraVtbl;
         s_lastLoggedCameraInstance = currCameraInstance;
         s_lastLoggedCameraChaseInstance = cameraChaseInstance;
     }
 
-    auto* xr = VRManager::instance().XR.get();
-    if (xr != nullptr) {
-        static uint32_t s_lastSnapTurnCameraActive = UINT32_MAX;
-        const bool isSnapTurnCamera = currentCameraVtbl == kCameraChaseVtbl || currentCameraVtbl == kCameraTailVtbl;
-        if (s_lastSnapTurnCameraActive != (uint32_t)isSnapTurnCamera) {
-            Log::print<INFO>("SnapTurn camera active: {} (vtbl={:#X})", isSnapTurnCamera, currentCameraVtbl);
-            s_lastSnapTurnCameraActive = (uint32_t)isSnapTurnCamera;
-        }
+    if (auto* xr = VRManager::instance().XR.get()) {
         xr->m_isSnapTurnCameraActive.store(isSnapTurnCamera, std::memory_order_relaxed);
     }
 

@@ -165,6 +165,8 @@ public:
     static bool IsFirstPerson();
     static bool IsThirdPerson();
     static bool IsTwoHandGripEngaged();
+    static bool IsBowDrawEngaged();
+    static bool IsArrowNearBowStart();
     static bool UseBlackBarsDuringEvents();
     static bool IsScreenOpen(ScreenId screen);
     static bool IsScreenVisible(ScreenId screen);

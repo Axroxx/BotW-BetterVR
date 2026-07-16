@@ -463,6 +463,10 @@ static bool TryReadLiveBowState(LiveBowState& outState) {
     CemuHooks::readMemoryBE(weaponPtr + kWeaponDrawAmountOffset, &drawAmount);
     drawAmount = glm::clamp(drawAmount, 0.0f, 1.5f);
 
+    if (CemuHooks::IsFirstPerson() && drawAmount <= kMinimumBowDrawAmount && CemuHooks::IsArrowNearBowStart()) {
+        drawAmount = 1.0f;
+    }
+
     uint32_t actorParamPtr = 0;
     CemuHooks::readMemoryBE(weaponPtr + kActorParamPtrOffset, &actorParamPtr);
     if (actorParamPtr == 0) {
@@ -1379,6 +1383,12 @@ static void DrawAimingArc(const AimingArcCache& cache) {
 void QueueBowAimingArcPreview(bool isBowAimingActive, long frameIdx) {
     const bool hasHeldBow = GetHeldLeftBowWeaponPtr() != 0;
     if (!isBowAimingActive || !hasHeldBow) {
+        s_aimingArcCache = {};
+        return;
+    }
+
+    // only draw aiming arc when the bow is being charged
+    if (CemuHooks::IsFirstPerson() && !CemuHooks::IsBowDrawEngaged() && !CemuHooks::IsArrowNearBowStart()) {
         s_aimingArcCache = {};
         return;
     }
