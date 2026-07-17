@@ -47,7 +47,21 @@ static XrPath GetPath(XrInstance instance, const char* str) {
     return path;
 }
 
-inline void SuggestControllerBindings(XrInstance instance, const ControllerActionBindings& a, bool enablePicoBindings = true, bool enableCosmosBindings = true, bool enableHPMixedRealityBindings = true) {
+static void SuggestProfileBindings(XrInstance instance, const char* interactionProfile, const XrActionSuggestedBinding* bindings, uint32_t bindingCount, bool fatalOnUnsupported) {
+    XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+    suggestedBindingsInfo.interactionProfile = GetPath(instance, interactionProfile);
+    suggestedBindingsInfo.countSuggestedBindings = bindingCount;
+    suggestedBindingsInfo.suggestedBindings = bindings;
+
+    XrResult result = xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo);
+    if (!fatalOnUnsupported && result == XR_ERROR_PATH_UNSUPPORTED) {
+        Log::print<INFO>("Runtime doesn't support the {} interaction profile - skipping its suggested bindings.", interactionProfile);
+        return;
+    }
+    checkXRResult(result, std::format("Failed to suggest bindings for the {} interaction profile!", interactionProfile).c_str());
+}
+
+inline void SuggestControllerBindings(XrInstance instance, const ControllerActionBindings& a, bool enablePicoBindings = true, bool enablePicoUltraBindings = true, bool enableCosmosBindings = true, bool enableHPMixedRealityBindings = true) {
     {
         std::array suggestedBindings = {
             // === gameplay suggestions ===
@@ -65,11 +79,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
             XrActionSuggestedBinding{ .action = a.sortAction, .binding = GetPath(instance, "/user/hand/left/input/select/click") },
             XrActionSuggestedBinding{ .action = a.holdAction, .binding = GetPath(instance, "/user/hand/left/input/menu/click") }
         };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetPath(instance, "/interaction_profiles/khr/simple_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest simple controller profile bindings!");
+        SuggestProfileBindings(instance, "/interaction_profiles/khr/simple_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), true);
     }
 
     {
@@ -116,11 +126,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
             XrActionSuggestedBinding{ .action = a.inMenu_inventory_mapAction, .binding = GetPath(instance, "/user/hand/right/input/thumbstick/click") },
             XrActionSuggestedBinding{ .action = a.inMenu_modMenuAction, .binding = GetPath(instance, "/user/hand/left/input/x/click") },
         };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetPath(instance, "/interaction_profiles/oculus/touch_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest Oculus Touch Controller Profile bindings!");
+        SuggestProfileBindings(instance, "/interaction_profiles/oculus/touch_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), true);
     }
 
     {
@@ -167,14 +173,10 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
             XrActionSuggestedBinding{ .action = a.inMenu_inventory_mapAction, .binding = GetPath(instance, "/user/hand/right/input/thumbstick/click") },
             XrActionSuggestedBinding{ .action = a.inMenu_modMenuAction, .binding = GetPath(instance, "/user/hand/left/input/a/click") },
         };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetPath(instance, "/interaction_profiles/valve/index_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest Valve Index Controller Profile bindings!");
+        SuggestProfileBindings(instance, "/interaction_profiles/valve/index_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), true);
     }
 
-    if (enablePicoBindings) {
+    if (enablePicoBindings || enablePicoUltraBindings) {
         std::array suggestedBindings = {
             // === gameplay suggestions ===
             XrActionSuggestedBinding{ .action = a.inGameGripPoseAction, .binding = GetPath(instance, "/user/hand/left/input/grip/pose") },
@@ -218,11 +220,13 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
             XrActionSuggestedBinding{ .action = a.inMenu_inventory_mapAction, .binding = GetPath(instance, "/user/hand/right/input/thumbstick/click") },
             XrActionSuggestedBinding{ .action = a.inMenu_modMenuAction, .binding = GetPath(instance, "/user/hand/left/input/x/click") },
         };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetPath(instance, "/interaction_profiles/bytedance/pico4_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest Pico 4 Controller Profile bindings!");
+        if (enablePicoBindings) {
+            SuggestProfileBindings(instance, "/interaction_profiles/bytedance/pico4_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), true);
+            SuggestProfileBindings(instance, "/interaction_profiles/bytedance/pico_neo3_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), false);
+        }
+        if (enablePicoUltraBindings) {
+            SuggestProfileBindings(instance, "/interaction_profiles/bytedance/pico_ultra_controller_bd", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), false);
+        }
     }
 
     if (enableHPMixedRealityBindings) {
@@ -269,11 +273,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
             XrActionSuggestedBinding{ .action = a.inMenu_inventory_mapAction, .binding = GetPath(instance, "/user/hand/right/input/thumbstick/click") },
             XrActionSuggestedBinding{ .action = a.inMenu_modMenuAction, .binding = GetPath(instance, "/user/hand/left/input/x/click") },
         };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetPath(instance, "/interaction_profiles/hp/mixed_reality_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest HP Reverb G2 Controller Profile bindings!");
+        SuggestProfileBindings(instance, "/interaction_profiles/hp/mixed_reality_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), true);
     }
 
     if (enableCosmosBindings) {
@@ -320,11 +320,7 @@ inline void SuggestControllerBindings(XrInstance instance, const ControllerActio
             XrActionSuggestedBinding{ .action = a.inMenu_inventory_mapAction, .binding = GetPath(instance, "/user/hand/right/input/thumbstick/click") },
             XrActionSuggestedBinding{ .action = a.inMenu_modMenuAction, .binding = GetPath(instance, "/user/hand/left/input/x/click") },
         };
-        XrInteractionProfileSuggestedBinding suggestedBindingsInfo = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-        suggestedBindingsInfo.interactionProfile = GetPath(instance, "/interaction_profiles/htc/vive_cosmos_controller");
-        suggestedBindingsInfo.countSuggestedBindings = (uint32_t)suggestedBindings.size();
-        suggestedBindingsInfo.suggestedBindings = suggestedBindings.data();
-        checkXRResult(xrSuggestInteractionProfileBindings(instance, &suggestedBindingsInfo), "Failed to suggest Vive Cosmos Controller Profile bindings!");
+        SuggestProfileBindings(instance, "/interaction_profiles/htc/vive_cosmos_controller", suggestedBindings.data(), (uint32_t)suggestedBindings.size(), true);
     }
 }
 

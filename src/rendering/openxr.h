@@ -24,6 +24,7 @@ public:
         bool isOculusLinkRuntime;
         bool isMetaSimulator;
         bool supportsPicoController;
+        bool supportsPicoUltraController;
         bool supportsCosmosController;
         bool supportsHPMixedRealityController;
         ControllerType activeControllerType = ControllerType::Unknown;

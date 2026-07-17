@@ -234,7 +234,9 @@ struct ActorWeapon {
 };
 
 struct ActorWeapons {
-    ActorWeapon weapons[6];
+    static constexpr size_t CategoryCount = 6;
+
+    ActorWeapon weapons[CategoryCount];
     BEType<uint32_t> actorThisPtr;
     BEType<uint32_t> actorWeaponsVtblPtr;
 };
@@ -306,16 +308,40 @@ struct Player : PlayerBase {
 };
 static_assert(sizeof(Player) == 0x2528, "Player size mismatch");
 
+struct BaseProcLink {
+    BEType<uint32_t> baseProcLinkData;
+    BEType<uint32_t> id;
+    BEType<uint8_t> acquired;
+    uint8_t padding9[3];
+};
+static_assert(offsetof(BaseProcLink, id) == 0x4, "BaseProcLink.id offset mismatch");
+static_assert(offsetof(BaseProcLink, acquired) == 0x8, "BaseProcLink.acquired offset mismatch");
+static_assert(sizeof(BaseProcLink) == 0xC, "BaseProcLink size mismatch");
+
 struct WeaponBase : ActorWiiU {
-    PADDED_BYTES(0x53C, 0x5F0);
-    BEType<uint32_t> field_5F4;
+    PADDED_BYTES(0x53C, 0x574);
+    BaseProcLink requestedParentActorLink;
+    PADDED_BYTES(0x584, 0x5F0);
+    BEType<int32_t> requestedActorWeaponsCategory;
     BEType<uint8_t> isEquippedProbably;
     BEType<uint8_t> field_5FD;
     BEType<uint8_t> field_5FE;
     BEType<uint8_t> field_5FF;
-    PADDED_BYTES(0x600, 0x72C);
+    PADDED_BYTES(0x5FC, 0x60C);
+    BaseProcLink activeParentActorLink;
+    BaseProcLink previousParentActorLink;
+    BaseProcLink field_628;
+    PADDED_BYTES(0x634, 0x6A0);
+    BEType<int32_t> activeActorWeaponsCategory;
+    PADDED_BYTES(0x6A8, 0x728);
 };
+static_assert(offsetof(WeaponBase, requestedParentActorLink) == 0x578, "WeaponBase.requestedParentActorLink offset mismatch");
+static_assert(offsetof(WeaponBase, requestedActorWeaponsCategory) == 0x5F4, "WeaponBase.requestedActorWeaponsCategory offset mismatch");
 static_assert(offsetof(WeaponBase, isEquippedProbably) == 0x5F8, "WeaponBase.isEquippedProbably offset mismatch");
+static_assert(offsetof(WeaponBase, activeParentActorLink) == 0x610, "WeaponBase.activeParentActorLink offset mismatch");
+static_assert(offsetof(WeaponBase, previousParentActorLink) == 0x61C, "WeaponBase.previousParentActorLink offset mismatch");
+static_assert(offsetof(WeaponBase, field_628) == 0x628, "WeaponBase.field_628 offset mismatch");
+static_assert(offsetof(WeaponBase, activeActorWeaponsCategory) == 0x6A4, "WeaponBase.activeActorWeaponsCategory offset mismatch");
 static_assert(sizeof(WeaponBase) == 0x72C, "WeaponBase size mismatch");
 
 struct Struct20 {
@@ -492,6 +518,9 @@ struct Weapon : WeaponBase {
 static_assert(offsetof(Weapon, setupAttackSensor.resetAttack) == 0x8A0, "Weapon.setupAttackSensor.resetAttack offset mismatch");
 static_assert(offsetof(Weapon, setupAttackSensor.mode) == 0x874, "Weapon.setupAttackSensor.mode offset mismatch");
 static_assert(offsetof(Weapon, finalizedAttackSensor.resetAttack) == 0x950, "Weapon.finalizedAttackSensor.resetAttack offset mismatch");
+static_assert(offsetof(Weapon, field_99C) == 0x99C, "Weapon.field_99C offset mismatch");
+static_assert(offsetof(Weapon, field_9A0) == 0x9A0, "Weapon.field_9A0 offset mismatch");
+static_assert(offsetof(Weapon, weaponFlags) == 0xA14, "Weapon.weaponFlags offset mismatch");
 static_assert(sizeof(Weapon) == 0xB5C, "Weapon size mismatch");
 
 struct LookAtMatrix {
@@ -631,12 +660,6 @@ namespace ksys::phys {
         BEType<uint32_t> mHitRigidBody;
     };
 }
-
-struct BaseProcLink {
-    BEType<uint32_t> baseProcLinkData;
-    BEType<uint32_t> idAndPadding3;
-    BEType<uint32_t> engaged;
-};
 
 struct InlineParamVec3 {
     BEType<uint32_t> intOrFloatOrBool;

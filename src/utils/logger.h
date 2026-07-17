@@ -268,9 +268,9 @@ public:
         //if constexpr (L == PPC) {
         //    return true;
         //}
-        if constexpr (L == ARROW_SHOT_CAPTURE) {
-            return true;
-        }
+        //if constexpr (L == ARROW_SHOT_CAPTURE) {
+        //    return true;
+        //}
 #endif
         return false;
     }

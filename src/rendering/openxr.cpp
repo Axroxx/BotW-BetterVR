@@ -3,6 +3,10 @@
 #include "openxr.h"
 #include "instance.h"
 
+#ifndef XR_BD_ULTRA_CONTROLLER_INTERACTION_EXTENSION_NAME
+#define XR_BD_ULTRA_CONTROLLER_INTERACTION_EXTENSION_NAME "XR_BD_ultra_controller_interaction"
+#endif
+
 static XrBool32 XR_DebugUtilsMessengerCallback(XrDebugUtilsMessageSeverityFlagsEXT messageSeverity, XrDebugUtilsMessageTypeFlagsEXT messageType, const XrDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData) {
     Log::print<XR_DEBUGUTILS>("[XR Debug Utils] Function {}: {}", callbackData->functionName, callbackData->message);
     return XR_FALSE;
@@ -45,6 +49,9 @@ OpenXR::OpenXR() {
         else if (strcmp(extensionProperties.extensionName, XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME) == 0) {
             m_capabilities.supportsPicoController = true;
         }
+        else if (strcmp(extensionProperties.extensionName, XR_BD_ULTRA_CONTROLLER_INTERACTION_EXTENSION_NAME) == 0) {
+            m_capabilities.supportsPicoUltraController = true;
+        }
         else if (strcmp(extensionProperties.extensionName, XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME) == 0) {
             m_capabilities.supportsCosmosController = true;
         }
@@ -71,6 +78,7 @@ OpenXR::OpenXR() {
     std::vector<const char*> enabledExtensions = { XR_KHR_D3D12_ENABLE_EXTENSION_NAME, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME };
     if (debugUtilsSupported) enabledExtensions.emplace_back(XR_EXT_DEBUG_UTILS_EXTENSION_NAME);
     if (m_capabilities.supportsPicoController) enabledExtensions.emplace_back(XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME);
+    if (m_capabilities.supportsPicoUltraController) enabledExtensions.emplace_back(XR_BD_ULTRA_CONTROLLER_INTERACTION_EXTENSION_NAME);
     if (m_capabilities.supportsCosmosController) enabledExtensions.emplace_back(XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME);
     if (m_capabilities.supportsHPMixedRealityController) enabledExtensions.emplace_back(XR_EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME);
 
@@ -339,7 +347,7 @@ void OpenXR::CreateActions() {
         bindings.inMenu_modMenuAction = m_inMenu_modMenuAction;
         bindings.inMenu_inventory_mapAction = m_inMenu_inventory_mapAction;
 
-        SuggestControllerBindings(m_instance, bindings, m_capabilities.supportsPicoController, m_capabilities.supportsCosmosController, m_capabilities.supportsHPMixedRealityController);
+        SuggestControllerBindings(m_instance, bindings, m_capabilities.supportsPicoController, m_capabilities.supportsPicoUltraController, m_capabilities.supportsCosmosController, m_capabilities.supportsHPMixedRealityController);
     }
 
     XrSessionActionSetsAttachInfo attachInfo = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };

@@ -53,7 +53,7 @@ addi r7, r31, 0x3C ; the mtx of the item supposedly
 lwz r8, 0x0C(r1) ; the target actor
 li r13, 0
 bl import.coreinit.hook_ChangeWeaponMtx
-stw r13, 0x3C(r1) ; store the hand idx
+stw r13, 0x3C(r1) ; store the native ActorWeapons category for an optional drop
 
 cmpwi r9, 0
 beq noChangeWeaponMtx
@@ -90,10 +90,10 @@ mtctr r3
 lwz r3, 0x1C(r1) ; r3 = Actor*
 bctrl ; call PlayerOrEnemy::m_97_getWeapons
 ; r3 now contains the ActorWeapons*
-lis r4, ActorWeapons__resetBaseProc@ha
-addi r4, r4, ActorWeapons__resetBaseProc@l
-mtctr r4
-lwz r5, 0x3C(r1) ; r5 = hand idx
+lis r12, ActorWeapons__resetBaseProc@ha
+addi r12, r12, ActorWeapons__resetBaseProc@l
+mtctr r12
+lwz r4, 0x3C(r1) ; r4 = native ActorWeapons category from Weapon+0x6A4
 bctrl ; call ActorWeapons::resetBaseProc
 
 noWeaponDrop:

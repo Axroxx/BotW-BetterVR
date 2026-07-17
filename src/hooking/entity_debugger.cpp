@@ -253,7 +253,7 @@ void EntityDebugger::UpdateEntityMemory() {
             addMemoryRange("Weapon::actorAtk.attackSensorStruct8Ptr", actorPtr + offsetof(Weapon, actorAtk.attackSensorStruct8Ptr), 0x28);
             addField.operator()<BEType<uint16_t>>("Weapon::weaponFlags", offsetof(Weapon, weaponFlags));
             addField.operator()<BEType<uint16_t>>("Weapon::otherFlags", offsetof(Weapon, otherFlags));
-            addField.operator()<BEType<uint32_t>>("Weapon::heldIndex", offsetof(Weapon, field_5F4));
+            addField.operator()<BEType<int32_t>>("Weapon::requestedActorWeaponsCategory", offsetof(Weapon, requestedActorWeaponsCategory));
         }
 
         if (actorName.starts_with("GameROMPlayer")) {
@@ -329,7 +329,9 @@ void EntityDebugger::UpdateEntityMemory() {
     }
 
 #ifdef _DEBUG
-    UpdateArrowTrails();
+    if (Log::isLogTypeEnabled<ARROW_SHOT_CAPTURE>()) {
+        UpdateArrowTrails();
+    }
 #endif
 
     // other systems might've added memory to the overlay, so hence this is a separate loop
