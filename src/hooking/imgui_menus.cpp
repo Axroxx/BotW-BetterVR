@@ -906,6 +906,14 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
     ImGui::EndTabItem();
 }
 
+static void DrawLogCategoryToggle(const char* label, LogCategorySetting& setting, bool* changed) {
+    bool enabled = setting;
+    if (ImGui::Checkbox(label, &enabled)) {
+        setting = enabled;
+        *changed = true;
+    }
+}
+
 void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
     auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get();
     if (entityDebugger != nullptr) {
@@ -919,6 +927,18 @@ void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
         ImGui::SeparatorText("Entity Debugger");
         entityDebugger->DrawEntityInspectorContent();
     }
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::SeparatorText("Log Categories");
+
+    auto& settings = GetSettings();
+    DrawLogCategoryToggle("Rendering", settings.logRendering, changed);
+    DrawLogCategoryToggle("Interop", settings.logInterop, changed);
+    DrawLogCategoryToggle("Controls", settings.logControls, changed);
+    DrawLogCategoryToggle("PPC Hooks", settings.logPpc, changed);
+    DrawLogCategoryToggle("OpenXR Debug Utils", settings.logXrDebugUtils, changed);
+    DrawLogCategoryToggle("Arrow Shot Capture", settings.logArrowShotCapture, changed);
+    DrawLogCategoryToggle("Verbose", settings.logVerbose, changed);
 
     ImGui::EndTabItem();
 }

@@ -8,7 +8,7 @@
 #endif
 
 static XrBool32 XR_DebugUtilsMessengerCallback(XrDebugUtilsMessageSeverityFlagsEXT messageSeverity, XrDebugUtilsMessageTypeFlagsEXT messageType, const XrDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData) {
-    Log::print<XR_DEBUGUTILS>("[XR Debug Utils] Function {}: {}", callbackData->functionName, callbackData->message);
+    Log::print<XR_DEBUGUTILS>("Function {}: {}", callbackData->functionName, callbackData->message);
     return XR_FALSE;
 }
 

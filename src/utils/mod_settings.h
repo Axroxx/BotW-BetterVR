@@ -391,6 +391,23 @@ public:
     }
 };
 
+class LogCategorySetting : public BoolSetting {
+private:
+    LogType m_category;
+
+public:
+    using BoolSetting::operator=;
+
+    LogCategorySetting(const char* name, LogType category, bool defaultValue): BoolSetting(name, defaultValue), m_category(category) {
+        Log::SetCategoryEnabled(category, defaultValue);
+    }
+
+    void Set(const bool value, std::memory_order order = std::memory_order_seq_cst) override {
+        BoolSetting::Set(value, order);
+        Log::SetCategoryEnabled(m_category, value);
+    }
+};
+
 class StringSetting : public ModSettingBase {
 private:
     std::string m_value;
@@ -826,6 +843,13 @@ struct ModSettings {
     EnumSetting<AngularVelocityFixerMode> buggyAngularVelocity = EnumSetting<AngularVelocityFixerMode>("BuggyAngularVelocity", AngularVelocityFixerMode::AUTO, ModSettings::toString, { AngularVelocityFixerMode::AUTO, AngularVelocityFixerMode::FORCED_ON, AngularVelocityFixerMode::FORCED_OFF });
     EnumSetting<PerformanceOverlayMode> performanceOverlay = EnumSetting<PerformanceOverlayMode>("PerformanceOverlay", PerformanceOverlayMode::DISABLE, ModSettings::toString, { PerformanceOverlayMode::DISABLE, PerformanceOverlayMode::WINDOW_ONLY, PerformanceOverlayMode::WINDOW_AND_VR, PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER });
     UIntSetting<uint32_t> performanceOverlayFrequency = UIntSetting<uint32_t>("PerformanceOverlayFrequency", 90);
+    LogCategorySetting logRendering = LogCategorySetting("LogRendering", RENDERING, false);
+    LogCategorySetting logInterop = LogCategorySetting("LogInterop", INTEROP, false);
+    LogCategorySetting logControls = LogCategorySetting("LogControls", CONTROLS, false);
+    LogCategorySetting logPpc = LogCategorySetting("LogPpc", PPC, true);
+    LogCategorySetting logXrDebugUtils = LogCategorySetting("LogXrDebugUtils", XR_DEBUGUTILS, false);
+    LogCategorySetting logArrowShotCapture = LogCategorySetting("LogArrowShotCapture", ARROW_SHOT_CAPTURE, false);
+    LogCategorySetting logVerbose = LogCategorySetting("LogVerbose", VERBOSE, false);
     BoolSetting tutorialPromptShown = BoolSetting("TutorialPromptShown", false);
     BoolSetting bootDirectlyIntoGame = BoolSetting("BootDirectlyIntoGame", false);
     StringSetting bootDirectlyTitleId = StringSetting("BootDirectlyTitleId", "");
@@ -878,6 +902,13 @@ struct ModSettings {
             &buggyAngularVelocity,
             &performanceOverlay,
             &performanceOverlayFrequency,
+            &logRendering,
+            &logInterop,
+            &logControls,
+            &logPpc,
+            &logXrDebugUtils,
+            &logArrowShotCapture,
+            &logVerbose,
             &tutorialPromptShown,
             &bootDirectlyIntoGame,
             &bootDirectlyTitleId,
@@ -981,22 +1012,7 @@ struct ModSettings {
         std::string buffer = "";
         std::format_to(std::back_inserter(buffer), " - Camera Mode: {}\n", toDisplayString(GetCameraMode()));
         std::format_to(std::back_inserter(buffer), " - Left Handed: {}\n", IsLeftHanded() ? "Yes" : "No");
-        std::format_to(std::back_inserter(buffer), " - GUI Follow Setting: {}\n", DoesUIFollowGaze() ? "Follow Looking Direction" : "Fixed");
         std::format_to(std::back_inserter(buffer), " - Player Height: {} meters\n", GetPlayerHeightOffset());
-        std::format_to(std::back_inserter(buffer), " - Boot Directly Into BotW: {}\n", ShouldBootDirectlyIntoGame() ? "Enabled" : "Disabled");
-        if (!bootDirectlyTitleId.Get().empty()) {
-            std::format_to(std::back_inserter(buffer), " - Saved Direct Boot Title ID: {}\n", bootDirectlyTitleId.Get());
-        }
-        std::format_to(std::back_inserter(buffer), " - Cutscene Camera Mode: {}\n", toDisplayString(GetCutsceneCameraMode()));
-        std::format_to(std::back_inserter(buffer), " - Show Black Bars for Third-Person Cutscenes: {}\n", UseBlackBarsForCutscenes() ? "Yes" : "No");
-        std::format_to(std::back_inserter(buffer), " - Performance Overlay: {}\n", toDisplayString(performanceOverlay));
-        std::format_to(std::back_inserter(buffer), " - Performance Overlay Frequency: {} Hz\n", uint32_t(performanceOverlayFrequency));
-        std::format_to(std::back_inserter(buffer), " - Stick Direction Threshold: {}\n", float(axisThreshold));
-        std::format_to(std::back_inserter(buffer), " - Thumbstick Deadzone: {}\n", float(stickDeadzone));
-        std::format_to(std::back_inserter(buffer), " - Weapon Sensitivity: {}\n", toDisplayString(GetSwingSensitivity()));
-        std::format_to(std::back_inserter(buffer), " - Walking Direction: {}\n", toDisplayString(GetWalkingDirection()));
-        std::format_to(std::back_inserter(buffer), " - Turn Mode: {}\n", toDisplayString(turnMode.load()));
-        std::format_to(std::back_inserter(buffer), " - Prevent Ragdolling In First-Person: {}\n", ShouldPreventFirstPersonRagdoll() ? "Yes" : "No");
         return buffer;
     }
 };

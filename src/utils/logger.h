@@ -240,44 +240,33 @@ ENABLE_BITMASK_OPERATORS(LogType);
 
 class Log {
 public:
+    static constexpr size_t kLogTypeCount = (size_t)VERBOSE + 1;
+
     Log();
     ~Log();
 
     template <typename LogType L>
     static inline bool consteval isLogTypeEnabled() {
-        if constexpr (L == ERROR) {
-            return true;
-        }
-        if constexpr (L == WARNING) {
-            return true;
-        }
-        if constexpr (L == INFO) {
-            return true;
-        }
-#ifdef _DEBUG
-        if constexpr (L == VERBOSE) {
-            return true;
-        }
-        //if constexpr (L == RENDERING) {
-        //    return true;
-        //}
-        //if constexpr (L == CONTROLS) {
-        //    return true;
-        //}
-        //if constexpr (L == PPC) {
-        //    return true;
-        //}
-        //if constexpr (L == ARROW_SHOT_CAPTURE) {
-        //    return true;
-        //}
-#endif
-        return false;
+        return true;
+    }
+
+    static bool IsCategoryEnabled(LogType type) {
+        return s_categoryEnabled[(size_t)type].load(std::memory_order_relaxed);
+    }
+
+    static void SetCategoryEnabled(LogType type, bool enabled) {
+        s_categoryEnabled[(size_t)type].store(enabled, std::memory_order_relaxed);
     }
 
     template <typename LogType L>
     static inline void print(const char* message) {
         if constexpr (!isLogTypeEnabled<L>()) {
             return;
+        }
+        if constexpr (L != INFO && L != WARNING && L != ERROR) {
+            if (!IsCategoryEnabled(L)) {
+                return;
+            }
         }
         submit(L, std::string_view(message));
     }
@@ -286,6 +275,11 @@ public:
     static inline void print(const char* format, Args&&... args) {
         if constexpr (!isLogTypeEnabled<L>()) {
             return;
+        }
+        if constexpr (L != INFO && L != WARNING && L != ERROR) {
+            if (!IsCategoryEnabled(L)) {
+                return;
+            }
         }
         s_scratch.clear();
         std::vformat_to(std::back_inserter(s_scratch), format, std::make_format_args(args...));
@@ -302,6 +296,8 @@ private:
     static void submit(LogType type, std::string_view message);
 
     inline static thread_local std::string s_scratch;
+
+    inline static constinit std::array<std::atomic_bool, kLogTypeCount> s_categoryEnabled = {};
 };
 
 static void checkXRResult(const XrResult result, const char* errorMessage) {
