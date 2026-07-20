@@ -2,10 +2,235 @@
 
 #include "logger.h"
 
-HANDLE Log::consoleHandle = NULL;
-double Log::timeFrequency = 0.0f;
-std::ofstream Log::logFile;
-std::mutex Log::logMutex;
+// FILE_APPEND_DATA without FILE_WRITE_DATA is what makes each write an atomic append, so the layer,
+// the launcher and Cemu's stderr can share one file. Adding FILE_WRITE_DATA breaks that.
+static constexpr DWORD kLogFileAccess = FILE_APPEND_DATA;
+static constexpr DWORD kLogFileShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+static constexpr size_t kMaxQueuedRecords = 4096;
+static constexpr DWORD kUncleanShutdownTimeoutMs = 2000;
+
+struct LogRecord {
+    std::string text;
+    LogType type = INFO;
+    uint32_t threadId = 0;
+    uint64_t time = 0; // FILETIME ticks
+};
+
+static std::mutex s_queueMutex;
+static std::condition_variable s_wakeWriter;
+static std::condition_variable s_drained;
+static std::thread s_writerThread;
+static std::atomic_bool s_running = false;
+static bool s_writerBusy = false;
+
+static std::vector<LogRecord> s_produce;
+static std::vector<LogRecord> s_consume;
+static size_t s_produceCount = 0;
+static uint32_t s_droppedCount = 0;
+
+static std::string s_batchBuffer;
+static std::string s_directBuffer;
+static HANDLE s_fileHandle = INVALID_HANDLE_VALUE;
+static HANDLE s_consoleHandle = NULL;
+static double s_timeFrequency = 0.0;
+static uint32_t s_processId = GetCurrentProcessId();
+
+static uint64_t GetFileTimeNow() {
+    FILETIME systemTime;
+    GetSystemTimeAsFileTime(&systemTime);
+    return ((uint64_t)systemTime.dwHighDateTime << 32) | systemTime.dwLowDateTime;
+}
+
+static const char* GetLogTypeName(LogType type) {
+    switch (type) {
+        case RENDERING: return "RENDER";
+        case INTEROP: return "INTEROP";
+        case CONTROLS: return "CONTROL";
+        case PPC: return "PPC";
+        case XR_DEBUGUTILS: return "XR";
+        case ARROW_SHOT_CAPTURE: return "ARROW";
+        case INFO: return "INFO";
+        case WARNING: return "WARN";
+        case ERROR: return "ERROR";
+        case VERBOSE: return "VERBOSE";
+    }
+    return "?";
+}
+
+static void FillRecord(LogRecord& record, LogType type, std::string_view message) {
+    record.text.assign(message);
+    record.type = type;
+    record.threadId = GetCurrentThreadId();
+    record.time = GetFileTimeNow();
+}
+
+static void AppendRecord(std::string& batch, const LogRecord& record) {
+    FILETIME utcTime;
+    utcTime.dwLowDateTime = (DWORD)(record.time & 0xFFFFFFFFull);
+    utcTime.dwHighDateTime = (DWORD)(record.time >> 32);
+
+    FILETIME localFileTime;
+    SYSTEMTIME localTime;
+    if (FileTimeToLocalFileTime(&utcTime, &localFileTime) && FileTimeToSystemTime(&localFileTime, &localTime)) {
+        std::format_to(std::back_inserter(batch), "[{:02}:{:02}:{:02}.{:03}] ", localTime.wHour, localTime.wMinute, localTime.wSecond, localTime.wMilliseconds);
+    }
+
+    std::format_to(std::back_inserter(batch), "[{}:{}] [{:<7}] ", s_processId, record.threadId, GetLogTypeName(record.type));
+    batch.append(record.text);
+    batch.append("\n");
+}
+
+static void WriteBatch(const std::string& batch) {
+    if (batch.empty()) {
+        return;
+    }
+
+    if (s_fileHandle != INVALID_HANDLE_VALUE) {
+        DWORD bytesWritten = 0;
+        WriteFile(s_fileHandle, batch.data(), (DWORD)batch.size(), &bytesWritten, nullptr);
+    }
+
+    if (s_consoleHandle != NULL && s_consoleHandle != INVALID_HANDLE_VALUE) {
+        DWORD charsWritten = 0;
+        WriteConsoleA(s_consoleHandle, batch.data(), (DWORD)batch.size(), &charsWritten, NULL);
+    }
+
+#ifdef _DEBUG
+    OutputDebugStringA(batch.c_str());
+#endif
+}
+
+static void DrainQueue() {
+    while (true) {
+        size_t count = 0;
+        uint32_t dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(s_queueMutex);
+            if (s_produceCount == 0) {
+                s_writerBusy = false;
+                break;
+            }
+
+            s_produce.swap(s_consume);
+            count = s_produceCount;
+            s_produceCount = 0;
+            dropped = s_droppedCount;
+            s_droppedCount = 0;
+            s_writerBusy = true;
+        }
+
+        s_batchBuffer.clear();
+        for (size_t index = 0; index < count; ++index) {
+            AppendRecord(s_batchBuffer, s_consume[index]);
+        }
+
+        if (dropped > 0) {
+            LogRecord droppedRecord;
+            FillRecord(droppedRecord, WARNING, std::format("... {} log messages dropped, queue was full", dropped));
+            AppendRecord(s_batchBuffer, droppedRecord);
+        }
+
+        WriteBatch(s_batchBuffer);
+    }
+
+    s_drained.notify_all();
+}
+
+static void WriterThreadMain() {
+    while (s_running.load(std::memory_order_relaxed)) {
+        {
+            std::unique_lock<std::mutex> lock(s_queueMutex);
+            s_wakeWriter.wait(lock, [] { return s_produceCount > 0 || !s_running.load(std::memory_order_relaxed); });
+        }
+        DrainQueue();
+    }
+
+    DrainQueue();
+}
+
+static void FlushBlocking() {
+    std::unique_lock<std::mutex> lock(s_queueMutex);
+    if (!s_running.load(std::memory_order_relaxed)) {
+        return;
+    }
+    s_drained.wait(lock, [] { return s_produceCount == 0 && !s_writerBusy; });
+}
+
+static void OpenLogFile() {
+    // Deliberately relative: Cemu's working directory is the launcher directory, which is what puts
+    // the layer and the launcher in one shared file. Module-relative would split them apart.
+    std::wstring logPath = L"BetterVR_log.txt";
+    if (const wchar_t* overridePath = _wgetenv(L"BETTERVR_LOG_PATH"); overridePath != nullptr && overridePath[0] != L'\0') {
+        logPath = overridePath;
+    }
+
+    s_fileHandle = CreateFileW(logPath.c_str(), kLogFileAccess, kLogFileShare, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+static void StartWriterThread() {
+    std::lock_guard<std::mutex> lock(s_queueMutex);
+    if (s_running.load(std::memory_order_relaxed)) {
+        return;
+    }
+
+    s_produce.reserve(512);
+    s_consume.reserve(512);
+    s_running.store(true, std::memory_order_relaxed);
+    s_writerThread = std::thread(WriterThreadMain);
+}
+
+static bool StopWriterThread(DWORD timeoutMs) {
+    std::thread writerThread;
+    {
+        std::lock_guard<std::mutex> lock(s_queueMutex);
+        if (!s_running.load(std::memory_order_relaxed)) {
+            return true;
+        }
+        s_running.store(false, std::memory_order_relaxed);
+        writerThread = std::move(s_writerThread);
+    }
+
+    s_wakeWriter.notify_all();
+
+    if (!writerThread.joinable()) {
+        return true;
+    }
+
+    if (timeoutMs == INFINITE) {
+        writerThread.join();
+        return true;
+    }
+
+    // ~Log() runs under the loader lock, where join() can deadlock. The writer never needs the loader
+    // lock, so a bounded wait costs a short stall at worst.
+    if (WaitForSingleObject(writerThread.native_handle(), timeoutMs) == WAIT_OBJECT_0) {
+        writerThread.join();
+        return true;
+    }
+
+    writerThread.detach();
+    return false;
+}
+
+static void ShutdownLogging(DWORD timeoutMs) {
+    if (!s_running.load(std::memory_order_relaxed)) {
+        return;
+    }
+
+    Log::print<INFO>("Shutting down BetterVR logging...");
+
+    if (!StopWriterThread(timeoutMs)) {
+        return;
+    }
+
+    DrainQueue();
+
+    if (s_fileHandle != INVALID_HANDLE_VALUE) {
+        CloseHandle(s_fileHandle);
+        s_fileHandle = INVALID_HANDLE_VALUE;
+    }
+}
 
 static void LogSystemHardwareInfo() {
     int cpuInfo[4] = {0, 0, 0, 0};
@@ -34,29 +259,66 @@ static void LogSystemHardwareInfo() {
     }
 }
 
+void Log::submit(LogType type, std::string_view message) {
+    {
+        std::lock_guard<std::mutex> lock(s_queueMutex);
+
+        if (!s_running.load(std::memory_order_relaxed)) {
+            LogRecord record;
+            FillRecord(record, type, message);
+
+            s_directBuffer.clear();
+            AppendRecord(s_directBuffer, record);
+            WriteBatch(s_directBuffer);
+            return;
+        }
+
+        if (s_produceCount >= kMaxQueuedRecords) {
+            s_droppedCount++;
+            return;
+        }
+
+        if (s_produceCount >= s_produce.size()) {
+            s_produce.emplace_back();
+        }
+
+        FillRecord(s_produce[s_produceCount++], type, message);
+    }
+
+    s_wakeWriter.notify_one();
+}
+
 Log::Log() {
     AllocConsole();
     SetConsoleTitleA("BetterVR Debugging Console");
-    consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    logFile.open("BetterVR_log.txt", std::ios::out | std::ios::app);
-    Log::print<INFO>("Successfully started BetterVR!");
-    LogSystemHardwareInfo();
+    s_consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 
     LARGE_INTEGER timeLI;
     QueryPerformanceFrequency(&timeLI);
-    timeFrequency = double(timeLI.QuadPart) / 1000.0;
+    s_timeFrequency = double(timeLI.QuadPart) / 1000.0;
+
+    OpenLogFile();
+    StartWriterThread();
+
+    Log::print<INFO>("Successfully started BetterVR!");
+    LogSystemHardwareInfo();
 }
 
 Log::~Log() {
-    Log::print<INFO>("Shutting down BetterVR debugging console...");
+    ShutdownLogging(kUncleanShutdownTimeoutMs);
     FreeConsole();
-    if (logFile.is_open()) {
-        logFile.close();
-    }
+}
+
+void Log::Flush() {
+    FlushBlocking();
+}
+
+void Log::Shutdown() {
+    ShutdownLogging(INFINITE);
 }
 
 void Log::printTimeElapsed(const char* message_prefix, LARGE_INTEGER time) {
     LARGE_INTEGER timeNow;
     QueryPerformanceCounter(&timeNow);
-    Log::print<INFO>("{}: {} ms", message_prefix, double(time.QuadPart - timeNow.QuadPart) / timeFrequency);
+    Log::print<INFO>("{}: {} ms", message_prefix, double(time.QuadPart - timeNow.QuadPart) / s_timeFrequency);
 }

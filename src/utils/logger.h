@@ -1,6 +1,5 @@
 #pragma once
 #include "vkroots.h"
-#include <fstream>
 
 template <>
 struct std::formatter<VkResult> : std::formatter<string> {
@@ -280,26 +279,7 @@ public:
         if constexpr (!isLogTypeEnabled<L>()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(logMutex);
-        std::string messageStr = std::string(message) + "\n";
-
-#ifndef _DEBUG
-        if (logFile.is_open()) {
-            logFile << messageStr;
-            logFile.flush();
-        }
-#endif
-
-        DWORD charsWritten = 0;
-        WriteConsoleA(consoleHandle, messageStr.c_str(), (DWORD)messageStr.size(), &charsWritten, NULL);
-#ifdef _DEBUG
-        //std::string messageStr = std::string(message) + "\n";
-        //DWORD charsWritten = 0;
-        //WriteConsoleA(consoleHandle, messageStr.c_str(), (DWORD)messageStr.size(), &charsWritten, NULL);
-        OutputDebugStringA(messageStr.c_str());
-#else
-        std::cout << message << std::endl;
-#endif
+        submit(L, std::string_view(message));
     }
 
     template <typename LogType L, class... Args>
@@ -307,22 +287,28 @@ public:
         if constexpr (!isLogTypeEnabled<L>()) {
             return;
         }
-        Log::print<L>(std::vformat(format, std::make_format_args(args...)).c_str());
+        s_scratch.clear();
+        std::vformat_to(std::back_inserter(s_scratch), format, std::make_format_args(args...));
+        submit(L, std::string_view(s_scratch));
     }
 
     static void printTimeElapsed(const char* message_prefix, LARGE_INTEGER time);
+    static void Flush();
+
+    // Call from a regular thread so the writer is never joined under the loader lock.
+    static void Shutdown();
 
 private:
-    static HANDLE consoleHandle;
-    static double timeFrequency;
-    static std::ofstream logFile;
-    static std::mutex logMutex;
+    static void submit(LogType type, std::string_view message);
+
+    inline static thread_local std::string s_scratch;
 };
 
 static void checkXRResult(const XrResult result, const char* errorMessage) {
     if (XR_FAILED(result)) {
         if (errorMessage == nullptr) {
             Log::print<ERROR>("An unknown error (result was {}) has occurred!", result);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -331,6 +317,7 @@ static void checkXRResult(const XrResult result, const char* errorMessage) {
         }
         else {
             Log::print<ERROR>("Error {}: {}", result, errorMessage);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -344,6 +331,7 @@ static void checkHResult(const HRESULT result, const char* errorMessage) {
     if (FAILED(result)) {
         if (errorMessage == nullptr) {
             Log::print<ERROR>("[Error] An unknown error (result was {}) has occurred!", result);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -352,6 +340,7 @@ static void checkHResult(const HRESULT result, const char* errorMessage) {
         }
         else {
             Log::print<ERROR>("Error {}: {}", result, errorMessage);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -365,6 +354,7 @@ static void checkVkResult(const VkResult result, const char* errorMessage) {
     if (result != VK_SUCCESS) {
         if (errorMessage == nullptr) {
             Log::print<ERROR>("An unknown error (result was {}) has occurred!", (std::underlying_type_t<VkResult>)result);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -373,6 +363,7 @@ static void checkVkResult(const VkResult result, const char* errorMessage) {
         }
         else {
             Log::print<ERROR>("Error {}: {}", (std::underlying_type_t<VkResult>)result, errorMessage);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -386,6 +377,7 @@ static void checkAssert(const bool assert, const char* errorMessage) {
     if (!assert) {
         if (errorMessage == nullptr) {
             Log::print<ERROR>("Something unexpected happened that prevents further execution!");
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif
@@ -394,6 +386,7 @@ static void checkAssert(const bool assert, const char* errorMessage) {
         }
         else {
             Log::print<ERROR>("{}", errorMessage);
+            Log::Flush();
 #ifdef _DEBUG
             __debugbreak();
 #endif

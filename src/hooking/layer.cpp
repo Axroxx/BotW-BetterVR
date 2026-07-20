@@ -427,6 +427,7 @@ void VRLayer::VkInstanceOverrides::DestroyInstance(const vkroots::VkInstanceDisp
     PFN_vkDestroyInstance ptr_vkDestroyInstance = (PFN_vkDestroyInstance)pDispatch.GetInstanceProcAddr(instance, "vkDestroyInstance");
     vkroots::tables::DestroyDispatchTable(instance);
     ptr_vkDestroyInstance(instance, pAllocator);
+    Log::Shutdown();
 }
 
 void VRLayer::VkDeviceOverrides::DestroyDevice(const vkroots::VkDeviceDispatch& pDispatch, VkDevice device, const VkAllocationCallbacks* pAllocator) {
