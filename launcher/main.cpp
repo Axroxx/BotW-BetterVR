@@ -282,6 +282,49 @@ static std::string ToLower(std::string value) {
     return value;
 }
 
+static bool IsFPSPlusPlusEnabled(const LauncherPaths& paths) {
+    std::ifstream input(paths.cemuSettingsXml, std::ios::binary);
+    if (!input.is_open()) {
+        LogLine("FPS++ check could not open Cemu settings: " + Narrow(paths.cemuSettingsXml));
+        return false;
+    }
+
+    std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    contents = ToLower(std::move(contents));
+    std::ranges::replace(contents, '\\', '/');
+
+    constexpr std::string_view RulesPathSuffix = "breathofthewild/mods/fps++/rules.txt";
+    size_t pathPosition = 0;
+    while ((pathPosition = contents.find(RulesPathSuffix, pathPosition)) != std::string::npos) {
+        const size_t entryBegin = contents.rfind("<entry", pathPosition);
+        const size_t entryEnd = entryBegin == std::string::npos ? std::string::npos : contents.find('>', entryBegin);
+        if (entryBegin != std::string::npos && entryEnd != std::string::npos && pathPosition < entryEnd) {
+            const std::string_view entryTag(contents.data() + entryBegin, entryEnd - entryBegin);
+            if (!entryTag.contains("disabled=\"true\"") && !entryTag.contains("disabled='true'")) {
+                LogLine("FPS++ graphic pack is enabled in Cemu settings");
+                return true;
+            }
+        }
+
+        pathPosition += RulesPathSuffix.size();
+    }
+
+    LogLine("FPS++ graphic pack is missing or disabled in Cemu settings: " + Narrow(paths.cemuSettingsXml));
+    return false;
+}
+
+static void WarnIfFPSPlusPlusDisabled(const LauncherPaths& paths) {
+    if (IsFPSPlusPlusEnabled(paths)) {
+        return;
+    }
+
+    constexpr char Message[] =
+        "FPS++ is not enabled for Breath of the Wild.\n\n"
+        "BetterVR requires FPS++, and the game will crash without it.\n\n"
+        "In Cemu, go to Options > Graphic Packs > The Legend of Zelda: Breath of the Wild > Mods and enable FPS++ before starting the game.";
+    MessageBoxA(nullptr, Message, "BetterVR Launcher - FPS++ Required", MB_OK | MB_ICONWARNING);
+}
+
 static bool IsBetterVRRegistryValue(const std::wstring& valueName) {
     const std::string lowered = ToLower(Narrow(fs::path(valueName).filename()));
     return lowered == "bettervr_layer.json" || lowered == "bettervr_layer.admin.json";
@@ -1321,6 +1364,8 @@ int wmain(int argc, wchar_t** argv) {
         if (!UpdateChecker::CheckCemuVersion(paths)) {
             return 1;
         }
+
+        WarnIfFPSPlusPlusDisabled(paths);
 
         UpdateChecker::CheckForUpdates(paths);
 

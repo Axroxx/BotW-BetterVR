@@ -192,7 +192,7 @@ static void StartWriterThread() {
 static bool StopWriterThread(DWORD timeoutMs) {
     std::thread writerThread;
     {
-        std::lock_guard<std::mutex> lock(s_queueMutex);
+        std::scoped_lock lock(s_queueMutex);
         if (!s_running.load(std::memory_order_relaxed)) {
             return true;
         }
@@ -270,7 +270,7 @@ static void LogSystemHardwareInfo() {
 
 void Log::submit(LogType type, std::string_view message) {
     {
-        std::lock_guard<std::mutex> lock(s_queueMutex);
+        std::scoped_lock lock(s_queueMutex);
 
         if (!s_running.load(std::memory_order_relaxed)) {
             LogRecord record;
@@ -337,5 +337,5 @@ void Log::Shutdown() {
 void Log::printTimeElapsed(const char* message_prefix, LARGE_INTEGER time) {
     LARGE_INTEGER timeNow;
     QueryPerformanceCounter(&timeNow);
-    Log::print<INFO>("{}: {} ms", message_prefix, double(time.QuadPart - timeNow.QuadPart) / s_timeFrequency);
+    Log::print<INFO>("{}: {} ms", message_prefix, (double)(time.QuadPart - timeNow.QuadPart) / s_timeFrequency);
 }
