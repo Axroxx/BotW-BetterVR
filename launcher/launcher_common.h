@@ -26,6 +26,7 @@ struct LauncherPaths {
     fs::path launcherDir;
     fs::path cemuExe;
     fs::path cemuLog;
+    fs::path cemuSettingsXml;
     fs::path settingsIni;
     fs::path targetBase;
     fs::path targetPack;
@@ -151,16 +152,19 @@ inline LauncherPaths DetectPaths() {
         paths.mode = CemuMode::Portable;
         paths.targetBase = paths.launcherDir / "portable" / "graphicPacks";
         paths.cemuLog = paths.launcherDir / "portable" / "log.txt";
+        paths.cemuSettingsXml = paths.launcherDir / "portable" / "settings.xml";
     }
     else if (fs::exists(paths.launcherDir / "settings.xml")) {
         paths.mode = CemuMode::SettingsXml;
         paths.targetBase = paths.launcherDir / "graphicPacks";
         paths.cemuLog = paths.launcherDir / "log.txt";
+        paths.cemuSettingsXml = paths.launcherDir / "settings.xml";
     }
     else if (const std::optional<fs::path> appData = GetEnvironmentPath(L"APPDATA"); appData.has_value()) {
         paths.mode = CemuMode::AppData;
         paths.targetBase = *appData / "Cemu" / "graphicPacks";
         paths.cemuLog = *appData / "Cemu" / "log.txt";
+        paths.cemuSettingsXml = *appData / "Cemu" / "settings.xml";
     }
     else {
         throw std::runtime_error("APPDATA is not available");
@@ -182,6 +186,7 @@ inline void InitLog(const LauncherPaths& paths) {
     LogLine("Version: " + std::string(BETTERVR_LAUNCHER_VERSION));
     LogLine("Launcher: " + Narrow(paths.launcherExe));
     LogLine("Cemu log.txt: " + Narrow(paths.cemuLog));
+    LogLine("Cemu settings.xml: " + Narrow(paths.cemuSettingsXml));
     LogLine("Cemu mode: " + ModeName(paths.mode));
     LogLine("Graphic pack target: " + Narrow(paths.targetPack));
     LogLine("Runtime directory: " + Narrow(paths.targetPack));

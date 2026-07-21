@@ -14,6 +14,7 @@ static constexpr wchar_t BetterVRAdminEnableEnvironmentVariable[] = L"ENABLE_BET
 static constexpr std::string_view BundledGraphicPackName = "BreathOfTheWild_BetterVR";
 static constexpr std::string_view BundledGraphicPackPrefix = "BreathOfTheWild_BetterVR/";
 static constexpr std::string_view BundledDownloadedGraphicsPrefix = "BreathOfTheWild_Graphics/";
+static constexpr std::string_view CemuAccurateBarriersElementName = "vkAccurateBarriers";
 static constexpr uint32_t BetterVRResolutionSearchAlignment = 8;
 static constexpr uint32_t BetterVRResolutionSearchRadius = 32;
 static constexpr double BetterVRPreferredMatchDistance = 32.0;
@@ -416,11 +417,16 @@ static bool RegisterImplicitLayer(const LauncherPaths& paths, LayerInstallScope 
 }
 
 static std::vector<fs::path> CollectInstalledGraphicPackPaths(const LauncherPaths& paths) {
-    std::vector<fs::path> result;
-    result.push_back(paths.launcherDir / "portable" / "graphicPacks" / fs::path(std::string(BundledGraphicPackName)));
-    result.push_back(paths.launcherDir / "graphicPacks" / fs::path(std::string(BundledGraphicPackName)));
+    std::vector<fs::path> packBases;
+    packBases.push_back(paths.launcherDir / "portable" / "graphicPacks");
+    packBases.push_back(paths.launcherDir / "graphicPacks");
     if (const std::optional<fs::path> appData = GetEnvironmentPath(L"APPDATA"); appData.has_value()) {
-        result.push_back(*appData / "Cemu" / "graphicPacks" / fs::path(std::string(BundledGraphicPackName)));
+        packBases.push_back(*appData / "Cemu" / "graphicPacks");
+    }
+
+    std::vector<fs::path> result;
+    for (const fs::path& packBase : packBases) {
+        result.push_back(packBase / fs::path(std::string(BundledGraphicPackName)));
     }
 
     std::sort(result.begin(), result.end());
@@ -924,6 +930,123 @@ static std::optional<std::string> ReadDirectBootTitleId(const LauncherPaths& pat
     return directBootTitleId;
 }
 
+static std::optional<std::pair<size_t, size_t>> FindXmlElementValueRange(const std::string& contents, std::string_view elementName, size_t searchBegin, size_t searchEnd) {
+    const std::string openTag = "<" + std::string(elementName) + ">";
+    const std::string closeTag = "</" + std::string(elementName) + ">";
+
+    const size_t openPosition = contents.find(openTag, searchBegin);
+    if (openPosition == std::string::npos || openPosition >= searchEnd) {
+        return std::nullopt;
+    }
+
+    const size_t valueBegin = openPosition + openTag.size();
+    const size_t closePosition = contents.find(closeTag, valueBegin);
+    if (closePosition == std::string::npos || closePosition > searchEnd) {
+        return std::nullopt;
+    }
+
+    return std::make_pair(valueBegin, closePosition);
+}
+
+static bool WriteCemuAccurateBarriers(const fs::path& settingsPath, const std::string& value, std::string* previousValue) {
+    std::ifstream input(settingsPath, std::ios::binary);
+    if (!input.is_open()) {
+        LogLine("Cemu settings.xml was not found, so accurate barriers were left untouched: " + Narrow(settingsPath));
+        return false;
+    }
+
+    std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    input.close();
+
+    const std::optional<std::pair<size_t, size_t>> graphicRange = FindXmlElementValueRange(contents, "Graphic", 0, contents.size());
+    if (!graphicRange.has_value()) {
+        LogLine("Cemu settings.xml has no <Graphic> section, so accurate barriers were left untouched");
+        return false;
+    }
+
+    const std::optional<std::pair<size_t, size_t>> barriersRange = FindXmlElementValueRange(contents, CemuAccurateBarriersElementName, graphicRange->first, graphicRange->second);
+    if (barriersRange.has_value()) {
+        const std::string currentValue = Trim(contents.substr(barriersRange->first, barriersRange->second - barriersRange->first));
+        if (previousValue != nullptr) {
+            *previousValue = currentValue;
+        }
+
+        if (currentValue == value) {
+            LogLine("Cemu accurate barriers were already set to " + value);
+            return true;
+        }
+
+        contents.replace(barriersRange->first, barriersRange->second - barriersRange->first, value);
+    }
+    else {
+        if (previousValue != nullptr) {
+            *previousValue = "true";
+        }
+
+        const size_t closingTagLineBegin = contents.rfind('\n', graphicRange->second);
+        std::string closingTagIndentation;
+        if (closingTagLineBegin != std::string::npos && closingTagLineBegin < graphicRange->second) {
+            closingTagIndentation = contents.substr(closingTagLineBegin + 1, graphicRange->second - closingTagLineBegin - 1);
+            if (closingTagIndentation.find_first_not_of(" \t") != std::string::npos) {
+                closingTagIndentation.clear();
+            }
+        }
+
+        const std::string element = "<" + std::string(CemuAccurateBarriersElementName) + ">" + value + "</" + std::string(CemuAccurateBarriersElementName) + ">";
+        if (closingTagIndentation.empty()) {
+            contents.insert(graphicRange->second, element);
+        }
+        else {
+            contents.insert(graphicRange->second, closingTagIndentation + element + "\n" + closingTagIndentation);
+        }
+    }
+
+    if (!WriteBinaryFile(settingsPath, reinterpret_cast<const unsigned char*>(contents.data()), contents.size())) {
+        LogLine("Failed to write Cemu settings.xml while setting accurate barriers to " + value);
+        return false;
+    }
+
+    LogLine("Set Cemu accurate barriers to " + value + " in " + Narrow(settingsPath));
+    return true;
+}
+
+struct CemuAccurateBarriersOverride {
+    fs::path settingsPath;
+    std::string previousValue;
+
+    void Apply(const LauncherPaths& paths) {
+        Restore();
+
+        std::string originalValue;
+        if (!WriteCemuAccurateBarriers(paths.cemuSettingsXml, "false", &originalValue)) {
+            return;
+        }
+
+        if (originalValue.empty() || originalValue == "false") {
+            return;
+        }
+
+        settingsPath = paths.cemuSettingsXml;
+        previousValue = originalValue;
+    }
+
+    void Restore() {
+        if (settingsPath.empty()) {
+            return;
+        }
+
+        const fs::path restorePath = settingsPath;
+        const std::string restoreValue = previousValue;
+        settingsPath.clear();
+        previousValue.clear();
+        WriteCemuAccurateBarriers(restorePath, restoreValue, nullptr);
+    }
+
+    ~CemuAccurateBarriersOverride() {
+        Restore();
+    }
+};
+
 static void LogVulkanDetails() {
     HMODULE vulkanModule = LoadLibraryW(L"vulkan-1.dll");
     if (vulkanModule == nullptr) {
@@ -1119,6 +1242,7 @@ int wmain(int argc, wchar_t** argv) {
         const LauncherPaths paths = DetectPaths();
         InitLog(paths);
         TemporaryDownloadedGraphicsFiles downloadedGraphicsOverrideFiles;
+        CemuAccurateBarriersOverride accurateBarriersOverride;
         CleanupLegacyLaunchFiles(paths);
         CleanupDownloadedGraphicsOverrideFiles(paths);
         const bool processElevated = IsProcessElevated();
@@ -1234,11 +1358,14 @@ int wmain(int argc, wchar_t** argv) {
             return 1;
         }
 
+        accurateBarriersOverride.Apply(paths);
+
         LogVulkanDetails();
 
         const int exitCode = LaunchCemuAndWait(paths, forwardedArgs, layerInstallScope);
 
         EmbedCemuLog(paths);
+        accurateBarriersOverride.Restore();
         downloadedGraphicsOverrideFiles.DeleteAll();
 
         if (!keepInstalled) {
