@@ -27,7 +27,7 @@ static void DrawSettingRow(const ImVec2& windowWidth, const char* label, DrawWid
 }
 
 template <typename FormatDistanceFn>
-static void DrawLayerSettingsRow(const ImVec2& windowWidth, const char* label, bool* changed, FloatSetting<float>& distanceSetting, FloatSetting<float>& scaleSetting, FormatDistanceFn&& formatDistance) {
+static void DrawLayerSettingsRow(const ImVec2& windowWidth, const char* label, bool* changed, FloatSetting& distanceSetting, FloatSetting& scaleSetting, FormatDistanceFn&& formatDistance) {
     DrawSettingRow(windowWidth, label, [&]() {
         auto applyValues = [&](float distance, float scale) {
             distanceSetting = distance;
@@ -36,16 +36,16 @@ static void DrawLayerSettingsRow(const ImVec2& windowWidth, const char* label, b
 
         float distance = distanceSetting;
         float scale = scaleSetting;
-        std::string distanceIdStr = std::format("##{}_Distance", label);
-        std::string scaleIdStr = std::format("##{}_Scale", label);
 
         float totalWidth = ImGui::GetContentRegionAvail().x;
         float resetWidth = 45.0f;
         float itemSpacing = ImGui::GetStyle().ItemSpacing.x;
         float sliderWidth = (totalWidth - resetWidth - itemSpacing * 2.0f) * 0.5f;
 
+        ImGui::PushID(label);
+
         ImGui::PushItemWidth(sliderWidth);
-        if (ImGui::SliderFloat(distanceIdStr.c_str(), &distance, distanceSetting.min, distanceSetting.max, formatDistance(distance).c_str())) {
+        if (ImGui::SliderFloat("##distance", &distance, distanceSetting.min, distanceSetting.max, formatDistance(distance).c_str())) {
             applyValues(std::clamp(distance, distanceSetting.min, distanceSetting.max), scaleSetting);
             *changed = true;
         }
@@ -53,19 +53,20 @@ static void DrawLayerSettingsRow(const ImVec2& windowWidth, const char* label, b
         ImGui::SameLine();
 
         ImGui::PushItemWidth(sliderWidth);
-        if (ImGui::SliderFloat(scaleIdStr.c_str(), &scale, scaleSetting.min, scaleSetting.max, "%.2fx scale")) {
+        if (ImGui::SliderFloat("##scale", &scale, scaleSetting.min, scaleSetting.max, "%.2fx scale")) {
             applyValues(distanceSetting, std::clamp(scale, scaleSetting.min, scaleSetting.max));
             *changed = true;
         }
         ImGui::PopItemWidth();
         ImGui::SameLine();
 
-        std::string resetIdStr = std::format("Reset##{}", label);
-        if (ImGui::Button(resetIdStr.c_str())) {
+        if (ImGui::Button("Reset")) {
             distanceSetting.Reset();
             scaleSetting.Reset();
             *changed = true;
         }
+
+        ImGui::PopID();
     });
 }
 
@@ -728,7 +729,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
     ImGui::Spacing();
     ImGui::Separator();
     DrawSettingRow(windowWidth, "Camera Mode", [&]() {
-        settings.cameraMode.AddRadioToGUI(changed, ModSettings::toDisplayString);
+        settings.cameraMode.AddRadioToGUI(changed);
     });
 
     ImGui::Spacing();
@@ -764,7 +765,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
         });
 
         DrawSettingRow(windowWidth, "Turn Mode", [&]() {
-            settings.turnMode.AddComboToGUI(changed, ModSettings::toDisplayString);
+            settings.turnMode.AddComboToGUI(changed);
         });
     }
 
@@ -774,7 +775,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
 
     if (cameraMode != CameraMode::THIRD_PERSON) {
         DrawSettingRow(windowWidth, "Camera In Cutscenes", [&]() {
-            settings.cutsceneCameraMode.AddComboToGUI(changed, ModSettings::toDisplayString);
+            settings.cutsceneCameraMode.AddComboToGUI(changed);
         });
     }
 
@@ -817,7 +818,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
         }
         
         DrawSettingRow(windowWidth, "Walking Direction", [&]() {
-            settings.walkingDirection.AddComboToGUI(changed, ModSettings::toDisplayString);
+            settings.walkingDirection.AddComboToGUI(changed);
         });
 
         DrawSettingRow(windowWidth, "Bow Aiming Arc Opacity", [&]() {
@@ -854,7 +855,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
 
         if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
             DrawSettingRow(windowWidth, "Angular Velocity Fixer", [&]() {
-                settings.buggyAngularVelocity.AddComboToGUI(changed, ModSettings::toDisplayString);
+                settings.buggyAngularVelocity.AddComboToGUI(changed);
             });
         }
         else {
@@ -881,9 +882,8 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
     ImGui::NewLine();
     DrawSettingRow(windowWidth, "", [&]() {
         if (ImGui::Button("Reset All Settings")) {
-            auto options = settings.GetOptions();
-            for (int i = 0; i < options.size(); ++i) {
-                options[i]->Reset();
+            for (ModSettingBase* option : settings.GetOptions()) {
+                option->Reset();
             }
             *changed = true;
         }
@@ -1029,7 +1029,7 @@ void RND_Renderer::ImGuiOverlay::DrawFPSOverlayTab(const ImVec2& windowWidth, bo
     auto& settings = GetSettings();
 
     DrawSettingRow(windowWidth, "Show FPS Overlay", [&]() {
-        settings.performanceOverlay.AddComboToGUI(changed, ModSettings::toDisplayString);
+        settings.performanceOverlay.AddComboToGUI(changed);
     });
 
     if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
@@ -1106,63 +1106,63 @@ void RND_Renderer::ImGuiOverlay::DrawCustomAttackSensitivityTab(const ImVec2& wi
     });
 
     DrawSettingRow(windowWidth, "Stab Speed Threshold", [&]() {
-        settings.customStabSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.01f, 0.50f, [](float) { return "%.2f m/s"; });
+        settings.customStabSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.01f, 0.50f, "%.2f m/s");
     });
     DrawSettingRow(windowWidth, "Stab Accel Threshold", [&]() {
-        settings.customStabAccThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f m/s^2"; });
+        settings.customStabAccThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, "%.1f m/s^2");
     });
     DrawSettingRow(windowWidth, "Stab Aim Cone", [&]() {
-        settings.customStabSteadinessCone.AddToGUI(changed, windowWidth.x, 15.0f, 85.0f, [](float) { return "%.0f deg"; });
+        settings.customStabSteadinessCone.AddToGUI(changed, windowWidth.x, 15.0f, 85.0f, "%.0f deg");
     });
     DrawSettingRow(windowWidth, "Stab Twist Limit", [&]() {
-        settings.customStabAngularSteadiness.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
+        settings.customStabAngularSteadiness.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, "%.1f rad/s");
     });
     DrawSettingRow(windowWidth, "Stab Travel Distance", [&]() {
-        settings.customStabTravelDistance.AddToGUI(changed, windowWidth.x, 0.05f, 0.50f, [](float) { return "%.2f m"; });
+        settings.customStabTravelDistance.AddToGUI(changed, windowWidth.x, 0.05f, 0.50f, "%.2f m");
     });
     DrawSettingRow(windowWidth, "Stab Lock Time", [&]() {
-        settings.customMinGoodStabDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+        settings.customMinGoodStabDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
     });
 
     ImGui::Spacing();
     DrawSectionHeader("Custom Swing Sensitivity");
 
     DrawSettingRow(windowWidth, "Swing Speed Threshold", [&]() {
-        settings.customSlashSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 5.0f, [](float) { return "%.1f rad/s"; });
+        settings.customSlashSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 5.0f, "%.1f rad/s");
     });
     DrawSettingRow(windowWidth, "Swing Accel Threshold", [&]() {
-        settings.customSlashAccThreshold.AddToGUI(changed, windowWidth.x, 3.0f, 40.0f, [](float) { return "%.1f rad/s^2"; });
+        settings.customSlashAccThreshold.AddToGUI(changed, windowWidth.x, 3.0f, 40.0f, "%.1f rad/s^2");
     });
     DrawSettingRow(windowWidth, "Swing Velocity Threshold", [&]() {
-        settings.customSlashVelocityThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, [](float) { return "%.1f rad/s"; });
+        settings.customSlashVelocityThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, "%.1f rad/s");
     });
     DrawSettingRow(windowWidth, "Swing Drift Limit", [&]() {
-        settings.customSlashAccDriftThreshold.AddToGUI(changed, windowWidth.x, 2.0f, 30.0f, [](float) { return "%.1f rad/s^2"; });
+        settings.customSlashAccDriftThreshold.AddToGUI(changed, windowWidth.x, 2.0f, 30.0f, "%.1f rad/s^2");
     });
     DrawSettingRow(windowWidth, "Swing Travel Angle", [&]() {
-        settings.customSlashTravelAngle.AddToGUI(changed, windowWidth.x, 10.0f, 90.0f, [](float) { return "%.0f deg"; });
+        settings.customSlashTravelAngle.AddToGUI(changed, windowWidth.x, 10.0f, 90.0f, "%.0f deg");
     });
     DrawSettingRow(windowWidth, "Swing Lock Time", [&]() {
-        settings.customMinGoodSwingDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+        settings.customMinGoodSwingDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
     });
 
     ImGui::Spacing();
     DrawSectionHeader("Shared Tuning");
 
     DrawSettingRow(windowWidth, "Bad Sample Timeout", [&]() {
-        settings.customMaxBadDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+        settings.customMaxBadDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
     });
     DrawSettingRow(windowWidth, "Grace Period", [&]() {
-        settings.customGoodSampleGracePeriod.AddToGUI(changed, windowWidth.x, 10.0f, 200.0f, [](float) { return "%.0f ms"; });
+        settings.customGoodSampleGracePeriod.AddToGUI(changed, windowWidth.x, 10.0f, 200.0f, "%.0f ms");
     });
     DrawSettingRow(windowWidth, "Input Smoothing", [&]() {
-        settings.customSmoothingTimeConstant.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, [](float) { return "%.3f s"; });
+        settings.customSmoothingTimeConstant.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
     });
     DrawSettingRow(windowWidth, "Drift Min Velocity", [&]() {
-        settings.customAngularDriftMinVelocity.AddToGUI(changed, windowWidth.x, 0.1f, 3.0f, [](float) { return "%.1f rad/s"; });
+        settings.customAngularDriftMinVelocity.AddToGUI(changed, windowWidth.x, 0.1f, 3.0f, "%.1f rad/s");
     });
     DrawSettingRow(windowWidth, "Damage Output Scale", [&]() {
-        settings.customDamageOutputScale.AddToGUI(changed, windowWidth.x, 0.10f, 2.00f, [](float) { return "%.2fx"; });
+        settings.customDamageOutputScale.AddToGUI(changed, windowWidth.x, 0.10f, 2.00f, "%.2fx");
     });
     DrawSettingRow(windowWidth, "", [&]() {
         if (ImGui::Button("Reset Custom Weapon Sensitivity")) {

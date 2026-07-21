@@ -45,12 +45,9 @@ static void Settings_ReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
         Log::print<ERROR>("Failed to parse option line \"{}\": missing option key", line);
         return;
     }
-    std::string nameStr = std::string(nameView);
-    const char* name = nameStr.c_str();
-
     auto options = s->GetOptions();
     for (ModSettingBase* option : options) {
-        if (stricmp(option->name, name) == 0) {
+        if (IEquals(option->name, nameView)) {
             std::string_view valueView = lineView.substr(sepIndex + 1, lineView.size() - sepIndex - 1);
             // Remove leading whitespaces
             valueView.remove_prefix(std::min(valueView.find_first_not_of(" \t"), valueView.size()));
@@ -60,12 +57,12 @@ static void Settings_ReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
                 Log::print<ERROR>("Failed to parse option line \"{}\": missing value", line);
                 return;
             }
-            option->Deserialize(std::string(valueView));
+            option->Deserialize(valueView);
             //Log::print<INFO>("Deserialized \"{}\" to \"{}\" from line \"{}\"", option->name, option->Serialize(), line);
             return;
         }
     }
-    Log::print<ERROR>("Failed to parse option line \"{}\": Unknown option key \"{}\"", line, name);
+    Log::print<ERROR>("Failed to parse option line \"{}\": Unknown option key \"{}\"", line, nameView);
 }
 
 static void Settings_WriteAll(ImGuiContext* ctx, ImGuiSettingsHandler* handler, ImGuiTextBuffer* buf) {

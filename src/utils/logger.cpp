@@ -37,7 +37,7 @@ static double s_timeFrequency = 0.0;
 static uint32_t s_processId = GetCurrentProcessId();
 
 static constinit std::atomic_bool s_showTimestamps = true;
-static constinit std::atomic_bool s_showThreadIds = true;
+static constinit std::atomic_bool s_showThreadIds = false;
 
 static uint64_t GetFileTimeNow() {
     FILETIME systemTime;

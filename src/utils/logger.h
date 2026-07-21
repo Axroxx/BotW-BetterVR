@@ -258,6 +258,11 @@ public:
         s_categoryEnabled[(size_t)type].store(enabled, std::memory_order_relaxed);
     }
 
+    template <LogType L>
+    static void SetCategory(bool enabled) {
+        SetCategoryEnabled(L, enabled);
+    }
+
     static void SetShowTimestamps(bool enabled);
     static void SetShowThreadIds(bool enabled);
 

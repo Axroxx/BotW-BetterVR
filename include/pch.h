@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <charconv>
+#include <span>
 #include <string>
 #include <variant>
 #include <functional>
@@ -141,6 +143,9 @@ inline glm::fmat4 ToMat4(const glm::fvec3& pos, const glm::fquat& rot) {
     return ToMat4(pos) * ToMat4(rot);
 }
 
+static bool IEquals(std::string_view lhs, std::string_view rhs) {
+    return std::ranges::equal(lhs, rhs, [](char a, char b) { return std::tolower((unsigned char)a) == std::tolower((unsigned char)b); });
+}
 
 inline std::string toLower(std::string str) {
     std::ranges::transform(str, str.begin(), [](unsigned char c) { return std::tolower(c); });
