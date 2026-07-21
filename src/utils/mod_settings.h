@@ -408,6 +408,23 @@ public:
     }
 };
 
+class LogFormatSetting : public BoolSetting {
+private:
+    void (*m_apply)(bool);
+
+public:
+    using BoolSetting::operator=;
+
+    LogFormatSetting(const char* name, void (*apply)(bool), bool defaultValue): BoolSetting(name, defaultValue), m_apply(apply) {
+        apply(defaultValue);
+    }
+
+    void Set(const bool value, std::memory_order order = std::memory_order_seq_cst) override {
+        BoolSetting::Set(value, order);
+        m_apply(value);
+    }
+};
+
 class StringSetting : public ModSettingBase {
 private:
     std::string m_value;
@@ -850,6 +867,8 @@ struct ModSettings {
     LogCategorySetting logXrDebugUtils = LogCategorySetting("LogXrDebugUtils", XR_DEBUGUTILS, false);
     LogCategorySetting logArrowShotCapture = LogCategorySetting("LogArrowShotCapture", ARROW_SHOT_CAPTURE, false);
     LogCategorySetting logVerbose = LogCategorySetting("LogVerbose", VERBOSE, false);
+    LogFormatSetting logTimestamps = LogFormatSetting("LogTimestamps", &Log::SetShowTimestamps, true);
+    LogFormatSetting logThreadIds = LogFormatSetting("LogThreadIds", &Log::SetShowThreadIds, true);
     BoolSetting tutorialPromptShown = BoolSetting("TutorialPromptShown", false);
     BoolSetting bootDirectlyIntoGame = BoolSetting("BootDirectlyIntoGame", false);
     StringSetting bootDirectlyTitleId = StringSetting("BootDirectlyTitleId", "");
@@ -909,6 +928,8 @@ struct ModSettings {
             &logXrDebugUtils,
             &logArrowShotCapture,
             &logVerbose,
+            &logTimestamps,
+            &logThreadIds,
             &tutorialPromptShown,
             &bootDirectlyIntoGame,
             &bootDirectlyTitleId,

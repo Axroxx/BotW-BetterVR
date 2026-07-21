@@ -36,6 +36,9 @@ static HANDLE s_consoleHandle = NULL;
 static double s_timeFrequency = 0.0;
 static uint32_t s_processId = GetCurrentProcessId();
 
+static constinit std::atomic_bool s_showTimestamps = true;
+static constinit std::atomic_bool s_showThreadIds = true;
+
 static uint64_t GetFileTimeNow() {
     FILETIME systemTime;
     GetSystemTimeAsFileTime(&systemTime);
@@ -66,17 +69,23 @@ static void FillRecord(LogRecord& record, LogType type, std::string_view message
 }
 
 static void AppendRecord(std::string& batch, const LogRecord& record) {
-    FILETIME utcTime;
-    utcTime.dwLowDateTime = (DWORD)(record.time & 0xFFFFFFFFull);
-    utcTime.dwHighDateTime = (DWORD)(record.time >> 32);
+    if (s_showTimestamps.load(std::memory_order_relaxed)) {
+        FILETIME utcTime;
+        utcTime.dwLowDateTime = (DWORD)(record.time & 0xFFFFFFFFull);
+        utcTime.dwHighDateTime = (DWORD)(record.time >> 32);
 
-    FILETIME localFileTime;
-    SYSTEMTIME localTime;
-    if (FileTimeToLocalFileTime(&utcTime, &localFileTime) && FileTimeToSystemTime(&localFileTime, &localTime)) {
-        std::format_to(std::back_inserter(batch), "[{:02}:{:02}:{:02}.{:03}] ", localTime.wHour, localTime.wMinute, localTime.wSecond, localTime.wMilliseconds);
+        FILETIME localFileTime;
+        SYSTEMTIME localTime;
+        if (FileTimeToLocalFileTime(&utcTime, &localFileTime) && FileTimeToSystemTime(&localFileTime, &localTime)) {
+            std::format_to(std::back_inserter(batch), "[{:02}:{:02}:{:02}.{:03}] ", localTime.wHour, localTime.wMinute, localTime.wSecond, localTime.wMilliseconds);
+        }
     }
 
-    std::format_to(std::back_inserter(batch), "[{}:{}] [{:<7}] ", s_processId, record.threadId, GetLogTypeName(record.type));
+    if (s_showThreadIds.load(std::memory_order_relaxed)) {
+        std::format_to(std::back_inserter(batch), "[{}:{}] ", s_processId, record.threadId);
+    }
+
+    std::format_to(std::back_inserter(batch), "[{:<7}] ", GetLogTypeName(record.type));
     batch.append(record.text);
     batch.append("\n");
 }
@@ -307,6 +316,14 @@ Log::Log() {
 Log::~Log() {
     ShutdownLogging(kUncleanShutdownTimeoutMs);
     FreeConsole();
+}
+
+void Log::SetShowTimestamps(bool enabled) {
+    s_showTimestamps.store(enabled, std::memory_order_relaxed);
+}
+
+void Log::SetShowThreadIds(bool enabled) {
+    s_showThreadIds.store(enabled, std::memory_order_relaxed);
 }
 
 void Log::Flush() {

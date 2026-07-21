@@ -906,7 +906,7 @@ void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool
     ImGui::EndTabItem();
 }
 
-static void DrawLogCategoryToggle(const char* label, LogCategorySetting& setting, bool* changed) {
+static void DrawLogToggle(const char* label, BoolSetting& setting, bool* changed) {
     bool enabled = setting;
     if (ImGui::Checkbox(label, &enabled)) {
         setting = enabled;
@@ -932,13 +932,18 @@ void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
     ImGui::SeparatorText("Log Categories");
 
     auto& settings = GetSettings();
-    DrawLogCategoryToggle("Rendering", settings.logRendering, changed);
-    DrawLogCategoryToggle("Interop", settings.logInterop, changed);
-    DrawLogCategoryToggle("Controls", settings.logControls, changed);
-    DrawLogCategoryToggle("PPC Hooks", settings.logPpc, changed);
-    DrawLogCategoryToggle("OpenXR Debug Utils", settings.logXrDebugUtils, changed);
-    DrawLogCategoryToggle("Arrow Shot Capture", settings.logArrowShotCapture, changed);
-    DrawLogCategoryToggle("Verbose", settings.logVerbose, changed);
+    DrawLogToggle("Rendering", settings.logRendering, changed);
+    DrawLogToggle("Interop", settings.logInterop, changed);
+    DrawLogToggle("Controls", settings.logControls, changed);
+    DrawLogToggle("PPC Hooks", settings.logPpc, changed);
+    DrawLogToggle("OpenXR Debug Utils", settings.logXrDebugUtils, changed);
+    DrawLogToggle("Arrow Shot Capture", settings.logArrowShotCapture, changed);
+    DrawLogToggle("Verbose", settings.logVerbose, changed);
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::SeparatorText("Log Line Prefix");
+    DrawLogToggle("Timestamps", settings.logTimestamps, changed);
+    DrawLogToggle("Process & Thread IDs", settings.logThreadIds, changed);
 
     ImGui::EndTabItem();
 }

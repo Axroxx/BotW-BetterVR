@@ -258,6 +258,9 @@ public:
         s_categoryEnabled[(size_t)type].store(enabled, std::memory_order_relaxed);
     }
 
+    static void SetShowTimestamps(bool enabled);
+    static void SetShowThreadIds(bool enabled);
+
     template <typename LogType L>
     static inline void print(const char* message) {
         if constexpr (!isLogTypeEnabled<L>()) {
