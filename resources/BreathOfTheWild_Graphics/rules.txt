@@ -129,6 +129,24 @@ condition = ($recordingOutput != 0)
 $width = 3840
 $height = 2160
 
+# Quality Preset / Performance Hacks (BetterVR)
+
+[Preset]
+name = Very Low (No Shadows & God Rays, ~10% Higher FPS)
+category = Quality Preset / Performance Hacks
+$qualityPreset:int = 0
+
+[Preset]
+name = Low (No God Rays, ~4% Higher FPS)
+category = Quality Preset / Performance Hacks
+$qualityPreset:int = 1
+
+[Preset]
+name = Normal (Recommended)
+category = Quality Preset / Performance Hacks
+default = 1
+$qualityPreset:int = 2
+
 # Anti-Aliasing
 
 [Preset]
@@ -147,37 +165,45 @@ category = Anti-Aliasing
 default = 1
 
 # Shadow Graphics Pack
+# Hidden at the Very Low quality preset, which turns the depth shadow pass off entirely.
 
 [Preset]
 name = Low (50%)
 category = Shadows
+condition = $qualityPreset > 0
 $shadowRes = 0.5
 
 [Preset]
 name = Medium (100%, Default)
 default = 1
 category = Shadows
+condition = $qualityPreset > 0
 
 [Preset]
 name = High (200%)
 category = Shadows
+condition = $qualityPreset > 0
 $shadowRes = 2
 
 [Preset]
 name = Ultra (300%)
 category = Shadows
+condition = $qualityPreset > 0
 $shadowRes = 3
 
 [Preset]
 name = Extreme (400%, Unstable)
 category = Shadows
+condition = $qualityPreset > 0
 $shadowRes = 4
 
 # Shadow Draw Distance
+# Hidden at the Very Low quality preset, which turns the depth shadow pass off entirely.
 
 [Preset]
 category = Shadow Draw Distance
 name = Low (Low Draw Distance, Sharp Shadows)
+condition = $qualityPreset > 0
 $shadowNearbyEnd = 0.6
 $shadowFarStart = 0.6
 $shadowFarEnd = 0.75
@@ -185,6 +211,7 @@ $shadowFarEnd = 0.75
 [Preset]
 name = Medium (Lower Draw Distance, Sharper Shadows)
 category = Shadow Draw Distance
+condition = $qualityPreset > 0
 $shadowNearbyEnd = 0.8
 $shadowFarStart = 0.8
 $shadowFarEnd = 0.9
@@ -192,11 +219,13 @@ $shadowFarEnd = 0.9
 [Preset]
 name = High (Default)
 category = Shadow Draw Distance
+condition = $qualityPreset > 0
 default = 1
 
 [Preset]
 name = Very High (Recommended)
 category = Shadow Draw Distance
+condition = $qualityPreset > 0
 $shadowNearbyEnd = 1.25
 $shadowFarStart = 1.25
 $shadowFarEnd = 1.30
@@ -204,6 +233,7 @@ $shadowFarEnd = 1.30
 [Preset]
 name = Ultra (Higher Draw Distance, Slightly Blurrier Shadows)
 category = Shadow Draw Distance
+condition = $qualityPreset > 0
 $shadowNearbyEnd = 1.3
 $shadowFarStart = 1.3
 $shadowFarEnd = 1.5
@@ -211,29 +241,10 @@ $shadowFarEnd = 1.5
 [Preset]
 name = Extreme (Higher Draw Distance, Blurry Shadows)
 category = Shadow Draw Distance
+condition = $qualityPreset > 0
 $shadowNearbyEnd = 1.4
 $shadowFarStart = 1.4
 $shadowFarEnd = 1.55
-
-
-# Quality Preset (BetterVR)
-
-[Preset]
-name = Low (No Shadows & Godrays, Dark During Nights, Very Experimental!)
-category = Quality Preset
-$qualityPreset:int = 0
-
-[Preset]
-name = Medium (No Godrays)
-category = Quality Preset
-$qualityPreset:int = 1
-
-[Preset]
-name = High (All, Recommended)
-category = Quality Preset
-default = 1
-$qualityPreset:int = 2
-
 
 # Texture Changes
 
