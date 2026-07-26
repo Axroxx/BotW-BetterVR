@@ -264,6 +264,106 @@ static bool isFaceMaterialTriggerBone(const std::string_view& boneName) {
     return boneName == "Face_Root" || boneName == "Head" || boneName == "Eyeball_L" || boneName == "Eyeball_R";
 }
 
+static constexpr uint32_t ActorGsysModelOffset = 0x330;
+static constexpr uint32_t ModelUnitCountOffset = 0x1C;
+static constexpr uint32_t ModelUnitArrayOffset = 0x24;
+static constexpr uint32_t ModelUnitMaterialCountOffset = 0x9A;
+static constexpr uint32_t ModelUnitMaterialArrayOffset = 0xA4;
+static constexpr uint32_t ModelUnitMaterialStride = 0x40;
+static constexpr uint32_t MaterialNameRelativeOffset = 0x04;
+
+static std::string_view GetModelUnitMaterialName(uint32_t materialArray, uint16_t materialIdx) {
+    uint32_t materialPtr = 0;
+    CemuHooks::readMemoryBE(materialArray + materialIdx * ModelUnitMaterialStride, &materialPtr);
+    if (!materialPtr) return {};
+    uint32_t nameOffset = 0;
+    CemuHooks::readMemoryBE(materialPtr + MaterialNameRelativeOffset, &nameOffset);
+    if (nameOffset == 0) return {};
+    const uint32_t nameAddress = materialPtr + MaterialNameRelativeOffset + nameOffset;
+    const char* materialName = (const char*)(CemuHooks::s_memoryBaseAddress + nameAddress);
+    return std::string_view(materialName, strnlen(materialName, 63));
+}
+
+
+struct HairMaterialRef {
+    uint32_t unitPtr;
+    uint16_t materialIdx;
+};
+
+static std::array<HairMaterialRef, 8> s_playerHairMaterials{};
+static uint32_t s_playerHairMaterialCount = 0;
+static uint32_t s_playerHairMaterialCursor = 0;
+
+static void CollectHairMaterialsFromModel(uint32_t gsysModelPtr) {
+    uint32_t unitCount = 0;
+    uint32_t unitArray = 0;
+    CemuHooks::readMemoryBE(gsysModelPtr + ModelUnitCountOffset, &unitCount);
+    CemuHooks::readMemoryBE(gsysModelPtr + ModelUnitArrayOffset, &unitArray);
+    if (unitArray == 0) return;
+
+    for (uint32_t unitIdx = 0; unitIdx < unitCount; unitIdx++) {
+        uint32_t unitHolder = 0;
+        CemuHooks::readMemoryBE(unitArray + unitIdx * 4, &unitHolder);
+        if (unitHolder == 0) continue;
+        uint32_t unitPtr = 0;
+        CemuHooks::readMemoryBE(unitHolder, &unitPtr);
+        if (unitPtr == 0) continue;
+
+        uint16_t materialCount = 0;
+        uint32_t materialArray = 0;
+        CemuHooks::readMemoryBE(unitPtr + ModelUnitMaterialCountOffset, &materialCount);
+        CemuHooks::readMemoryBE(unitPtr + ModelUnitMaterialArrayOffset, &materialArray);
+        if (materialArray == 0) continue;
+
+        for (uint16_t materialIdx = 0; materialIdx < materialCount; materialIdx++) {
+            if (!GetModelUnitMaterialName(materialArray, materialIdx).starts_with("Mt_Hair")) continue;
+            if (s_playerHairMaterialCount >= s_playerHairMaterials.size()) return;
+            s_playerHairMaterials[s_playerHairMaterialCount++] = { unitPtr, materialIdx };
+        }
+    }
+}
+
+static void CollectHairMaterialsFromActor(uint32_t actorPtr) {
+    uint32_t gsysModelPtr = 0;
+    CemuHooks::readMemoryBE(actorPtr + ActorGsysModelOffset, &gsysModelPtr);
+    if (gsysModelPtr == 0) return;
+    CollectHairMaterialsFromModel(gsysModelPtr);
+}
+
+static uint32_t ResolveBaseProcLinkActor(uint32_t baseProcLinkAddress) {
+    BaseProcLink link = {};
+    CemuHooks::readMemory(baseProcLinkAddress, &link);
+    const uint32_t linkDataPtr = link.baseProcLinkData.getLE();
+    if (linkDataPtr == 0) return 0;
+
+    BaseProcLinkData linkData = {};
+    CemuHooks::readMemory(linkDataPtr, &linkData);
+    if (linkData.id.getLE() != link.id.getLE()) return 0;
+    return linkData.actor.getLE();
+}
+
+static void RefreshPlayerHairMaterials() {
+    s_playerHairMaterialCount = 0;
+
+    const uint32_t playerActorPtr = CemuHooks::s_playerAddress;
+    if (playerActorPtr == 0) return;
+
+    const uint32_t headArmorLinkAddress = playerActorPtr + offsetof(Player, armors) + offsetof(PlayerArmors, armorHead);
+    const uint32_t headArmorActorPtr = ResolveBaseProcLinkActor(headArmorLinkAddress);
+    if (headArmorActorPtr == 0) return;
+    CollectHairMaterialsFromActor(headArmorActorPtr);
+}
+
+static void SubmitHairMaterialVisibility(PPCInterpreter_t* hCPU, bool hideHair) {
+    RefreshPlayerHairMaterials();
+    if (s_playerHairMaterialCount == 0) return;
+
+    const HairMaterialRef& hairMaterial = s_playerHairMaterials[s_playerHairMaterialCursor++ % s_playerHairMaterialCount];
+    hCPU->gpr[9] = hairMaterial.unitPtr;
+    hCPU->gpr[10] = hairMaterial.materialIdx;
+    hCPU->gpr[11] = hideHair ? 0 : 1;
+}
+
 static Skeleton s_skeleton;
 static bool s_skeletonParsed = false;
 static glm::vec3 s_manualBodyOffset = glm::vec3(0.0f, 0.0f, -0.075f);
@@ -349,6 +449,10 @@ static float GetBowDrawSnapWeight() {
 
     const float weight = s_bowPull.ratio;
     return weight * weight * (3.0f - 2.0f * weight);
+}
+
+float CemuHooks::GetBowDrawAmount() {
+    return s_bowPull.valid ? glm::clamp(s_bowPull.ratio, 0.0f, 1.0f) : 0.0f;
 }
 
 static glm::mat4 BlendTransforms(const glm::mat4& fromMtx, const glm::mat4& toMtx, float weight) {
@@ -475,6 +579,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
     hCPU->gpr[7] = 0;
     hCPU->gpr[8] = 0;
+    hCPU->gpr[9] = 0;
 
     const uint32_t gsysModelPtr = hCPU->gpr[3];
     const uint32_t matrixPtr = hCPU->gpr[4];
@@ -521,6 +626,11 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     if (isThirdPerson) {
         // wrist is game-animated in third person
         s_lastAppliedRightWristRotValid = false;
+        if (isFaceMaterialTriggerBone(boneName)) {
+            hCPU->gpr[7] = 1;
+            hCPU->gpr[8] = 0;
+            SubmitHairMaterialVisibility(hCPU, false);
+        }
         if (isFaceBone(boneName)) {
             setMemory(scalePtr, glm::fvec3(1.0f));
         }
@@ -530,6 +640,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
     if (isFaceMaterialTriggerBone(boneName)) {
         hCPU->gpr[7] = 1;
         hCPU->gpr[8] = 1;
+        SubmitHairMaterialVisibility(hCPU, true);
     }
 
     if (isFaceBone(boneName)) {

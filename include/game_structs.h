@@ -303,11 +303,6 @@ struct PlayerBase : PlayerOrEnemy {
 static_assert(offsetof(PlayerBase, moveBitFlags) == 0x8DC, "Player.float834 offset mismatch");
 static_assert(sizeof(PlayerBase) == 0x12A8, "PlayerBase size mismatch");
 
-struct Player : PlayerBase {
-    PADDED_BYTES(0x12A8, 0x2524);
-};
-static_assert(sizeof(Player) == 0x2528, "Player size mismatch");
-
 struct BaseProcLink {
     BEType<uint32_t> baseProcLinkData;
     BEType<uint32_t> id;
@@ -317,6 +312,47 @@ struct BaseProcLink {
 static_assert(offsetof(BaseProcLink, id) == 0x4, "BaseProcLink.id offset mismatch");
 static_assert(offsetof(BaseProcLink, acquired) == 0x8, "BaseProcLink.acquired offset mismatch");
 static_assert(sizeof(BaseProcLink) == 0xC, "BaseProcLink size mismatch");
+
+struct BaseProcLinkData {
+    uint8_t criticalSection[0x3C];
+    BEType<uint32_t> id;
+    BEType<uint32_t> actor;
+    BEType<uint32_t> refCount;
+};
+static_assert(offsetof(BaseProcLinkData, id) == 0x3C, "BaseProcLinkData.id offset mismatch");
+static_assert(offsetof(BaseProcLinkData, actor) == 0x40, "BaseProcLinkData.actor offset mismatch");
+static_assert(sizeof(BaseProcLinkData) == 0x48, "BaseProcLinkData size mismatch");
+
+struct BaseProcHandle {
+    BEType<uint32_t> unit;
+    BEType<uint8_t> failed;
+    uint8_t padding5[3];
+};
+static_assert(sizeof(BaseProcHandle) == 0x8, "BaseProcHandle size mismatch");
+
+struct PlayerArmors {
+    BEType<uint32_t> vtable;
+    BEType<uint32_t> unk_04;
+    BaseProcLink armorHead;
+    BaseProcLink armorBody;
+    BaseProcLink armorLower;
+    BaseProcLink armorExtra[3];
+    BaseProcHandle creationHandles[6];
+    PADDED_BYTES(0x80, 0xAC);
+    BEType<uint32_t> owner;
+    PADDED_BYTES(0xB4, 0xE4);
+};
+static_assert(offsetof(PlayerArmors, armorHead) == 0x08, "PlayerArmors.armorHead offset mismatch");
+static_assert(offsetof(PlayerArmors, owner) == 0xB0, "PlayerArmors.owner offset mismatch");
+static_assert(sizeof(PlayerArmors) == 0xE8, "PlayerArmors size mismatch");
+
+struct Player : PlayerBase {
+    PADDED_BYTES(0x12A8, 0x1D90);
+    PlayerArmors armors;
+    PADDED_BYTES(0x1E7C, 0x2524);
+};
+static_assert(offsetof(Player, armors) == 0x1D94, "Player.armors offset mismatch");
+static_assert(sizeof(Player) == 0x2528, "Player size mismatch");
 
 struct WeaponBase : ActorWiiU {
     PADDED_BYTES(0x53C, 0x574);

@@ -53,6 +53,7 @@ static const char* GetLogTypeName(LogType type) {
         case PPC: return "PPC";
         case XR_DEBUGUTILS: return "XR";
         case ARROW_SHOT_CAPTURE: return "ARROW";
+        case ROOMSCALE: return "ROOMSCALE";
         case INFO: return "INFO";
         case WARNING: return "WARN";
         case ERROR: return "ERROR";

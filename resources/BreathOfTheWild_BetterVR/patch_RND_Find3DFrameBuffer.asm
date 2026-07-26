@@ -4,9 +4,9 @@ moduleMatches = 0x6267BFD0
 .origin = codecave
 
 str_printClear3DBuffer_left:
-.string "[PPC] Clearing both 3D buffers with left eye"
+.string "Clearing both 3D buffers with left eye"
 str_printClear3DBuffer_right:
-.string "[PPC] Clearing both 3D buffers with right eye"
+.string "Clearing both 3D buffers with right eye"
 
 magic3DClearingValues:
 .float (0.0 / 32.0)

@@ -1006,7 +1006,7 @@ void CemuHooks::hook_ConsumeRoomscaleRaycast(PPCInterpreter_t* hCPU) {
 #define LOG_PLAYER_BODY(...)                     \
     do {                                         \
         if (GameUtils::IsTrackedPlayerBody(hCPU->gpr[3])) { \
-            Log::print<PPC>(__VA_ARGS__);        \
+            Log::print<ROOMSCALE>(__VA_ARGS__);        \
         }                                        \
     } while (0)
 

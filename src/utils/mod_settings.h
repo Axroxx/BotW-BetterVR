@@ -571,6 +571,7 @@ struct ModSettings {
     BoolSetting logPpc{ "LogPpc", true, Log::SetCategory<PPC> };
     BoolSetting logXrDebugUtils{ "LogXrDebugUtils", false, Log::SetCategory<XR_DEBUGUTILS> };
     BoolSetting logArrowShotCapture{ "LogArrowShotCapture", false, Log::SetCategory<ARROW_SHOT_CAPTURE> };
+    BoolSetting logRoomscale{ "LogRoomscale", false, Log::SetCategory<ROOMSCALE> };
     BoolSetting logVerbose{ "LogVerbose", false, Log::SetCategory<VERBOSE> };
     BoolSetting logTimestamps{ "LogTimestamps", true, &Log::SetShowTimestamps };
     BoolSetting logThreadIds{ "LogThreadIds", false, &Log::SetShowThreadIds };

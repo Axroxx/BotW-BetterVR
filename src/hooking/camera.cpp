@@ -527,7 +527,7 @@ void CemuHooks::hook_FixStaminaGaugeScreenPosition(PPCInterpreter_t* hCPU) {
     BEVec3 playerPosToCameraPos;
     readMemory(hCPU->gpr[5], &playerPosToCameraPos);
 
-    Log::print<PPC>("Fixing stamina gauge position (oldPos = {}, playerPosToCameraPos = {})", staminaGauge2DPos.getLE(), playerPosToCameraPos);
+    //Log::print<PPC>("Fixing stamina gauge position (oldPos = {}, playerPosToCameraPos = {})", staminaGauge2DPos.getLE(), playerPosToCameraPos);
 
     staminaGauge2DPos = BEVec2{ -482.0f, +170.0f }; // nested under hearts
     //staminaGauge2DPos = BEVec2{ 380.0f, 300.0f }; // above the status bars but at the top of the screen
@@ -888,7 +888,7 @@ void CemuHooks::hook_CheckIfCameraCanSeePos(PPCInterpreter_t* hCPU) {
         }
     }
 
-    Log::print<PPC>("Checking visibility of {} (rad = {}, near = {}, far = {}): {}", center, radius, nearClip, farClip, visible ? "visible" : "invisible");
+    //Log::print<PPC>("Checking visibility of {} (rad = {}, near = {}, far = {}): {}", center, radius, nearClip, farClip, visible ? "visible" : "invisible");
 
     hCPU->gpr[3] = visible ? 1 : 0;
 }

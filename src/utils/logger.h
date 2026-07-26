@@ -227,6 +227,7 @@ enum class LogType {
     PPC,
     XR_DEBUGUTILS,
     ARROW_SHOT_CAPTURE,
+    ROOMSCALE,
 
     // generic types
     INFO,

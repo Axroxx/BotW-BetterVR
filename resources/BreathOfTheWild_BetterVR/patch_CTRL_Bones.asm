@@ -5,6 +5,7 @@ moduleMatches = 0x6267BFD0
 
 ModelUnitVtableOffset = 0x74
 ModelUnitGetMaterialNumVtableOffset = 0xBC
+ModelUnitSetMaterialVisibleVtableOffset = 0x1B4
 gsys_ModelUnit_setXluAlpha = 0x039E4E08
 
 0x03C6FE5C = copyMatrix34:
@@ -71,12 +72,28 @@ mr r6, r27
 cmpwi r7, 0
 beq custom_gsys_ModelUnit_getBoneLocalMatrix_Restore
 
+cmpwi r9, 0
+beq custom_gsys_ModelUnit_getBoneLocalMatrix_HairDone
+stw r8, 0x24(r1)
+mr r3, r9
+mr r4, r10
+mr r5, r11
+lwz r12, ModelUnitVtableOffset(r3)
+lwz r12, ModelUnitSetMaterialVisibleVtableOffset(r12)
+mtctr r12
+bctrl
+lwz r8, 0x24(r1)
+
+custom_gsys_ModelUnit_getBoneLocalMatrix_HairDone:
 lis r12, player_face_model_unit@ha
 addi r12, r12, player_face_model_unit@l
 stw r29, 0(r12)
 lis r12, hide_face_materials@ha
 addi r12, r12, hide_face_materials@l
 stw r8, 0(r12)
+
+cmpwi r8, 0
+beq custom_gsys_ModelUnit_getBoneLocalMatrix_Restore
 
 mr r3, r29
 lwz r12, ModelUnitVtableOffset(r3)
@@ -85,8 +102,6 @@ mtctr r12
 bctrl
 mr r28, r3
 
-cmpwi r8, 0
-beq custom_gsys_ModelUnit_getBoneLocalMatrix_Restore
 lis r30, material_alpha_zero@ha
 addi r30, r30, material_alpha_zero@l
 b custom_gsys_ModelUnit_getBoneLocalMatrix_Apply

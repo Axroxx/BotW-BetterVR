@@ -15,9 +15,9 @@ magic2DColorValue_cntr1:
 .float 1.0
 
 str_printClear2DColorBuffer_left:
-.string "[PPC] Clearing 2D color buffer with left eye"
+.string "Clearing 2D color buffer with left eye"
 str_printClear2DColorBuffer_right:
-.string "[PPC] Clearing 2D color buffer with right eye"
+.string "Clearing 2D color buffer with right eye"
 
 clear2DColorBuffer:
 mflr r5
