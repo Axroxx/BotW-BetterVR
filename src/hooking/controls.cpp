@@ -548,15 +548,20 @@ void processLeftHandInGameInput(
     else
         gameState.left_hand_position_stored = false;
 
-    if (isHandOverRightWaistSlot(leftGesture)) {
-        if (isGrabPressedLong) {
-            rumbleMgr->enqueueInputsRumbleCommand(leftRumbleFall);
-            inputs.inGame.drop_weapon[0] = true;
-            gameState.prevent_grab_inputs = true;
-            gameState.prevent_grab_time = now;
-        }
-        return;
-    }
+    // Left hand item drop broken rn, makes the game thinks link is empty handed in right hand too.
+    // Waiting for a fix before uncommenting
+    //if (isHandOverRightWaistSlot(leftGesture))
+    //{
+    //    if (isCurrentGrabPressed)
+    //        rumbleMgr->enqueueInputsRumbleCommand(grabSlotRumble);
+    //    //Handle drop action
+    //    if (isGrabPressedLong) {
+    //        inputs.inGame.drop_weapon[0] = true;
+    //        gameState.prevent_grab_inputs = true;
+    //        gameState.prevent_grab_time = now;
+    //    }
+    //    return;
+    //}
     
     if (isGrabPressed) {
         // Handle grab action. is_riding_mount check added to prevent conflict with master cycle brake function

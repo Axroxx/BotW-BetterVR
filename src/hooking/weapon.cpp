@@ -193,7 +193,7 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
     // r9 returns 1 if the weapon is modified
     // r10 holds the camera pointer
     // r11 returns 1 when the weapon should be dropped
-    // r13 returns the weapon's native ActorWeapons category for that drop
+    // r13 returns the weapon actor to drop, whose equip slot the patch resolves itself
 
     hCPU->gpr[9] = 0; // this is used to indicate whether the weapon was modified
     hCPU->gpr[11] = 0; // this is used to drop the weapon if the grip button is pressed
@@ -321,17 +321,10 @@ void CemuHooks::hook_ChangeWeaponMtx(PPCInterpreter_t* hCPU) {
         auto dropSide = input.inGame.drop_weapon[side];
 
         if (input.shared.in_game && dropSide && isDroppable(targetActor.name.getLE())) {
-            const int32_t activeCategory = targetActor.activeActorWeaponsCategory.getLE();
-            if (activeCategory < 0 || activeCategory >= (int32_t)ActorWeapons::CategoryCount) {
-                Log::print<WARNING>("Refusing to drop weapon {} from {} hand: invalid ActorWeapons category {}", targetActor.name.getLE().c_str(), side == OpenXR::EyeSide::LEFT ? "left" : "right", activeCategory);
-                hCPU->gpr[9] = 1;
-                return;
-            }
-
-            Log::print<INFO>("Dropping weapon {} with type {} and ActorWeapons category {} from {} hand", targetActor.name.getLE().c_str(), (uint32_t)targetActor.type.getLE(), activeCategory, side == OpenXR::EyeSide::LEFT ? "left" : "right");
+            Log::print<INFO>("Dropping weapon {} with type of {} from the {} hand due to long press on right waist body slot", targetActor.name.getLE().c_str(), (uint32_t)targetActor.type.getLE(), isLeftHandWeapon ? "left" : "right");
             hCPU->gpr[11] = 1;
             hCPU->gpr[9] = 1;
-            hCPU->gpr[13] = (uint32_t)activeCategory; // ActorWeapons category, not the physical hand side.
+            hCPU->gpr[13] = targetActorPtr; // the patch matches this against every equip slot to find the one to drop
             return;
         }
 

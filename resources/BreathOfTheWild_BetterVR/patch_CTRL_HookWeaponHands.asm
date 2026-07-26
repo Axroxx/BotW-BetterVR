@@ -4,7 +4,8 @@ moduleMatches = 0x6267BFD0
 .origin = codecave
 
 0x020081AC = PlayerOrEnemy__dropWeapon:
-0x033BCD9C = ActorWeapons__resetBaseProc:
+0x033BCCD8 = ActorWeapons__getEquippedWeapon:
+0x033BD09C = ActorWeapons__dropWeapon:
 
 dropPosition:
 .float 0.0
@@ -42,7 +43,7 @@ lis r3, Camera__sInstance@ha
 lwz r3, Camera__sInstance@l(r3)
 bctrl ; bl Camera__getLookAtCamera
 mr. r10, r3 ; move camera to r10
-beq noChangeWeaponMtx
+beq noWeaponDrop ; without a camera the hook never runs, so r11 holds no drop request
 
 ; call C++ code to change the weapon mtx to the hand mtx
 lwz r3, 0x1C(r1) ; the source actor
@@ -53,7 +54,7 @@ addi r7, r31, 0x3C ; the mtx of the item supposedly
 lwz r8, 0x0C(r1) ; the target actor
 li r13, 0
 bl import.coreinit.hook_ChangeWeaponMtx
-stw r13, 0x3C(r1) ; store the native ActorWeapons category for an optional drop
+stw r13, 0x3C(r1) ; store the Weapon* that should be dropped
 
 cmpwi r9, 0
 beq noChangeWeaponMtx
@@ -70,31 +71,61 @@ cmpwi r11, 0
 beq noWeaponDrop
 
 
+; 0x3C(r1) holds the Weapon* the C++ hook wants dropped. Don't drop it directly: ask the
+; game which equip slot actually holds that actor, then let ActorWeapons::dropWeapon do the
+; drop and the matching BaseProcLink reset together. Doing those two halves by hand is what
+; let them target different slots, which left one link pointing at a torn-down proc.
 dropWeapon:
-lwz r3, 0x0C(r1)
-lwz r3, 0xE8(r3)
-lwz r3, 0x57C(r3)
-mtctr r3
-li r5, 0 ; spin-y drop caused by electricity
-li r6, 0 ; also kinda spin-y
-li r7, 0 ; this is some pointer?
-li r8, 0 ; unsure
-lis r4, dropPosition@ha
-addi r4, r4, dropPosition@l
-lwz r3, 0x0C(r1) ; r3 = Weapon*
-bctrl ; call Weapon::m_174_dropPos
+lwz r13, 0x38(r1) ; restore the small data area base before re-entering game code
+lwz r0, 0x3C(r1)
+cmpwi r0, 0
+beq noWeaponDrop
+
 lwz r3, 0x1C(r1) ; r3 = Actor*
-lwz r3, 0xE8(r3)
-lwz r3, 0x314(r3)
-mtctr r3
-lwz r3, 0x1C(r1) ; r3 = Actor*
-bctrl ; call PlayerOrEnemy::m_97_getWeapons
-; r3 now contains the ActorWeapons*
-lis r12, ActorWeapons__resetBaseProc@ha
-addi r12, r12, ActorWeapons__resetBaseProc@l
+lwz r12, 0xE8(r3)
+lwz r12, 0x314(r12)
 mtctr r12
-lwz r4, 0x3C(r1) ; r4 = native ActorWeapons category from Weapon+0x6A4
-bctrl ; call ActorWeapons::resetBaseProc
+bctrl ; call PlayerOrEnemy::m_97_getWeapons
+cmpwi r3, 0
+beq noWeaponDrop
+stw r3, 0x40(r1) ; the ActorWeapons*
+li r0, 0
+stw r0, 0x44(r1) ; the equip slot being tested
+
+findWeaponSlot:
+lis r12, ActorWeapons__getEquippedWeapon@ha
+addi r12, r12, ActorWeapons__getEquippedWeapon@l
+mtctr r12
+lwz r3, 0x40(r1) ; r3 = ActorWeapons*
+lwz r4, 0x44(r1) ; r4 = slot idx
+bctrl ; call ActorWeapons::getEquippedWeapon, which only returns procs that are still calcing
+cmpwi r3, 0
+beq nextWeaponSlot
+lwz r0, 0x3C(r1)
+cmpw r3, r0
+beq foundWeaponSlot
+
+nextWeaponSlot:
+lwz r0, 0x44(r1)
+addi r0, r0, 1
+stw r0, 0x44(r1)
+cmpwi r0, 6
+blt findWeaponSlot
+b noWeaponDrop ; the held actor isn't in any equip slot, so leave it alone entirely
+
+foundWeaponSlot:
+lis r12, ActorWeapons__dropWeapon@ha
+addi r12, r12, ActorWeapons__dropWeapon@l
+mtctr r12
+lwz r3, 0x40(r1) ; r3 = ActorWeapons*
+lwz r4, 0x44(r1) ; r4 = the slot that holds the weapon
+lis r5, dropPosition@ha
+addi r5, r5, dropPosition@l
+li r6, 0 ; spin-y drop caused by electricity
+li r7, 0 ; also kinda spin-y
+li r8, 0 ; this is some pointer?
+li r9, 0 ; broke
+bctrl ; call ActorWeapons::dropWeapon
 
 noWeaponDrop:
 lwz r3, 0x08(r1)
@@ -176,8 +207,6 @@ blr
 
 
 ; PlayerOrEnemy__dropWeapon
-0x033BD09C = ActorWeapons__dropWeapon:
-
 custom_PlayerOrEnemy__dropWeapon:
 stwu r1, -0x20(r1)
 stmw r26, 8(r1)
