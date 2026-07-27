@@ -46,6 +46,7 @@ static std::optional<XrFovf> GetGameProjectionFOV(OpenXR::EyeSide side, const BE
 
 
 float hardcodedSwimOffset = 0.0f;
+float hardcodedSwimHeight = 1.73f;
 float hardcodedRidingOffset = 0.65f;
 float hardcodedCrouchOffset = 0.3f;
 
@@ -203,6 +204,33 @@ static bool TryUpdateGameplayCameraTarget(const glm::fvec3& cameraPos, const glm
     return true;
 }
 
+// the two targets only disagree while swimming, where the rendered camera pins the eye to a fixed
+// height above the water and the reference anchor keeps following the height setting
+enum class HeightAdjustmentTarget {
+    ReferenceAnchor,
+    RenderedCamera,
+};
+
+static float ResolvePlayerHeightAdjustment(HeightAdjustmentTarget target) {
+    const float heightOffset = GetSettings().GetPlayerHeightOffset();
+
+    if (CemuHooks::IsRiding(true)) {
+        // the height setting is deliberately left out so the saddle keeps the height it had up to 0.9.15
+        return -hardcodedRidingOffset;
+    }
+    if (s_isSwimming) {
+        if (target == HeightAdjustmentTarget::RenderedCamera) {
+            if (auto* renderer = VRManager::instance().XR->GetRenderer()) {
+                if (auto middlePose = renderer->GetMiddlePose()) {
+                    return hardcodedSwimHeight - middlePose.value()[3].y;
+                }
+            }
+        }
+        return heightOffset + hardcodedSwimOffset;
+    }
+    return heightOffset - actualCrouchOffset;
+}
+
 static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
     glm::fvec3 newPos = gameplayPos;
     if (CemuHooks::IsFirstPerson()) {
@@ -210,15 +238,7 @@ static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
         CemuHooks::readMemory(CemuHooks::s_playerMtxAddress, &playerMtx);
         glm::fvec3 playerPos = playerMtx.getPos().getLE();
 
-        if (CemuHooks::IsRiding(true)) {
-            playerPos.y -= hardcodedRidingOffset + GetSettings().GetPlayerHeightOffset();
-        }
-        else if (s_isSwimming) {
-            playerPos.y += hardcodedSwimOffset + GetSettings().GetPlayerHeightOffset();
-        }
-        else {
-            playerPos.y += GetSettings().GetPlayerHeightOffset() - actualCrouchOffset;
-        }
+        playerPos.y += ResolvePlayerHeightAdjustment(HeightAdjustmentTarget::ReferenceAnchor);
 
         newPos = playerPos;
     }
@@ -362,17 +382,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         }
 
         glm::fvec3 playerPos = actor.mtx.getPos().getLE();
-
-        if (CemuHooks::IsRiding(true)) {
-            playerPos.y -= hardcodedRidingOffset + GetSettings().GetPlayerHeightOffset();
-        }
-        else if (s_isSwimming) {
-            float playerHeight = VRManager::instance().XR->GetRenderer()->GetMiddlePose().value()[3].y;
-            playerPos.y += 1.73f - playerHeight;
-        }
-        else {
-            playerPos.y += GetSettings().GetPlayerHeightOffset() - actualCrouchOffset;
-        }
+        playerPos.y += ResolvePlayerHeightAdjustment(HeightAdjustmentTarget::RenderedCamera);
 
 
         if (s_isLadderClimbing > 0) {
