@@ -117,7 +117,7 @@ jobs:
           }
 
       - name: Upload launcher exe
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BetterVR_Launcher
           path: Cemu/BetterVR_Launcher.exe
