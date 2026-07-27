@@ -451,10 +451,6 @@ static float GetBowDrawSnapWeight() {
     return weight * weight * (3.0f - 2.0f * weight);
 }
 
-float CemuHooks::GetBowDrawAmount() {
-    return s_bowPull.valid ? glm::clamp(s_bowPull.ratio, 0.0f, 1.0f) : 0.0f;
-}
-
 static glm::mat4 BlendTransforms(const glm::mat4& fromMtx, const glm::mat4& toMtx, float weight) {
     const glm::fquat fromRot = glm::quat_cast(glm::mat3(fromMtx));
     const glm::fquat toRot = glm::quat_cast(glm::mat3(toMtx));

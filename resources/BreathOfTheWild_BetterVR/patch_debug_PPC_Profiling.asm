@@ -67,7 +67,7 @@ bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
 lwz r4, 0x0C(r1)
-lis r0, ReturnAfter_uking__frm__System__preCalc@ha
+lis r0, ReturnAfter_uking__frm__System__preCalc@h
 ori r0, r0, ReturnAfter_uking__frm__System__preCalc@l
 stw r0, 0x04(r1)
 lis r12, uking__frm__System__preCalc_continue@ha
@@ -94,7 +94,7 @@ bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
 lwz r4, 0x0C(r1)
-lis r0, ReturnAfter_uking__frm__System__calcAndRunStateMachine@ha
+lis r0, ReturnAfter_uking__frm__System__calcAndRunStateMachine@h
 ori r0, r0, ReturnAfter_uking__frm__System__calcAndRunStateMachine@l
 stwu r1, -0x18(r1)
 lis r12, uking__frm__System__calcAndRunStateMachine_continue@ha
@@ -123,7 +123,7 @@ bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
 lwz r4, 0x0C(r1)
-lis r0, ReturnAfter_uking__frm__System__postCalc@ha
+lis r0, ReturnAfter_uking__frm__System__postCalc@h
 ori r0, r0, ReturnAfter_uking__frm__System__postCalc@l
 stw r0, 0x04(r1)
 lis r12, uking__frm__System__postCalc_continue@ha
@@ -146,7 +146,7 @@ stw r0, 0x1C(r1)
 li r3, PPC_CalcPlacementMgr
 bla import.coreinit.hook_ProfileSectionBegin
 
-lis r0, ReturnAfter_ksys__CalcPlacementMgr@ha
+lis r0, ReturnAfter_ksys__CalcPlacementMgr@h
 ori r0, r0, ReturnAfter_ksys__CalcPlacementMgr@l
 stwu r1, -0x40(r1)
 lis r12, ksys__CalcPlacementMgr_continue@ha
@@ -199,7 +199,7 @@ stw r0, 0x1C(r1)
 li r3, PPC_ActorUpdateJobs
 bla import.coreinit.hook_ProfileSectionBegin
 
-lis r0, ReturnAfter_runActorUpdateStuff@ha
+lis r0, ReturnAfter_runActorUpdateStuff@h
 ori r0, r0, ReturnAfter_runActorUpdateStuff@l
 stwu r1, -0x10(r1)
 lis r12, runActorUpdateStuff_continue@ha
@@ -226,7 +226,7 @@ li r3, PPC_GraphicsCalc
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_gameScene__CalcGraphicsStuff@ha
+lis r0, ReturnAfter_gameScene__CalcGraphicsStuff@h
 ori r0, r0, ReturnAfter_gameScene__CalcGraphicsStuff@l
 stwu r1, -0x18(r1)
 lis r12, gameScene__CalcGraphicsStuff_continue@ha
@@ -313,7 +313,7 @@ li r3, PPC_SystemTaskDrawTV
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_gsys__SystemTask__drawTV@ha
+lis r0, ReturnAfter_gsys__SystemTask__drawTV@h
 ori r0, r0, ReturnAfter_gsys__SystemTask__drawTV@l
 stwu r1, -0x48(r1)
 lis r12, gsys__SystemTask__drawTV_continue@ha
@@ -340,7 +340,7 @@ li r3, PPC_SystemTaskDrawDRC
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_gsys__SystemTask__drawDRC@ha
+lis r0, ReturnAfter_gsys__SystemTask__drawDRC@h
 ori r0, r0, ReturnAfter_gsys__SystemTask__drawDRC@l
 stwu r1, -0x30(r1)
 lis r12, gsys__SystemTask__drawDRC_continue@ha
@@ -367,7 +367,7 @@ li r3, PPC_SystemTaskPostDrawTV
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_gsys__SystemTask__postDrawTV@ha
+lis r0, ReturnAfter_gsys__SystemTask__postDrawTV@h
 ori r0, r0, ReturnAfter_gsys__SystemTask__postDrawTV@l
 stwu r1, -0x28(r1)
 lis r12, gsys__SystemTask__postDrawTV_continue@ha
@@ -394,7 +394,7 @@ li r3, PPC_SystemTaskPostDrawDRC
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_gsys__SystemTask__postDrawDRC@ha
+lis r0, ReturnAfter_gsys__SystemTask__postDrawDRC@h
 ori r0, r0, ReturnAfter_gsys__SystemTask__postDrawDRC@l
 stwu r1, -0x28(r1)
 lis r12, gsys__SystemTask__postDrawDRC_continue@ha
@@ -451,7 +451,7 @@ li r3, PPC_ActorJob0_2
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_Actor__job0_2@ha
+lis r0, ReturnAfter_Actor__job0_2@h
 ori r0, r0, ReturnAfter_Actor__job0_2@l
 stwu r1, -0x10(r1)
 lis r12, real_actor_job0_2_continue@ha
@@ -478,7 +478,7 @@ li r3, PPC_ActorJob1_1
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_Actor__job1_1@ha
+lis r0, ReturnAfter_Actor__job1_1@h
 ori r0, r0, ReturnAfter_Actor__job1_1@l
 stwu r1, -0x20(r1)
 lis r12, real_actor_job1_1_continue@ha
@@ -505,7 +505,7 @@ li r3, PPC_ActorJob1_2
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_Actor__job1_2@ha
+lis r0, ReturnAfter_Actor__job1_2@h
 ori r0, r0, ReturnAfter_Actor__job1_2@l
 stwu r1, -0x10(r1)
 lis r12, real_actor_job1_2_continue@ha
@@ -593,7 +593,7 @@ li r3, PPC_ActorJob4
 bla import.coreinit.hook_ProfileSectionBegin
 
 lwz r3, 0x08(r1)
-lis r0, ReturnAfter_Actor__job4@ha
+lis r0, ReturnAfter_Actor__job4@h
 ori r0, r0, ReturnAfter_Actor__job4@l
 stwu r1, -0x10(r1)
 lis r12, real_actor_job4_continue@ha

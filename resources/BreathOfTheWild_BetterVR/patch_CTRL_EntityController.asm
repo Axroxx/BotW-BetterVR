@@ -130,8 +130,8 @@ beq ApplyRoomscaleAfterPlayerVelocity_SweepCleanupCapsule
 addi r3, r1, RoomscaleIterator
 addi r4, r6, 0x34
 bl ContactPointInfoIterator_ctor
-lis r0, ContactPointInfoIterator_HitPosVtable@ha
-addi r0, r0, ContactPointInfoIterator_HitPosVtable@l
+lis r0, ContactPointInfoIterator_HitPosVtable@h
+ori r0, r0, ContactPointInfoIterator_HitPosVtable@l
 stw r0, RoomscaleIterator + 0x10(r1)
 
 lwz r0, RoomscaleIterator + 0x00(r1)
@@ -232,7 +232,7 @@ addi r4, r1, RoomscaleScratch
 li r5, 1
 mflr r12
 stw r12, RoomscaleSavedLR(r1)
-lis r0, ReturnAfterOriginalSetRigidBodyTransformSecondary@ha
+lis r0, ReturnAfterOriginalSetRigidBodyTransformSecondary@h
 ori r0, r0, ReturnAfterOriginalSetRigidBodyTransformSecondary@l
 lis r12, OriginalSetRigidBodyTransform@ha
 addi r12, r12, OriginalSetRigidBodyTransform@l
@@ -258,7 +258,7 @@ addi r4, r1, RoomscaleScratch
 li r5, 1
 mflr r12
 stw r12, RoomscaleSavedLR(r1)
-lis r0, ReturnAfterOriginalSetRigidBodyTransformMain@ha
+lis r0, ReturnAfterOriginalSetRigidBodyTransformMain@h
 ori r0, r0, ReturnAfterOriginalSetRigidBodyTransformMain@l
 lis r12, OriginalSetRigidBodyTransform@ha
 addi r12, r12, OriginalSetRigidBodyTransform@l

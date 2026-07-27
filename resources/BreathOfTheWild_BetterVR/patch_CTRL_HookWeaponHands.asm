@@ -106,10 +106,10 @@ cmpw r3, r0
 beq foundWeaponSlot
 
 nextWeaponSlot:
-lwz r0, 0x44(r1)
-addi r0, r0, 1
-stw r0, 0x44(r1)
-cmpwi r0, 6
+lwz r4, 0x44(r1) ; not r0: addi reads rA=r0 as literal zero, so it cannot increment r0
+addi r4, r4, 1
+stw r4, 0x44(r1)
+cmpwi r4, 6
 blt findWeaponSlot
 b noWeaponDrop ; the held actor isn't in any equip slot, so leave it alone entirely
 
