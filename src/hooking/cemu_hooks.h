@@ -89,6 +89,7 @@ public:
         // Misc. Hooks
         osLib_registerHLEFunction("coreinit", "hook_OSReportToConsole", &hook_OSReportToConsole);
         osLib_registerHLEFunction("coreinit", "hook_DropWeaponLogging", &hook_DropWeaponLogging);
+        osLib_registerHLEFunction("coreinit", "hook_FindWeaponEquipSlot", &hook_FindWeaponEquipSlot);
         osLib_registerHLEFunction("coreinit", "hook_ModifyHandModelAccessSearch", &hook_ModifyHandModelAccessSearch);
         osLib_registerHLEFunction("coreinit", "hook_CreateNewScreen", &hook_CreateNewScreen);
         osLib_registerHLEFunction("coreinit", "hook_FixUIBlending", &hook_FixUIBlending);
@@ -268,6 +269,7 @@ private:
     // Misc Hooks
     static void hook_OSReportToConsole(PPCInterpreter_t* hCPU);
     static void hook_DropWeaponLogging(PPCInterpreter_t* hCPU);
+    static void hook_FindWeaponEquipSlot(PPCInterpreter_t* hCPU);
     static void hook_ModifyHandModelAccessSearch(PPCInterpreter_t* hCPU);
     static void hook_CreateNewScreen(PPCInterpreter_t* hCPU);
     static void hook_FixUIBlending(PPCInterpreter_t* hCPU);

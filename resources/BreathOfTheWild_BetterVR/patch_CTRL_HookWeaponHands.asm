@@ -4,7 +4,7 @@ moduleMatches = 0x6267BFD0
 .origin = codecave
 
 0x020081AC = PlayerOrEnemy__dropWeapon:
-0x033BCCD8 = ActorWeapons__getEquippedWeapon:
+0x033BCD9C = ActorWeapons__resetBaseProc:
 0x033BD09C = ActorWeapons__dropWeapon:
 
 dropPosition:
@@ -71,10 +71,8 @@ cmpwi r11, 0
 beq noWeaponDrop
 
 
-; 0x3C(r1) holds the Weapon* the C++ hook wants dropped. Don't drop it directly: ask the
-; game which equip slot actually holds that actor, then let ActorWeapons::dropWeapon do the
-; drop and the matching BaseProcLink reset together. Doing those two halves by hand is what
-; let them target different slots, which left one link pointing at a torn-down proc.
+; 0x3C(r1) holds the Weapon* the C++ hook wants dropped. Resolve its equip slot first, so the drop
+; and the matching BaseProcLink reset can't end up targeting different slots.
 dropWeapon:
 lwz r13, 0x38(r1) ; restore the small data area base before re-entering game code
 lwz r0, 0x3C(r1)
@@ -89,43 +87,34 @@ bctrl ; call PlayerOrEnemy::m_97_getWeapons
 cmpwi r3, 0
 beq noWeaponDrop
 stw r3, 0x40(r1) ; the ActorWeapons*
-li r0, 0
-stw r0, 0x44(r1) ; the equip slot being tested
 
-findWeaponSlot:
-lis r12, ActorWeapons__getEquippedWeapon@ha
-addi r12, r12, ActorWeapons__getEquippedWeapon@l
-mtctr r12
-lwz r3, 0x40(r1) ; r3 = ActorWeapons*
-lwz r4, 0x44(r1) ; r4 = slot idx
-bctrl ; call ActorWeapons::getEquippedWeapon, which only returns procs that are still calcing
+; ActorWeapons::getEquippedWeapon reads back empty from this thread, see hook_FindWeaponEquipSlot.
+; The hook also fills in dropPosition while it has the weapon.
+lwz r4, 0x3C(r1) ; r4 = the Weapon* to drop
+bl import.coreinit.hook_FindWeaponEquipSlot
 cmpwi r3, 0
-beq nextWeaponSlot
-lwz r0, 0x3C(r1)
-cmpw r3, r0
-beq foundWeaponSlot
+blt noWeaponDrop ; the held actor isn't in any equip slot, so leave it alone entirely
+stw r3, 0x44(r1) ; the slot that holds the weapon
 
-nextWeaponSlot:
-lwz r4, 0x44(r1) ; not r0: addi reads rA=r0 as literal zero, so it cannot increment r0
-addi r4, r4, 1
-stw r4, 0x44(r1)
-cmpwi r4, 6
-blt findWeaponSlot
-b noWeaponDrop ; the held actor isn't in any equip slot, so leave it alone entirely
+; ActorWeapons::dropWeapon opens with that same call, so do the two halves it would have done here
+lwz r3, 0x3C(r1) ; r3 = Weapon*
+lwz r12, 0xE8(r3)
+lwz r12, 0x57C(r12)
+mtctr r12
+lis r4, dropPosition@ha
+addi r4, r4, dropPosition@l
+li r5, 0 ; spin-y drop caused by electricity
+li r6, 0 ; also kinda spin-y
+li r7, 0 ; this is some pointer?
+li r8, 0 ; broke
+bctrl ; call Weapon::m_174_dropWeapon
 
-foundWeaponSlot:
-lis r12, ActorWeapons__dropWeapon@ha
-addi r12, r12, ActorWeapons__dropWeapon@l
+lis r12, ActorWeapons__resetBaseProc@ha
+addi r12, r12, ActorWeapons__resetBaseProc@l
 mtctr r12
 lwz r3, 0x40(r1) ; r3 = ActorWeapons*
-lwz r4, 0x44(r1) ; r4 = the slot that holds the weapon
-lis r5, dropPosition@ha
-addi r5, r5, dropPosition@l
-li r6, 0 ; spin-y drop caused by electricity
-li r7, 0 ; also kinda spin-y
-li r8, 0 ; this is some pointer?
-li r9, 0 ; broke
-bctrl ; call ActorWeapons::dropWeapon
+lwz r4, 0x44(r1) ; r4 = the slot that held the weapon
+bctrl ; call ActorWeapons::resetBaseProc
 
 noWeaponDrop:
 lwz r3, 0x08(r1)

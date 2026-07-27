@@ -173,6 +173,10 @@ static bool isDroppable(std::string actorName) {
     return true;
 }
 
+constexpr uint32_t ACTOR_WEAPONS_SLOT_COUNT = 6;
+constexpr uint32_t BASE_PROC_LINK_SIZE = 0x10;
+constexpr uint32_t NO_EQUIP_SLOT = 0xFFFFFFFF;
+
 constexpr uint32_t FLAG_THROWABLE = 0x00004000;
 bool ObjectCanBeThrown(uint32_t flags)
 {
@@ -530,6 +534,41 @@ void CemuHooks::hook_DropWeaponLogging(PPCInterpreter_t* hCPU) {
     uint32_t a7 = hCPU->gpr[9];
 
     Log::print<CONTROLS>("{} ({:08X}) is dropping weapon with idx={}, position={}, a4={}, a5={}, a6={}, a7={}", actorName, actorPtr, weaponIdx, position, a4, a5, a6, a7);
+}
+
+// r3 = ActorWeapons*, r4 = the Weapon* to drop. Returns the equip slot in r3, or -1 if not equipped.
+//
+// ActorWeapons::getEquippedWeapon would answer this, but it only returns a proc when
+// BaseProcMgr::isHighPriorityThread() is true, and the drop is requested from ModelBindInfo::Calc,
+// which is not one of the actor job threads, so every slot comes back empty there.
+void CemuHooks::hook_FindWeaponEquipSlot(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    const uint32_t actorWeaponsPtr = hCPU->gpr[3];
+    const uint32_t weaponPtr = hCPU->gpr[4];
+
+    hCPU->gpr[3] = NO_EQUIP_SLOT;
+    if (actorWeaponsPtr == 0 || weaponPtr == 0)
+        return;
+
+    // each link is { procSlot*, id, engagedByte, _ }, resolving to the actor in procSlot+0x40
+    for (uint32_t slot = 0; slot < ACTOR_WEAPONS_SLOT_COUNT; slot++) {
+        const uint32_t linkPtr = actorWeaponsPtr + slot * BASE_PROC_LINK_SIZE;
+        const uint32_t procSlotPtr = getMemory<uint32_t>(linkPtr).getLE();
+        const uint32_t linkId = getMemory<uint32_t>(linkPtr + 4).getLE();
+        if (procSlotPtr == 0 || linkId == 0xFFFFFFFF)
+            continue;
+        if (getMemory<uint32_t>(procSlotPtr + 0x3C).getLE() != linkId)
+            continue; // stale link, that proc slot has been reused since
+        if (getMemory<uint32_t>(procSlotPtr + 0x40).getLE() != weaponPtr)
+            continue;
+
+        hCPU->gpr[3] = slot;
+        break;
+    }
+
+    if (hCPU->gpr[3] == NO_EQUIP_SLOT)
+        Log::print<WARNING>("Not dropping weapon {:08X}: it isn't in any equip slot of ActorWeapons {:08X}", weaponPtr, actorWeaponsPtr);
 }
 
 void CemuHooks::hook_ModifyHandModelAccessSearch(PPCInterpreter_t* hCPU) {
