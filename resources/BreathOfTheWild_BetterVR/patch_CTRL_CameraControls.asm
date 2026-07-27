@@ -223,6 +223,47 @@ blr
 0x02BEF014 = bla snapTurnCameraTailAndConvert
 
 
+; ==================================================================================
+; Report the yaw delta both camera modes derive from the camera stick, so first-person's held yaw
+; can follow it instead of correcting it away every frame.
+
+; CameraChase adds the frame-scaled delta at 0x194(r1) to its yaw while in anchor mode 3
+captureCameraChaseStickYaw:
+stwu r1, -0x20(r1)
+mflr r0
+stw r0, 0x24(r1)
+
+lfs f1, 0x1B4(r1) ; the delta, 0x20 higher up than in the game's own frame
+bl import.coreinit.hook_AddGameCameraStickYaw
+
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+
+lfs f12, 0x194(r1) ; replaced instruction
+blr
+
+0x02B9C96C = bla captureCameraChaseStickYaw
+
+; CameraTail adds f28 * f24 to its yaw right after this load. Both are non-volatile and final here.
+captureCameraTailStickYaw:
+stwu r1, -0x20(r1)
+mflr r0
+stw r0, 0x24(r1)
+
+fmuls f1, f28, f24 ; the same delta the following fmadds applies
+bl import.coreinit.hook_AddGameCameraStickYaw
+
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+
+lfs f1, 0x98(r31) ; replaced instruction
+blr
+
+0x02BEEBCC = bla captureCameraTailStickYaw
+
+
 ; workaround for ladder climbing issue
 ; Always sets the ladder mode to 4 which allows pressing A to jump up ladders
 ; Sets the ladder mode to 1 when player is moving the stick downwards to allow sliding down ladders

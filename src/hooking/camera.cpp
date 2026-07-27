@@ -60,6 +60,11 @@ bool s_wasCrouching = false;
 float actualCrouchOffset = 0.0f;
 std::chrono::steady_clock::time_point crouch_state_change_time;
 
+static float s_baseYawDegrees = 0.0f;
+static bool s_hasBaseYaw = false;
+static float s_pendingGameYawCorrection = 0.0f;
+static float s_pendingGameStickYawDelta = 0.0f;
+
 static int TryConsumePendingSnapTurnDirection() {
     auto* xr = VRManager::instance().XR.get();
     if (xr == nullptr) {
@@ -122,6 +127,42 @@ static void SignalSnapTurnFade() {
     const uint64_t startNs = GetTimeStamp();
     xr->m_snapTurnFadeStartNs.store(startNs, std::memory_order_relaxed);
     xr->m_snapTurnFadeUntilNs.store(startNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnFadeDuration).count(), std::memory_order_relaxed);
+}
+
+static float YawDegreesFromRotation(const glm::fquat& rot) {
+    const glm::fquat twist = RenderUtils::swingTwistY(rot).second;
+    return NormalizeDegrees(glm::degrees(2.0f * std::atan2(twist.y, twist.w)));
+}
+
+static bool ShouldAdoptGameCameraYaw() {
+    return !s_hasBaseYaw || !CemuHooks::IsFirstPerson() || !CemuHooks::IsInGame() || CemuHooks::HasActiveCutscene();
+}
+
+static float ConsumePendingCameraYawDelta() {
+    const int32_t snapAngle = GetSettings().GetSnapTurnAngle();
+    if (snapAngle <= 0) {
+        return TryConsumePendingSmoothTurnDelta();
+    }
+
+    const int direction = TryConsumePendingSnapTurnDirection();
+    if (direction == 0) {
+        return 0.0f;
+    }
+
+    SignalSnapTurnFade();
+    return (float)direction * (float)snapAngle;
+}
+
+static float ConsumePendingGameYawCorrection() {
+    const float correction = s_pendingGameYawCorrection;
+    s_pendingGameYawCorrection = 0.0f;
+    return correction;
+}
+
+static float ConsumeGameStickYawDelta() {
+    const float delta = s_pendingGameStickYawDelta;
+    s_pendingGameStickYawDelta = 0.0f;
+    return delta;
 }
 
 static bool ApplyYawDeltaToComputedCameraPivot(PPCInterpreter_t* hCPU, float yawDeltaDegrees) {
@@ -338,6 +379,20 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
     glm::mat4 existingGameMtx = glm::lookAtRH(oldCameraPosition, oldCameraTarget, oldCameraUp);
     glm::fquat gameplayRotation = glm::quat_cast(glm::inverse(existingGameMtx));
 
+    const float gameYawDegrees = YawDegreesFromRotation(gameplayRotation);
+    const float gameStickYawDelta = ConsumeGameStickYawDelta();
+    const bool adoptGameCameraYaw = ShouldAdoptGameCameraYaw();
+    if (adoptGameCameraYaw) {
+        s_baseYawDegrees = gameYawDegrees;
+        s_hasBaseYaw = true;
+    }
+    else {
+        // follow the turn the game already applied instead of correcting it away
+        s_baseYawDegrees = NormalizeDegrees(s_baseYawDegrees + gameStickYawDelta - ConsumePendingCameraYawDelta());
+        gameplayRotation = glm::angleAxis(glm::radians(s_baseYawDegrees), glm::fvec3(0.0f, 1.0f, 0.0f));
+    }
+    s_pendingGameYawCorrection = NormalizeDegrees(gameYawDegrees - s_baseYawDegrees);
+
     s_wsCameraPosition = oldCameraPosition;
     s_wsCameraRotation = gameplayRotation;
 
@@ -358,6 +413,12 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         gameState.is_riding_mount = CemuHooks::IsRiding(false);
         gameState.is_paragliding = HAS_FLAG(moveBits, PlayerMoveBitFlags::IS_GLIDER_ACTIVE);
         VRManager::instance().XR->m_gameState.store(gameState);
+
+        //static bool s_loggedAdoptGameCameraYaw = true;
+        //if (std::abs(s_pendingGameYawCorrection) > 1.0f || adoptGameCameraYaw != s_loggedAdoptGameCameraYaw) {
+        //    Log::print<INFO>("Yaw hold: game={:.1f} held={:.1f} correction={:.1f} adopt={} climbing={}", gameYawDegrees, s_baseYawDegrees, s_pendingGameYawCorrection, adoptGameCameraYaw, gameState.is_climbing);
+        //}
+        //s_loggedAdoptGameCameraYaw = adoptGameCameraYaw;
 
         auto now = std::chrono::steady_clock::now();
         std::chrono::milliseconds crouchLerpDuration{ 150 };
@@ -463,6 +524,19 @@ void CemuHooks::hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU) {
     writeMemory(pivotPtr, &pivot);
 }
 
+// only the VR controller's stick is withheld from the game, so this is in practice the rotation a
+// real controller's right stick asked for
+void CemuHooks::hook_AddGameCameraStickYaw(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    const float yawDelta = (float)hCPU->fpr[1].fp0;
+    if (yawDelta == 0.0f || !std::isfinite(yawDelta) || ShouldAdoptGameCameraYaw()) {
+        return;
+    }
+
+    s_pendingGameStickYawDelta = NormalizeDegrees(s_pendingGameStickYawDelta + yawDelta);
+}
+
 void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
@@ -470,16 +544,7 @@ void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    const int32_t snapAngle = GetSettings().GetSnapTurnAngle();
-    if (snapAngle > 0) {
-        const int direction = TryConsumePendingSnapTurnDirection();
-        if (direction != 0 && ApplyYawDeltaToComputedCameraPivot(hCPU, (float)direction * (float)snapAngle)) {
-            SignalSnapTurnFade();
-        }
-    } else {
-        const float smoothDelta = TryConsumePendingSmoothTurnDelta();
-        ApplyYawDeltaToComputedCameraPivot(hCPU, smoothDelta);
-    }
+    ApplyYawDeltaToComputedCameraPivot(hCPU, ConsumePendingGameYawCorrection());
 }
 
 static bool ApplyYawDeltaToCameraTailPivot(PPCInterpreter_t* hCPU, float yawDeltaDegrees) {
@@ -513,16 +578,7 @@ void CemuHooks::hook_SnapTurnCameraTailPivot(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    const int32_t snapAngle = GetSettings().GetSnapTurnAngle();
-    if (snapAngle > 0) {
-        const int direction = TryConsumePendingSnapTurnDirection();
-        if (direction != 0 && ApplyYawDeltaToCameraTailPivot(hCPU, (float)direction * (float)snapAngle)) {
-            SignalSnapTurnFade();
-        }
-    } else {
-        const float smoothDelta = TryConsumePendingSmoothTurnDelta();
-        ApplyYawDeltaToCameraTailPivot(hCPU, smoothDelta);
-    }
+    ApplyYawDeltaToCameraTailPivot(hCPU, ConsumePendingGameYawCorrection());
 }
 
 void CemuHooks::hook_FixStaminaGaugeScreenPosition(PPCInterpreter_t* hCPU) {
