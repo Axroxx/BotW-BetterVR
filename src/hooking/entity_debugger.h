@@ -46,6 +46,7 @@ public:
     glm::fvec3 m_playerPos = {};
 
 private:
+    std::atomic_bool m_logAnimationSlots = false;
     std::string m_filter = std::string(256, '\0');
     bool m_showWorldLabels = false;
     float m_worldAABBMinDistance = 1.0f;

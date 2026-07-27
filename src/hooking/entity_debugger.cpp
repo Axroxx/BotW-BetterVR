@@ -4,6 +4,7 @@
 #include "utils/mod_settings.h"
 
 #include "utils/debug_draw.h"
+#include "utils/game_utils.h"
 
 std::mutex g_actorListMutex;
 std::unordered_map<uint32_t, std::pair<std::string, uint32_t>> s_knownActors;
@@ -228,6 +229,8 @@ void EntityDebugger::UpdateEntityMemory() {
         }
     }
 
+    const bool logAnimationSlots = m_logAnimationSlots.load(std::memory_order_relaxed);
+
     // add actors that aren't in the overlay already
     for (auto& [actorId, actorInfo] : s_knownActors) {
         uint32_t actorPtr = actorInfo.second;
@@ -320,6 +323,26 @@ void EntityDebugger::UpdateEntityMemory() {
         addField.operator()<uint32_t>("flags", offsetof(ActorWiiU, flags));
         addField.operator()<uint32_t>("flags3", offsetof(ActorWiiU, flags3));
 
+        uint32_t asListPtr = logAnimationSlots ? CemuHooks::getMemory<BEType<uint32_t>>(actorPtr + offsetof(ActorWiiU, asListPtr)).getLE() : 0;
+        if (asListPtr != 0) {
+            std::string animations;
+            for (const auto& slot : GameUtils::GetAnimationSlots(asListPtr)) {
+                if (!animations.empty()) {
+                    animations += '\n';
+                }
+                std::format_to(std::back_inserter(animations), "[{}][{}] {} ({:08X})", slot.groupIndex, slot.slotIndex, slot.name, slot.slotPtr);
+            }
+
+            if (animations.empty()) {
+                animations = "<none assigned>";
+            }
+            else {
+                Log::print<INFO>("ASList animations of {} (ASList at {:08X}):\n{}", actorName, asListPtr, animations);
+            }
+
+            AddOrUpdateEntity(actorId, actorName, "ASList::getAnimation", asListPtr, std::move(animations), true);
+        }
+
         addField.operator()<uint32_t>("hashId", offsetof(ActorWiiU, hashId));
         addMemoryRange("physics", actorPtr + offsetof(ActorWiiU, actorPhysicsPtr), 0xE0);
         addMemoryRange("actorX6A0", actorPtr + offsetof(ActorWiiU, actorX6A0Ptr), 0x6C);
@@ -408,6 +431,11 @@ void EntityDebugger::DrawEntityInspectorContent() {
     static char buf[256];
     ImGui::InputText("Entity Filter", buf, std::size(buf));
     m_filter = buf;
+
+    bool logAnimationSlots = m_logAnimationSlots.load(std::memory_order_relaxed);
+    if (ImGui::Checkbox("Log ASList Animations", &logAnimationSlots)) {
+        m_logAnimationSlots.store(logAnimationSlots, std::memory_order_relaxed);
+    }
 
     // display entities
     if (ImGui::CollapsingHeader("Entity List")) {
@@ -525,8 +553,7 @@ void EntityDebugger::DrawEntityInspectorContent() {
                         }
                     }
                     else if constexpr (std::is_same_v<T, std::string>) {
-                        std::string val = std::get<std::string>(value.value);
-                        ImGui::Text(val.c_str());
+                        ImGui::TextUnformatted(std::format("{}: {}", value.value_name, std::get<std::string>(value.value)).c_str());
                     }
                 },
                            value.value);

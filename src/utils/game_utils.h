@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "hooking/cemu_hooks.h"
 
@@ -79,7 +80,7 @@ public:
 
             uint32_t entryPtr = entriesPtr + static_cast<uint32_t>(entryIndex) * kActionEntrySize;
             uint32_t namePtr = CemuHooks::getMemory<BEType<uint32_t>>(entryPtr + kActionEntryNameOffset).getLE();
-            return ReadLikelyActionName(namePtr);
+            return ReadLikelyName(namePtr);
         };
 
         uint16_t entryIndex = static_cast<uint16_t>(definitionIdx);
@@ -89,6 +90,55 @@ public:
         }
 
         return getNameFromProgramTable(kAiProgramAIsOffset, entryIndex);
+    }
+
+    struct AnimationSlot {
+        uint32_t groupIndex;
+        uint32_t slotIndex;
+        uint32_t slotPtr;
+        std::string name;
+    };
+
+    static std::vector<AnimationSlot> GetAnimationSlots(uint32_t asListPtr) {
+        std::vector<AnimationSlot> animations;
+        if (asListPtr == 0) {
+            return animations;
+        }
+
+        sead::Buffer groups = CemuHooks::getMemory<sead::Buffer>(asListPtr + offsetof(ASListPartial, slotGroups));
+        const uint32_t groupsPtr = groups.data.getLE();
+        const int32_t groupCount = groups.size.getLE();
+        if (groupsPtr == 0) {
+            return animations;
+        }
+
+        for (int32_t groupIdx = 0; groupIdx < groupCount; groupIdx++) {
+            uint32_t groupPtr = groupsPtr + static_cast<uint32_t>(groupIdx) * sizeof(ASListSlotGroup);
+            sead::Buffer slots = CemuHooks::getMemory<sead::Buffer>(groupPtr + offsetof(ASListSlotGroup, slots));
+            const uint32_t slotsPtr = slots.data.getLE();
+            const int32_t slotCount = slots.size.getLE();
+            if (slotsPtr == 0) {
+                continue;
+            }
+
+            for (int32_t slotIdx = 0; slotIdx < slotCount; slotIdx++) {
+                uint32_t slotPtr = slotsPtr + static_cast<uint32_t>(slotIdx) * sizeof(ASListSlot);
+                ASListSlot slot = CemuHooks::getMemory<ASListSlot>(slotPtr);
+                if (slot.assignedCount.getLE() == 0 || slot.definitionPtr.getLE() == 0) {
+                    continue;
+                }
+
+                sead::SafeString name = CemuHooks::getMemory<sead::SafeString>(slot.definitionPtr.getLE() + offsetof(ASListDefinitionPartial, name));
+                std::string animationName = ReadLikelyName(name.c_str.getLE());
+                if (animationName.empty()) {
+                    continue;
+                }
+
+                animations.emplace_back(static_cast<uint32_t>(groupIdx), static_cast<uint32_t>(slotIdx), slotPtr, std::move(animationName));
+            }
+        }
+
+        return animations;
     }
 
     static bool TryReadPlayerBase(PlayerBase& player) {
@@ -137,7 +187,7 @@ public:
     }
 
 private:
-    static std::string ReadLikelyActionName(uint32_t namePtr) {
+    static std::string ReadLikelyName(uint32_t namePtr) {
         if (namePtr == 0) {
             return {};
         }

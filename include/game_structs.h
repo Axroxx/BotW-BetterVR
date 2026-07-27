@@ -41,6 +41,12 @@ namespace sead {
         BEType<uint32_t> capacity;
         BEType<uint32_t> data;
     };
+
+    struct Buffer : BETypeCompatible {
+        BEType<int32_t> size;
+        BEType<uint32_t> data;
+    };
+    static_assert(sizeof(Buffer) == 0x08, "Buffer size mismatch");
 };
 
 struct ActorPhysics {
@@ -199,7 +205,9 @@ struct ActorWiiU : BaseProc {
     BEType<ActorFlags> flags;
     BEType<ActorFlags3> flags3; // 0x370 or 880. However in IDA there's a 0xF4 offset
 
-    PADDED_BYTES(0x374, 0x39C);
+    PADDED_BYTES(0x374, 0x390);
+    BEType<uint32_t> asListPtr; // 0x394, ASListPartial
+    PADDED_BYTES(0x398, 0x39C);
     BEType<uint32_t> actorPhysicsPtr; // 0x3A0
     PADDED_BYTES(0x3A4, 0x404);
 
@@ -222,7 +230,39 @@ static_assert(offsetof(ActorWiiU, modelOpacity) == 0x33C, "ActorWiiU.modelOpacit
 static_assert(offsetof(ActorWiiU, modelOpacityRelated) == 0x340, "ActorWiiU.modelOpacityRelated offset mismatch");
 static_assert(offsetof(ActorWiiU, opacityOrDoFlushOpacityToGPU) == 0x436, "ActorWiiU.opacityOrDoFlushOpacityToGPU offset mismatch");
 static_assert(offsetof(ActorWiiU, velocity) == 0x25C, "ActorWiiU.velocity offset mismatch");
+static_assert(offsetof(ActorWiiU, asListPtr) == 0x394, "ActorWiiU.asListPtr offset mismatch");
+static_assert(offsetof(ActorWiiU, actorPhysicsPtr) == 0x3A0, "ActorWiiU.actorPhysicsPtr offset mismatch");
 static_assert(sizeof(ActorWiiU) == 0x53C, "ActorWiiU size mismatch");
+
+struct ASListDefinitionPartial {
+    BEType<uint32_t> unk_00;
+    sead::SafeString name;
+};
+static_assert(offsetof(ASListDefinitionPartial, name) == 0x04, "ASListDefinitionPartial.name offset mismatch");
+
+// definitionPtr is only meaningful while assignedCount is set
+struct ASListSlot : BETypeCompatible {
+    BEType<uint32_t> definitionPtr;
+    PADDED_BYTES(0x04, 0x08);
+    BEType<uint32_t> assignedCount;
+    PADDED_BYTES(0x10, 0x64);
+};
+static_assert(offsetof(ASListSlot, assignedCount) == 0x0C, "ASListSlot.assignedCount offset mismatch");
+static_assert(sizeof(ASListSlot) == 0x68, "ASListSlot size mismatch");
+
+struct ASListSlotGroup {
+    PADDED_BYTES(0x00, 0x14);
+    sead::Buffer slots;
+    PADDED_BYTES(0x20, 0x30);
+};
+static_assert(offsetof(ASListSlotGroup, slots) == 0x18, "ASListSlotGroup.slots offset mismatch");
+static_assert(sizeof(ASListSlotGroup) == 0x34, "ASListSlotGroup size mismatch");
+
+struct ASListPartial {
+    PADDED_BYTES(0x00, 0x90);
+    sead::Buffer slotGroups;
+};
+static_assert(offsetof(ASListPartial, slotGroups) == 0x94, "ASListPartial.slotGroups offset mismatch");
 
 struct DynamicActor : ActorWiiU {
     PADDED_BYTES(0x53C, 0x7C8);
