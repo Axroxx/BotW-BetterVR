@@ -49,6 +49,7 @@ float hardcodedSwimOffset = 0.0f;
 float hardcodedSwimHeight = 1.73f;
 float hardcodedRidingOffset = 0.65f;
 float hardcodedCrouchOffset = 0.3f;
+float hardcodedClimbWallClearance = 0.35f;
 
 glm::fvec3 s_wsCameraPosition = glm::fvec3();
 glm::fquat s_wsCameraRotation = glm::identity<glm::fquat>();
@@ -64,6 +65,12 @@ static float s_baseYawDegrees = 0.0f;
 static bool s_hasBaseYaw = false;
 static float s_pendingGameYawCorrection = 0.0f;
 static float s_pendingGameStickYawDelta = 0.0f;
+
+// the normal points out of the wall, towards Link
+static glm::fvec3 s_climbWallPoint = glm::fvec3(0.0f);
+static glm::fvec3 s_climbWallNormal = glm::fvec3(0.0f);
+static uint64_t s_climbWallUpdateNs = 0;
+static glm::fvec3 s_climbWallCameraOffset = glm::fvec3(0.0f);
 
 static int TryConsumePendingSnapTurnDirection() {
     auto* xr = VRManager::instance().XR.get();
@@ -272,6 +279,58 @@ static float ResolvePlayerHeightAdjustment(HeightAdjustmentTarget target) {
     return heightOffset - actualCrouchOffset;
 }
 
+static glm::fvec3 ResolveClimbWallCameraOffset(const glm::fvec3& playerPos, const glm::fquat& cameraRotation) {
+    // the climb sweep runs every frame Link is on a wall, so a stale reading means he already let go
+    constexpr uint64_t kClimbWallMaxAgeNs = 100'000'000;
+    // guards against a normal left over from an earlier wall, which the game never clears
+    constexpr float kClimbWallMaxContactDistance = 3.0f;
+
+    if (s_climbWallUpdateNs == 0 || GetTimeStamp() - s_climbWallUpdateNs > kClimbWallMaxAgeNs) {
+        return glm::fvec3(0.0f);
+    }
+    if (glm::distance(s_climbWallPoint, playerPos) > kClimbWallMaxContactDistance) {
+        return glm::fvec3(0.0f);
+    }
+    // Link is always on the free side of the wall he hangs on, so anything else isn't that wall
+    if (glm::dot(playerPos - s_climbWallPoint, s_climbWallNormal) <= 0.0f) {
+        return glm::fvec3(0.0f);
+    }
+
+    auto* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr) {
+        return glm::fvec3(0.0f);
+    }
+
+    auto middlePose = renderer->GetMiddlePose();
+    if (!middlePose.has_value()) {
+        return glm::fvec3(0.0f);
+    }
+
+    const glm::fquat baseYaw = RenderUtils::swingTwistY(cameraRotation).second;
+    const glm::fvec3 headPos = playerPos + baseYaw * glm::fvec3(GetAppliedHeadsetPose(middlePose.value())[3]);
+
+    const float clearance = glm::dot(headPos - s_climbWallPoint, s_climbWallNormal);
+    if (!std::isfinite(clearance) || clearance >= hardcodedClimbWallClearance) {
+        return glm::fvec3(0.0f);
+    }
+
+    return s_climbWallNormal * (hardcodedClimbWallClearance - clearance);
+}
+
+// call once per frame, not per eye, or the two eyes end up offset by different amounts
+static void UpdateClimbWallCameraOffset(const glm::fvec3& playerPos, const glm::fquat& cameraRotation) {
+    constexpr float kClimbWallOffsetHalfLifeSeconds = 0.06f;
+
+    static uint64_t s_lastTimeNs = 0;
+    const uint64_t nowNs = GetTimeStamp();
+    const float dt = s_lastTimeNs == 0 ? 0.0f : (float)(nowNs - s_lastTimeNs) * 1.0e-9f;
+    s_lastTimeNs = nowNs;
+
+    const glm::fvec3 target = ResolveClimbWallCameraOffset(playerPos, cameraRotation);
+    const float blend = (dt <= 0.0f || dt > 0.5f) ? 1.0f : 1.0f - std::exp2(-dt / kClimbWallOffsetHalfLifeSeconds);
+    s_climbWallCameraOffset = glm::mix(s_climbWallCameraOffset, target, blend);
+}
+
 static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
     glm::fvec3 newPos = gameplayPos;
     if (CemuHooks::IsFirstPerson()) {
@@ -281,7 +340,7 @@ static glm::fvec3 ResolveGameplayAnchorPosition(const glm::fvec3& gameplayPos) {
 
         playerPos.y += ResolvePlayerHeightAdjustment(HeightAdjustmentTarget::ReferenceAnchor);
 
-        newPos = playerPos;
+        newPos = playerPos + s_climbWallCameraOffset;
     }
 
     return newPos;
@@ -445,6 +504,8 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         glm::fvec3 playerPos = actor.mtx.getPos().getLE();
         playerPos.y += ResolvePlayerHeightAdjustment(HeightAdjustmentTarget::RenderedCamera);
 
+        UpdateClimbWallCameraOffset(playerPos, gameplayRotation);
+        playerPos += s_climbWallCameraOffset;
 
         if (s_isLadderClimbing > 0) {
             s_isLadderClimbing--;
@@ -535,6 +596,29 @@ void CemuHooks::hook_AddGameCameraStickYaw(PPCInterpreter_t* hCPU) {
     }
 
     s_pendingGameStickYawDelta = NormalizeDegrees(s_pendingGameStickYawDelta + yawDelta);
+}
+
+void CemuHooks::hook_CaptureClimbWallSurface(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    constexpr uint32_t kClimbWallNormalOffset = 0x54;
+    constexpr uint32_t kClimbWallPointOffset = 0x60;
+
+    const uint32_t wallStatePtr = hCPU->gpr[3];
+    if (wallStatePtr == 0) {
+        return;
+    }
+
+    const glm::fvec3 normal = getMemory<BEVec3>(wallStatePtr + kClimbWallNormalOffset).getLE();
+    const glm::fvec3 point = getMemory<BEVec3>(wallStatePtr + kClimbWallPointOffset).getLE();
+    // the game leaves the normal at zero until the sweep has actually hit something
+    if (!IsAllFinite(normal) || !IsAllFinite(point) || glm::dot(normal, normal) < 0.5f) {
+        return;
+    }
+
+    s_climbWallNormal = glm::normalize(normal);
+    s_climbWallPoint = point;
+    s_climbWallUpdateNs = GetTimeStamp();
 }
 
 void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {

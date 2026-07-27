@@ -264,6 +264,37 @@ blr
 0x02BEEBCC = bla captureCameraTailStickYaw
 
 
+; ==================================================================================
+; The climb action's wall state holds the contact point at 0x60 and the wall normal at 0x54. This is
+; the last place in the sweep where both are final, with the state still in r31.
+captureClimbWallSurface:
+stwu r1, -0x20(r1)
+mflr r0
+stw r0, 0x24(r1)
+stw r4, 0x08(r1)
+stw r5, 0x0C(r1)
+stw r6, 0x10(r1)
+stw r7, 0x14(r1)
+stw r8, 0x18(r1)
+
+mr r3, r31
+bl import.coreinit.hook_CaptureClimbWallSurface
+
+lwz r4, 0x08(r1)
+lwz r5, 0x0C(r1)
+lwz r6, 0x10(r1)
+lwz r7, 0x14(r1)
+lwz r8, 0x18(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+
+mr r3, r31 ; replaced instruction
+blr
+
+0x03354C08 = bla captureClimbWallSurface
+
+
 ; workaround for ladder climbing issue
 ; Always sets the ladder mode to 4 which allows pressing A to jump up ladders
 ; Sets the ladder mode to 1 when player is moving the stick downwards to allow sliding down ladders
