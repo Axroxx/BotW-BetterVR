@@ -568,7 +568,7 @@ struct ModSettings {
     BoolSetting logRendering{ "LogRendering", false, Log::SetCategory<RENDERING> };
     BoolSetting logInterop{ "LogInterop", false, Log::SetCategory<INTEROP> };
     BoolSetting logControls{ "LogControls", false, Log::SetCategory<CONTROLS> };
-    BoolSetting logPpc{ "LogPpc", true, Log::SetCategory<PPC> };
+    BoolSetting logPpc{ "LogPpc", false, Log::SetCategory<PPC> };
     BoolSetting logXrDebugUtils{ "LogXrDebugUtils", false, Log::SetCategory<XR_DEBUGUTILS> };
     BoolSetting logArrowShotCapture{ "LogArrowShotCapture", false, Log::SetCategory<ARROW_SHOT_CAPTURE> };
     BoolSetting logRoomscale{ "LogRoomscale", false, Log::SetCategory<ROOMSCALE> };

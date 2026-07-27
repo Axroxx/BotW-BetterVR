@@ -278,6 +278,10 @@ public:
             }
         }
         submit(L, std::string_view(message));
+        // flush after errors since crash might be imminent
+        if constexpr (L == ERROR) {
+            Flush();
+        }
     }
 
     template <typename LogType L, class... Args>
@@ -293,6 +297,9 @@ public:
         s_scratch.clear();
         std::vformat_to(std::back_inserter(s_scratch), format, std::make_format_args(args...));
         submit(L, std::string_view(s_scratch));
+        if constexpr (L == ERROR) {
+            Flush();
+        }
     }
 
     static void printTimeElapsed(const char* message_prefix, LARGE_INTEGER time);

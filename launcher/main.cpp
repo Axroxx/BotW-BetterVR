@@ -1040,7 +1040,7 @@ static bool WriteCemuAccurateBarriers(const fs::path& settingsPath, const std::s
             contents.insert(graphicRange->second, element);
         }
         else {
-            contents.insert(graphicRange->second, closingTagIndentation + element + "\n" + closingTagIndentation);
+            contents.insert(graphicRange->second, element + "\n" + closingTagIndentation);
         }
     }
 
@@ -1065,12 +1065,14 @@ struct CemuAccurateBarriersOverride {
             return;
         }
 
-        if (originalValue.empty() || originalValue == "false") {
+        if (originalValue == "false") {
             return;
         }
 
+        // Cemu treats a missing/empty/unparseable value the same as its own
+        // default of true, so normalize it to "true" for the restore below.
         settingsPath = paths.cemuSettingsXml;
-        previousValue = originalValue;
+        previousValue = "true";
     }
 
     void Restore() {
