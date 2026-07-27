@@ -355,7 +355,10 @@ static void RefreshPlayerHairMaterials() {
 }
 
 static void SubmitHairMaterialVisibility(PPCInterpreter_t* hCPU, bool hideHair) {
-    RefreshPlayerHairMaterials();
+    if (!s_playerHairMaterialsRefreshedThisFrame) {
+        RefreshPlayerHairMaterials();
+        s_playerHairMaterialsRefreshedThisFrame = true;
+    }
     if (s_playerHairMaterialCount == 0) return;
 
     const HairMaterialRef& hairMaterial = s_playerHairMaterials[s_playerHairMaterialCursor++ % s_playerHairMaterialCount];
@@ -603,6 +606,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
         UpdateGameBowDrawRelativeTransform();
         s_twoHandGrip = {};
         CemuHooks::s_twoHandGripActive = false;
+        s_playerHairMaterialsRefreshedThisFrame = false;
     }
 
     // helpers to write back matrix and scale

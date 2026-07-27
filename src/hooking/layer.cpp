@@ -113,6 +113,8 @@ VkResult VRLayer::VkInstanceOverrides::CreateInstance(PFN_vkCreateInstance creat
 
     Log::print<INFO>("Created Vulkan instance (using Vulkan {}.{}.{}) successfully!", VK_API_VERSION_MAJOR(modifiedCreateInfo.pApplicationInfo->apiVersion), VK_API_VERSION_MINOR(modifiedCreateInfo.pApplicationInfo->apiVersion), VK_API_VERSION_PATCH(modifiedCreateInfo.pApplicationInfo->apiVersion));
     checkAssert(VK_VERSION_MINOR(modifiedCreateInfo.pApplicationInfo->apiVersion) != 0 || VK_VERSION_MAJOR(modifiedCreateInfo.pApplicationInfo->apiVersion) > 1, "Vulkan version needs to be v1.1 or higher!");
+
+    Log::OnInstanceCreated();
     return result;
 }
 
@@ -427,7 +429,8 @@ void VRLayer::VkInstanceOverrides::DestroyInstance(const vkroots::VkInstanceDisp
     PFN_vkDestroyInstance ptr_vkDestroyInstance = (PFN_vkDestroyInstance)pDispatch.GetInstanceProcAddr(instance, "vkDestroyInstance");
     vkroots::tables::DestroyDispatchTable(instance);
     ptr_vkDestroyInstance(instance, pAllocator);
-    Log::Shutdown();
+
+    Log::OnInstanceDestroyed();
 }
 
 void VRLayer::VkDeviceOverrides::DestroyDevice(const vkroots::VkDeviceDispatch& pDispatch, VkDevice device, const VkAllocationCallbacks* pAllocator) {

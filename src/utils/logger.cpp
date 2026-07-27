@@ -9,6 +9,7 @@ static constexpr DWORD kLogFileShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE
 
 static constexpr size_t kMaxQueuedRecords = 4096;
 static constexpr DWORD kUncleanShutdownTimeoutMs = 2000;
+static constexpr DWORD kFlushTimeoutMs = 500;
 
 struct LogRecord {
     std::string text;
@@ -17,20 +18,28 @@ struct LogRecord {
     uint64_t time = 0; // FILETIME ticks
 };
 
-static std::mutex s_queueMutex;
-static std::condition_variable s_wakeWriter;
-static std::condition_variable s_drained;
+// Never destructed because a detached writer thread (see StopWriterThread) may still touch these
+static std::mutex& s_queueMutex = *new std::mutex();
+static std::condition_variable& s_wakeWriter = *new std::condition_variable();
+static std::condition_variable& s_drained = *new std::condition_variable();
 static std::thread s_writerThread;
 static std::atomic_bool s_running = false;
 static bool s_writerBusy = false;
 
-static std::vector<LogRecord> s_produce;
-static std::vector<LogRecord> s_consume;
+// Reusing s_queueMutex here would self-deadlock with Start/StopWriterThread
+static std::mutex s_transitionMutex;
+static size_t s_instanceRefCount = 0;
+
+// Sticky: once a writer is detached, never start another one
+static constinit std::atomic_bool s_writerDetached = false;
+
+static std::vector<LogRecord>& s_produce = *new std::vector<LogRecord>();
+static std::vector<LogRecord>& s_consume = *new std::vector<LogRecord>();
 static size_t s_produceCount = 0;
 static uint32_t s_droppedCount = 0;
 
-static std::string s_batchBuffer;
-static std::string s_directBuffer;
+static std::string& s_batchBuffer = *new std::string();
+static std::string& s_directBuffer = *new std::string();
 static HANDLE s_fileHandle = INVALID_HANDLE_VALUE;
 static HANDLE s_consoleHandle = NULL;
 static double s_timeFrequency = 0.0;
@@ -159,12 +168,12 @@ static void WriterThreadMain() {
     DrainQueue();
 }
 
-static void FlushBlocking() {
+static void FlushBlocking(DWORD timeoutMs) {
     std::unique_lock<std::mutex> lock(s_queueMutex);
     if (!s_running.load(std::memory_order_relaxed)) {
         return;
     }
-    s_drained.wait(lock, [] { return s_produceCount == 0 && !s_writerBusy; });
+    s_drained.wait_for(lock, std::chrono::milliseconds(timeoutMs), [] { return s_produceCount == 0 && !s_writerBusy; });
 }
 
 static void OpenLogFile() {
@@ -212,8 +221,7 @@ static bool StopWriterThread(DWORD timeoutMs) {
         return true;
     }
 
-    // ~Log() runs under the loader lock, where join() can deadlock. The writer never needs the loader
-    // lock, so a bounded wait costs a short stall at worst.
+    // A timeout here means we're holding the loader lock, not that the writer is stuck. Detach instead of blocking forever.
     if (WaitForSingleObject(writerThread.native_handle(), timeoutMs) == WAIT_OBJECT_0) {
         writerThread.join();
         return true;
@@ -223,23 +231,30 @@ static bool StopWriterThread(DWORD timeoutMs) {
     return false;
 }
 
-static void ShutdownLogging(DWORD timeoutMs) {
+
+static bool ShutdownLogging(DWORD timeoutMs) {
     if (!s_running.load(std::memory_order_relaxed)) {
-        return;
+        return true;
     }
 
-    Log::print<INFO>("Shutting down BetterVR logging...");
+    Log::print<INFO>("Pausing BetterVR log writer (no active Vulkan instances)...");
 
     if (!StopWriterThread(timeoutMs)) {
-        return;
+        s_writerDetached.store(true, std::memory_order_relaxed);
+        return false;
     }
 
     DrainQueue();
 
-    if (s_fileHandle != INVALID_HANDLE_VALUE) {
-        CloseHandle(s_fileHandle);
-        s_fileHandle = INVALID_HANDLE_VALUE;
+    {
+        std::scoped_lock lock(s_queueMutex);
+        if (s_fileHandle != INVALID_HANDLE_VALUE) {
+            CloseHandle(s_fileHandle);
+            s_fileHandle = INVALID_HANDLE_VALUE;
+        }
     }
+
+    return true;
 }
 
 static void LogSystemHardwareInfo() {
@@ -274,6 +289,11 @@ void Log::submit(LogType type, std::string_view message) {
         std::scoped_lock lock(s_queueMutex);
 
         if (!s_running.load(std::memory_order_relaxed)) {
+            // OPEN_ALWAYS + FILE_APPEND_DATA makes reopening safe to redo on every call
+            if (s_fileHandle == INVALID_HANDLE_VALUE) {
+                OpenLogFile();
+            }
+
             LogRecord record;
             FillRecord(record, type, message);
 
@@ -315,8 +335,52 @@ Log::Log() {
 }
 
 Log::~Log() {
-    ShutdownLogging(kUncleanShutdownTimeoutMs);
+    const bool cleanShutdown = ShutdownLogging(kUncleanShutdownTimeoutMs);
+    if (!cleanShutdown || s_writerDetached.load(std::memory_order_relaxed)) {
+        return;
+    }
+
+    {
+        std::scoped_lock lock(s_queueMutex);
+        if (s_fileHandle != INVALID_HANDLE_VALUE) {
+            CloseHandle(s_fileHandle);
+            s_fileHandle = INVALID_HANDLE_VALUE;
+        }
+        s_consoleHandle = NULL;
+    }
+
     FreeConsole();
+}
+
+void Log::OnInstanceCreated() {
+    std::scoped_lock lock(s_transitionMutex);
+    if (s_instanceRefCount++ != 0) {
+        return;
+    }
+
+    if (s_writerDetached.load(std::memory_order_relaxed)) {
+        return;
+    }
+
+    {
+        std::scoped_lock lock(s_queueMutex);
+        if (s_fileHandle == INVALID_HANDLE_VALUE) {
+            OpenLogFile();
+        }
+    }
+    StartWriterThread();
+}
+
+void Log::OnInstanceDestroyed() {
+    std::scoped_lock lock(s_transitionMutex);
+    if (s_instanceRefCount == 0) {
+        return;
+    }
+    if (--s_instanceRefCount != 0) {
+        return;
+    }
+
+    ShutdownLogging(kUncleanShutdownTimeoutMs);
 }
 
 void Log::SetShowTimestamps(bool enabled) {
@@ -328,11 +392,7 @@ void Log::SetShowThreadIds(bool enabled) {
 }
 
 void Log::Flush() {
-    FlushBlocking();
-}
-
-void Log::Shutdown() {
-    ShutdownLogging(INFINITE);
+    FlushBlocking(kFlushTimeoutMs);
 }
 
 void Log::printTimeElapsed(const char* message_prefix, LARGE_INTEGER time) {

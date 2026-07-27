@@ -305,8 +305,9 @@ public:
     static void printTimeElapsed(const char* message_prefix, LARGE_INTEGER time);
     static void Flush();
 
-    // Call from a regular thread so the writer is never joined under the loader lock.
-    static void Shutdown();
+    // ref counted shutdown of the logger
+    static void OnInstanceCreated();
+    static void OnInstanceDestroyed();
 
 private:
     static void submit(LogType type, std::string_view message);
