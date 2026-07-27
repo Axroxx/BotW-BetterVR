@@ -9,12 +9,17 @@ set(BETTERVR_LAUNCHER_EMBED_DIR "${CMAKE_BINARY_DIR}/generated/launcher")
 set(BETTERVR_LAUNCHER_EMBED_HEADER "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_assets.h")
 set(BETTERVR_LAUNCHER_EMBED_SOURCE "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_assets.cpp")
 set(BETTERVR_LAUNCHER_EMBED_RC "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_assets.rc")
+set(BETTERVR_LAUNCHER_EMBED_STAMP "${BETTERVR_LAUNCHER_EMBED_DIR}/embedded_assets.stamp")
 set(BETTERVR_LAUNCHER_EMBED_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/generate_embedded_assets.cmake")
 set(BETTERVR_GRAPHIC_PACK_DIR "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR")
 set(BETTERVR_BOTW_GRAPHICS_DIR "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_Graphics")
 
 file(GLOB_RECURSE GRAPHIC_PACK_FILES CONFIGURE_DEPENDS "${BETTERVR_GRAPHIC_PACK_DIR}/*")
 file(GLOB_RECURSE BOTW_GRAPHICS_FILES CONFIGURE_DEPENDS "${BETTERVR_BOTW_GRAPHICS_DIR}/*")
+
+# Adding or removing an asset changes no surviving file's timestamp, so the list
+# itself is folded into the command line to keep the generator from going stale.
+string(MD5 BETTERVR_LAUNCHER_ASSET_LIST_HASH "${GRAPHIC_PACK_FILES};${BOTW_GRAPHICS_FILES}")
 
 add_executable(BetterVR_Launcher ${BETTERVR_LAUNCHER_SOURCES})
 target_precompile_headers(BetterVR_Launcher PRIVATE ${CMAKE_SOURCE_DIR}/include/pch.h)
@@ -28,7 +33,8 @@ target_compile_definitions(BetterVR_Launcher PRIVATE BETTERVR_LAUNCHER_VERSION="
 target_link_options(BetterVR_Launcher PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:wmainCRTStartup)
 
 add_custom_command(
-    OUTPUT ${BETTERVR_LAUNCHER_EMBED_HEADER} ${BETTERVR_LAUNCHER_EMBED_SOURCE} ${BETTERVR_LAUNCHER_EMBED_RC}
+    OUTPUT ${BETTERVR_LAUNCHER_EMBED_STAMP}
+    BYPRODUCTS ${BETTERVR_LAUNCHER_EMBED_HEADER} ${BETTERVR_LAUNCHER_EMBED_SOURCE} ${BETTERVR_LAUNCHER_EMBED_RC}
     COMMAND ${CMAKE_COMMAND}
         -DOUTPUT_HEADER=${BETTERVR_LAUNCHER_EMBED_HEADER}
         -DOUTPUT_SOURCE=${BETTERVR_LAUNCHER_EMBED_SOURCE}
@@ -39,7 +45,9 @@ add_custom_command(
         -DBOTW_GRAPHICS_DIR=${BETTERVR_BOTW_GRAPHICS_DIR}
         -DEXCLUDE_DEBUG_PATCHES=$<IF:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>,ON,OFF>
         -DVERSION=${PROJECT_VERSION}
+        -DASSET_LIST_HASH=${BETTERVR_LAUNCHER_ASSET_LIST_HASH}
         -P ${BETTERVR_LAUNCHER_EMBED_SCRIPT}
+    COMMAND ${CMAKE_COMMAND} -E touch ${BETTERVR_LAUNCHER_EMBED_STAMP}
     DEPENDS
         BetterVR_Layer
         ${CMAKE_SOURCE_DIR}/resources/BetterVR_Layer.json
@@ -48,6 +56,14 @@ add_custom_command(
         ${BOTW_GRAPHICS_FILES}
     VERBATIM
 )
+
+add_custom_target(BetterVR_LauncherAssets DEPENDS ${BETTERVR_LAUNCHER_EMBED_STAMP})
+add_dependencies(BetterVR_Launcher BetterVR_LauncherAssets)
+
+# The .rc only names the embedded files by path, so nothing in its own contents
+# changes when an asset's bytes change. Ninja cannot see that dependency, so the
+# stamp is what forces rc.exe to re-read the assets.
+set_source_files_properties(${BETTERVR_LAUNCHER_EMBED_RC} PROPERTIES OBJECT_DEPENDS ${BETTERVR_LAUNCHER_EMBED_STAMP})
 
 target_sources(BetterVR_Launcher PRIVATE ${BETTERVR_LAUNCHER_EMBED_SOURCE} ${BETTERVR_LAUNCHER_EMBED_HEADER} ${BETTERVR_LAUNCHER_EMBED_RC})
 target_include_directories(BetterVR_Launcher PRIVATE ${BETTERVR_LAUNCHER_EMBED_DIR})

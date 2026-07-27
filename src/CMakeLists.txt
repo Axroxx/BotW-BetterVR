@@ -70,6 +70,16 @@ if(GRAPHIC_PACK_FILES)
     target_sources(BetterVR_Layer PRIVATE ${GRAPHIC_PACK_HEADER_FILES})
 endif()
 
+set(BETTERVR_PACK_DIR "${CMAKE_SOURCE_DIR}/resources/BreathOfTheWild_BetterVR")
+
+add_custom_target(BetterVR_ValidateAsm ALL
+    COMMAND "${CMAKE_COMMAND}" -DPACK_DIR=${BETTERVR_PACK_DIR} -P "${CMAKE_SOURCE_DIR}/cmake/validate_asm_relocs.cmake"
+    COMMENT "Checking hand-written asm for broken address materialization"
+    VERBATIM
+)
+set_target_properties(BetterVR_ValidateAsm PROPERTIES FOLDER "BreathOfTheWild_BetterVR")
+add_dependencies(BetterVR_Layer BetterVR_ValidateAsm)
+
 target_link_libraries(BetterVR_Layer PRIVATE OpenXR::headers OpenXR::openxr_loader)
 target_include_directories(BetterVR_Layer SYSTEM PRIVATE ${VULKAN_HEADERS_INCLUDE_DIRS})
 target_link_libraries(BetterVR_Layer PRIVATE glm::glm)

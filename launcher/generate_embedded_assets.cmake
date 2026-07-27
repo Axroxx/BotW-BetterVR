@@ -5,6 +5,16 @@ endif()
 get_filename_component(output_dir "${OUTPUT_HEADER}" DIRECTORY)
 file(MAKE_DIRECTORY "${output_dir}")
 
+function(write_if_different path contents)
+    if(EXISTS "${path}")
+        file(READ "${path}" existing_contents)
+        if(existing_contents STREQUAL contents)
+            return()
+        endif()
+    endif()
+    file(WRITE "${path}" "${contents}")
+endfunction()
+
 get_filename_component(header_name "${OUTPUT_HEADER}" NAME)
 
 set(header_contents [=[#pragma once
@@ -82,6 +92,6 @@ endforeach()
 
 string(APPEND source_contents "    };\n\n    const size_t AssetCount = sizeof(Assets) / sizeof(Assets[0]);\n}\n")
 
-file(WRITE "${OUTPUT_HEADER}" "${header_contents}")
-file(WRITE "${OUTPUT_SOURCE}" "${source_contents}")
-file(WRITE "${OUTPUT_RC}" "${rc_contents}")
+write_if_different("${OUTPUT_HEADER}" "${header_contents}")
+write_if_different("${OUTPUT_SOURCE}" "${source_contents}")
+write_if_different("${OUTPUT_RC}" "${rc_contents}")
