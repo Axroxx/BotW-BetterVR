@@ -45,6 +45,7 @@ public:
 
     struct RenderFrame {
         std::optional<std::array<XrView, 2>> views;
+        std::optional<glm::fmat4> cameraReferenceMtx;
         CaptureRecordKind recordKind = CaptureRecordKind::None;
         uint64_t activeStereoGeneration = 0;
         uint64_t lastActivityOrdinal = 0;
@@ -110,6 +111,7 @@ public:
 
         void Reset() {
             views = std::nullopt;
+            cameraReferenceMtx = std::nullopt;
             recordKind = CaptureRecordKind::None;
             activeStereoGeneration = 0;
             lastActivityOrdinal = 0;
@@ -177,6 +179,14 @@ public:
         return ToMat4(middlePos, middleOri);
     };
 
+    // nullopt when the frame never latched one, in which case the live reference matrix applies
+    std::optional<glm::fmat4> GetCameraReferenceMtx(long frameIdx) const {
+        if (frameIdx != -1) {
+            return m_renderFrames[frameIdx].cameraReferenceMtx;
+        }
+        return std::nullopt;
+    }
+
     double GetLastFrameWorkTimeMs() const { return m_lastFrameWorkTimeMs; }
     double GetLastWaitTimeMs() const { return m_lastWaitTimeMs; }
     double GetLastFrameTimeMs() const { return m_lastFrameTimeMs; }
@@ -185,16 +195,19 @@ public:
 
     void On3DColorCopied(OpenXR::EyeSide side, long frameIdx) {
         if (!m_renderFrames[frameIdx].views.has_value() && HasCurrentFrameViewsLatched()) m_renderFrames[frameIdx].views = m_currViews;
+        LatchFrameCameraReference(frameIdx);
         DebugDraw::instance().SnapshotEyeState(side, frameIdx);
     }
 
     void On3DDepthCopied(OpenXR::EyeSide side, long frameIdx) {
         if (!m_renderFrames[frameIdx].views.has_value() && HasCurrentFrameViewsLatched()) m_renderFrames[frameIdx].views = m_currViews;
+        LatchFrameCameraReference(frameIdx);
     }
 
     void On2DCopied(long frameIdx) {
     }
 
+    void LatchFrameCameraReference(long frameIdx);
     void BeginStereoCaptureGeneration(long frameIdx);
     void BeginHudCaptureGeneration(long frameIdx);
     uint64_t NextCaptureActivityOrdinal() { return m_nextCaptureActivityOrdinal++; }

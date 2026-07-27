@@ -129,6 +129,7 @@ public:
     static uint32_t s_cameraMtxAddress;
     static glm::fvec3 s_playerPos;
     static glm::mat4 s_lastCameraMtx;
+    static glm::mat4 GetFreshCameraReferenceMtx();
     // If the user is unable to control the camera, we can guess that they're in a cutscene
     struct HybridEventSettings {
         bool firstPerson;                  // use Link's perspective, ignore the animated event camera

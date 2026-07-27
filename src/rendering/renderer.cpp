@@ -297,6 +297,13 @@ void RND_Renderer::EndFrame() {
     VRManager::instance().D3D12->EndFrame();
 }
 
+void RND_Renderer::LatchFrameCameraReference(long frameIdx) {
+    auto& frame = m_renderFrames[frameIdx];
+    if (!frame.cameraReferenceMtx.has_value() && frame.views.has_value()) {
+        frame.cameraReferenceMtx = CemuHooks::s_lastCameraMtx;
+    }
+}
+
 bool RND_Renderer::EnsureFrameViewsLatched() const {
     if (!m_frameViewsPending) {
         return !m_frameViewLatchFailed && m_currViews.has_value();
@@ -314,6 +321,9 @@ bool RND_Renderer::EnsureFrameViewsLatched() const {
     for (auto& frame : self->m_renderFrames) {
         if (!frame.views.has_value() && frame.IsStereoRecord() && frame.activeStereoGeneration != 0 && frame.acceptedCaptureMask != CaptureMask_None) {
             frame.views = self->m_currViews;
+            if (!frame.cameraReferenceMtx.has_value()) {
+                frame.cameraReferenceMtx = CemuHooks::s_lastCameraMtx;
+            }
         }
     }
 

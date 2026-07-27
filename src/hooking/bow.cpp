@@ -572,7 +572,20 @@ static glm::mat4 GetHandCorrectionMtx(OpenXR::EyeSide side) {
     return glm::mat4_cast(wristR);
 }
 
-static bool TryGetControllerWorldPose(const OpenXR::InputState& inputs, OpenXR::EyeSide side, bool useAimPose, glm::vec3& outPosition, glm::vec3& outForward) {
+// -1 asks for the live anchor, anything else for the one latched with that captured frame
+static glm::mat4 ResolveCameraReferenceMtx(long frameIdx) {
+    if (frameIdx != -1) {
+        auto* renderer = VRManager::instance().XR->GetRenderer();
+        if (renderer != nullptr) {
+            if (auto frameMtx = renderer->GetCameraReferenceMtx(frameIdx)) {
+                return frameMtx.value();
+            }
+        }
+    }
+    return CemuHooks::GetFreshCameraReferenceMtx();
+}
+
+static bool TryGetControllerWorldPose(const OpenXR::InputState& inputs, OpenXR::EyeSide side, bool useAimPose, glm::vec3& outPosition, glm::vec3& outForward, long frameIdx = -1) {
     if (!inputs.shared.in_game) {
         return false;
     }
@@ -593,7 +606,7 @@ static bool TryGetControllerWorldPose(const OpenXR::InputState& inputs, OpenXR::
     if (!useAimPose) {
         controllerMat *= GetHandCorrectionMtx(side);
     }
-    const glm::mat4 controllerWorld = CemuHooks::s_lastCameraMtx * controllerMat;
+    const glm::mat4 controllerWorld = ResolveCameraReferenceMtx(frameIdx) * controllerMat;
     const glm::vec3 worldForward = glm::mat3(controllerWorld) * glm::vec3(0.0f, 0.0f, -1.0f);
 
     outPosition = glm::vec3(controllerWorld[3]);
@@ -615,7 +628,7 @@ static bool TryGetGameplayCameraCenterPose(glm::vec3& outPosition, glm::vec3& ou
     glm::mat4 middlePose = middlePoseOpt.value();
     middlePose[3] = glm::vec4(RemoveHeadsetHorizontalOffset(glm::vec3(middlePose[3])), 1.0f);
 
-    const glm::mat4 cameraWorld = CemuHooks::s_lastCameraMtx * middlePose;
+    const glm::mat4 cameraWorld = ResolveCameraReferenceMtx(frameIdx) * middlePose;
     const glm::vec3 worldForward = glm::mat3(cameraWorld) * glm::vec3(0.0f, 0.0f, -1.0f);
     outPosition = glm::vec3(cameraWorld[3]);
     outForward = glm::length2(worldForward) > 0.000001f ? glm::normalize(worldForward) : glm::vec3(0.0f, 0.0f, -1.0f);
@@ -632,13 +645,13 @@ static bool TryResolveDirectionToTarget(const glm::vec3& origin, const glm::vec3
     return true;
 }
 
-static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTargetPos, const glm::vec3& targetPos, bool preferPoseAim, PoseFallbackState& outPose) {
+static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTargetPos, const glm::vec3& targetPos, bool preferPoseAim, PoseFallbackState& outPose, long cameraFrameIdx = -1) {
     outPose = {};
     const OpenXR::InputState inputs = VRManager::instance().XR->m_input.load();
 
     glm::vec3 cameraOrigin = glm::vec3(0.0f);
     glm::vec3 cameraForward = glm::vec3(0.0f, 0.0f, -1.0f);
-    const bool hasCameraPose = TryGetGameplayCameraCenterPose(cameraOrigin, cameraForward);
+    const bool hasCameraPose = TryGetGameplayCameraCenterPose(cameraOrigin, cameraForward, cameraFrameIdx);
 
     if (!CemuHooks::IsFirstPerson()) {
         if (!hasCameraPose) {
@@ -660,19 +673,19 @@ static bool TryBuildFallbackLaunchPose(const LiveBowState& liveState, bool hasTa
 
     glm::vec3 rightWorldPos = glm::vec3(0.0f);
     glm::vec3 rightWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
-    const bool hasRightHandPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::RIGHT, false, rightWorldPos, rightWorldForward);
+    const bool hasRightHandPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::RIGHT, false, rightWorldPos, rightWorldForward, cameraFrameIdx);
 
     glm::vec3 leftWorldPos = glm::vec3(0.0f);
     glm::vec3 leftWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
-    const bool hasLeftHandPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::LEFT, false, leftWorldPos, leftWorldForward);
+    const bool hasLeftHandPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::LEFT, false, leftWorldPos, leftWorldForward, cameraFrameIdx);
 
     glm::vec3 rightAimWorldPos = glm::vec3(0.0f);
     glm::vec3 rightAimWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
-    const bool hasRightAimPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::RIGHT, true, rightAimWorldPos, rightAimWorldForward);
+    const bool hasRightAimPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::RIGHT, true, rightAimWorldPos, rightAimWorldForward, cameraFrameIdx);
 
     glm::vec3 leftAimWorldPos = glm::vec3(0.0f);
     glm::vec3 leftAimWorldForward = glm::vec3(0.0f, 0.0f, -1.0f);
-    const bool hasLeftAimPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::LEFT, true, leftAimWorldPos, leftAimWorldForward);
+    const bool hasLeftAimPose = TryGetControllerWorldPose(inputs, OpenXR::EyeSide::LEFT, true, leftAimWorldPos, leftAimWorldForward, cameraFrameIdx);
 
     auto resolveDirectionAndTarget = [&](const glm::vec3& origin, glm::vec3& outDirection, BowVisualizationDirectionSource& outSource, glm::vec3& outTargetPos) -> bool {
         auto tryAimPoint = [&](const glm::vec3& aimPoint, BowVisualizationDirectionSource source) -> bool {
@@ -1218,7 +1231,7 @@ static bool TryBuildBowVisualizationState(BowVisualizationState& outState, long 
     }
     else {
         PoseFallbackState fallbackPose = {};
-        TryBuildFallbackLaunchPose(liveBowState, hasCandidateTargetPos, candidateTargetPos, true, fallbackPose);
+        TryBuildFallbackLaunchPose(liveBowState, hasCandidateTargetPos, candidateTargetPos, true, fallbackPose, cameraFrameIdx);
 
         if (fallbackPose.valid) {
             outState.launchOrigin = fallbackPose.origin;

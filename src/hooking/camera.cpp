@@ -554,6 +554,14 @@ void CemuHooks::hook_FixExtraStaminaGaugeIconPositions(PPCInterpreter_t* hCPU) {
 
 glm::mat4 CemuHooks::s_lastCameraMtx = glm::mat4(1.0f);
 
+// s_lastCameraMtx is still the previous frame's anchor while the actor calc jobs run, so anything
+// that also reads the live player matrix has to re-resolve it or it mixes two simulation steps
+glm::mat4 CemuHooks::GetFreshCameraReferenceMtx() {
+    glm::mat4 refMtx = s_lastCameraMtx;
+    refMtx[3] = glm::fvec4(ResolveGameplayAnchorPosition(glm::fvec3(refMtx[3])), 1.0f);
+    return refMtx;
+}
+
 void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
     uint32_t cameraIn = hCPU->gpr[3];

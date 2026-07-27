@@ -645,7 +645,7 @@ void CemuHooks::hook_ModifyBoneMatrix(PPCInterpreter_t* hCPU) {
 
     glm::fvec3 boneScale = getMemory<BEVec3>(scalePtr).getLE();
     const glm::fmat4 playerMtx4 = glm::fmat4(getMemory<BEMatrix34>(s_playerMtxAddress).getLEMatrix());
-    const glm::mat4 cameraMtx = s_lastCameraMtx;
+    const glm::mat4 cameraMtx = GetFreshCameraReferenceMtx();
 
     const OpenXR::InputState inputs = VRManager::instance().XR->m_input.load();
     if (!inputs.shared.pose[side].isActive) {
