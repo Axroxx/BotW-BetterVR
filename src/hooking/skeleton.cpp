@@ -271,6 +271,8 @@ static constexpr uint32_t ModelUnitMaterialCountOffset = 0x9A;
 static constexpr uint32_t ModelUnitMaterialArrayOffset = 0xA4;
 static constexpr uint32_t ModelUnitMaterialStride = 0x40;
 static constexpr uint32_t MaterialNameRelativeOffset = 0x04;
+static constexpr uint32_t ModelUnitCountSanityMax = 256;
+static constexpr int32_t MaterialNameMaxRelativeOffset = 0x04000000; // 64MB
 
 static std::string_view GetModelUnitMaterialName(uint32_t materialArray, uint16_t materialIdx) {
     uint32_t materialPtr = 0;
@@ -279,6 +281,7 @@ static std::string_view GetModelUnitMaterialName(uint32_t materialArray, uint16_
     uint32_t nameOffset = 0;
     CemuHooks::readMemoryBE(materialPtr + MaterialNameRelativeOffset, &nameOffset);
     if (nameOffset == 0) return {};
+    if ((int32_t)nameOffset > MaterialNameMaxRelativeOffset || (int32_t)nameOffset < -MaterialNameMaxRelativeOffset) return {};
     const uint32_t nameAddress = materialPtr + MaterialNameRelativeOffset + nameOffset;
     const char* materialName = (const char*)(CemuHooks::s_memoryBaseAddress + nameAddress);
     return std::string_view(materialName, strnlen(materialName, 63));
@@ -293,6 +296,8 @@ struct HairMaterialRef {
 static std::array<HairMaterialRef, 8> s_playerHairMaterials{};
 static uint32_t s_playerHairMaterialCount = 0;
 static uint32_t s_playerHairMaterialCursor = 0;
+// Reset once per frame in the "Skl_Root" branch of hook_ModifyBoneMatrix
+static bool s_playerHairMaterialsRefreshedThisFrame = false;
 
 static void CollectHairMaterialsFromModel(uint32_t gsysModelPtr) {
     uint32_t unitCount = 0;
@@ -300,6 +305,7 @@ static void CollectHairMaterialsFromModel(uint32_t gsysModelPtr) {
     CemuHooks::readMemoryBE(gsysModelPtr + ModelUnitCountOffset, &unitCount);
     CemuHooks::readMemoryBE(gsysModelPtr + ModelUnitArrayOffset, &unitArray);
     if (unitArray == 0) return;
+    if (unitCount > ModelUnitCountSanityMax) return;
 
     for (uint32_t unitIdx = 0; unitIdx < unitCount; unitIdx++) {
         uint32_t unitHolder = 0;
