@@ -75,14 +75,25 @@ RND_Renderer::RND_Renderer(XrSession xrSession): m_session(xrSession) {
     XrSessionBeginInfo m_sessionCreateInfo = { XR_TYPE_SESSION_BEGIN_INFO };
     m_sessionCreateInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     checkXRResult(xrBeginSession(m_session, &m_sessionCreateInfo), "Failed to begin OpenXR session!");
+    m_sessionRunning = true;
+}
+
+void RND_Renderer::EndSession() {
+    if (!m_sessionRunning || m_session == XR_NULL_HANDLE) {
+        return;
+    }
+    m_sessionRunning = false;
+    if (XrResult result = xrEndSession(m_session); XR_FAILED(result)) {
+        Log::print<ERROR>("Failed to end OpenXR session (result {})!", (int)result);
+    }
 }
 
 RND_Renderer::~RND_Renderer() {
-    xrRequestExitSession(m_session);
-    if (m_session != XR_NULL_HANDLE) {
-        checkXRResult(xrEndSession(m_session), "Failed to end OpenXR session!");
-        m_session = XR_NULL_HANDLE;
+    if (m_sessionRunning && m_session != XR_NULL_HANDLE) {
+        xrRequestExitSession(m_session);
+        EndSession();
     }
+    m_session = XR_NULL_HANDLE;
 
     if (m_layer3D) {
         m_layer3D.reset();
@@ -707,6 +718,15 @@ void RND_Renderer::Layer2D::RecordRender(RND_D3D12::CommandContext<false>* conte
     context->Signal(texture.get(), texture->GetD3D12SignalValue());
 }
 
+static glm::fvec3 GetHorizontalGazeDirection(const glm::quat& headOrientation) {
+    glm::quat yawOnly = glm::quat(headOrientation.w, 0.0f, headOrientation.y, 0.0f);
+    if (glm::length(yawOnly) < 0.001f) {
+        return glm::fvec3(0.0f, 0.0f, -1.0f);
+    }
+
+    return glm::normalize(yawOnly) * glm::fvec3(0.0f, 0.0f, -1.0f);
+}
+
 std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTime predictedDisplayTime, long frameIdx) {
     this->m_swapchain->FinishRendering();
 
@@ -729,9 +749,23 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
     const bool wasBowAimingSet = IsBowAimingActive();
     const bool isBowAiming = wasBowAimingSet && inputState.shared.in_game;
 
+    // the pause menu blanks briefly between tabs, so only unlock after it stays closed
+    constexpr uint32_t GAZE_UNLOCK_FRAMES = 5;
+    if (CemuHooks::IsScreenOpen(ScreenId::PauseMenuInfo_00)) {
+        m_gazeUnlockCounter = 0;
+        if (!m_isGazeLocked) {
+            m_isGazeLocked = true;
+            m_lockedGazeForward = GetHorizontalGazeDirection(headOrientation);
+        }
+    }
+    else if (m_isGazeLocked && ++m_gazeUnlockCounter >= GAZE_UNLOCK_FRAMES) {
+        m_isGazeLocked = false;
+        m_gazeUnlockCounter = 0;
+    }
+
     if (GetSettings().DoesUIFollowGaze() || isBowAiming) {
         m_currentOrientation = glm::slerp(m_currentOrientation, headOrientation, LERP_SPEED);
-        glm::vec3 forwardDirection = headOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+        glm::vec3 forwardDirection = m_isGazeLocked ? m_lockedGazeForward : headOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
 
         // calculate new position forwards
         glm::vec3 targetPosition = headPosition + (DISTANCE * forwardDirection);

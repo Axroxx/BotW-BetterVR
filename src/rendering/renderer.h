@@ -14,6 +14,8 @@ public:
     explicit RND_Renderer(XrSession xrSession);
     ~RND_Renderer();
 
+    void EndSession();
+
     enum CaptureMaskBits : uint32_t {
         CaptureMask_None = 0,
         CaptureMask_ColorLeft = 1u << 0,
@@ -284,6 +286,10 @@ public:
 
         glm::quat m_currentOrientation = glm::identity<glm::fquat>();
 
+        bool m_isGazeLocked = false;
+        uint32_t m_gazeUnlockCounter = 0;
+        glm::fvec3 m_lockedGazeForward = glm::fvec3(0.0f, 0.0f, -1.0f);
+
         long m_currentFrameIdx = 0;
     };
 
@@ -384,6 +390,7 @@ private:
 
 protected:
     XrSession m_session;
+    bool m_sessionRunning = false;
     XrFrameState m_frameState = { XR_TYPE_FRAME_STATE };
     mutable std::optional<std::array<XrView, 2>> m_currViews;
     std::array<RenderFrame, 2> m_renderFrames;

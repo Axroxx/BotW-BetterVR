@@ -75,7 +75,8 @@ OpenXR::OpenXR() {
         Log::print<INFO>("OpenXR runtime doesn't support debug utils (XR_EXT_DEBUG_UTILS)! Errors/debug information will no longer be able to be shown!");
     }
 
-    std::vector<const char*> enabledExtensions = { XR_KHR_D3D12_ENABLE_EXTENSION_NAME, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME };
+    std::vector<const char*> enabledExtensions = { XR_KHR_D3D12_ENABLE_EXTENSION_NAME, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME };
+    if (timeConvSupported) enabledExtensions.emplace_back(XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME);
     if (debugUtilsSupported) enabledExtensions.emplace_back(XR_EXT_DEBUG_UTILS_EXTENSION_NAME);
     if (m_capabilities.supportsPicoController) enabledExtensions.emplace_back(XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME);
     if (m_capabilities.supportsPicoUltraController) enabledExtensions.emplace_back(XR_BD_ULTRA_CONTROLLER_INTERACTION_EXTENSION_NAME);
@@ -727,6 +728,9 @@ void OpenXR::ProcessEvents() {
                 break;
             case XR_SESSION_STATE_STOPPING:
                 Log::print<VERBOSE>("OpenXR has indicated that the session should be ended!");
+                if (m_renderer) {
+                    m_renderer->EndSession();
+                }
                 break;
             case XR_SESSION_STATE_EXITING:
                 Log::print<VERBOSE>("OpenXR has indicated that the session should be destroyed!");
