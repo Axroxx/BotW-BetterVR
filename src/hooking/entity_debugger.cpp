@@ -1,4 +1,5 @@
 #include "entity_debugger.h"
+#include "hooking/imgui_menus.h"
 #include "instance.h"
 #include "pch.h"
 #include "utils/mod_settings.h"
@@ -22,8 +23,14 @@ void CemuHooks::hook_UpdateActorList(PPCInterpreter_t* hCPU) {
     // r5 holds current actor index
     // r6 holds current actor* list entry
 
+    // only the entity debugger reads the actor list, everything else needs the player/camera addresses below
+    const bool trackActors = GetSettings().enableDebuggerTools.load(std::memory_order_relaxed);
+    if (!trackActors && !s_knownActors.empty()) {
+        s_knownActors.clear();
+    }
+
     // clear actor list when reiterating actor list again
-    if (hCPU->gpr[5] == 0) {
+    if (trackActors && hCPU->gpr[5] == 0) {
         s_knownActors.clear();
     }
 
@@ -35,7 +42,7 @@ void CemuHooks::hook_UpdateActorList(PPCInterpreter_t* hCPU) {
 
     char* actorName = (char*)s_memoryBaseAddress + actorNamePtr;
 
-    if (actorName[0] != '\0') {
+    if (trackActors && actorName[0] != '\0') {
         // Log::print("Updating actor list [{}/{}] {:08x} - {}", hCPU->gpr[5], hCPU->gpr[7], hCPU->gpr[6], actorName);
         uint32_t actorId = hCPU->gpr[6] + stringToHash(actorName);
         s_knownActors.emplace(actorId, std::make_pair(actorName, hCPU->gpr[6]));
@@ -158,17 +165,48 @@ static void UpdateArrowTrails() {
 }
 #endif
 
+static bool IsEntityInspectorVisible() {
+    const auto& xr = VRManager::instance().XR;
+    return xr->m_isMenuOpen.load(std::memory_order_relaxed) && xr->m_currMenuTab.load(std::memory_order_relaxed) == ImGuiMenus::DEBUG_TAB;
+}
+
 void EntityDebugger::UpdateEntityMemory() {
-    std::scoped_lock lock(g_actorListMutex);
-    // remove actors in s_alreadyAddedActors that are no longer in s_knownActors
-    for (const auto& hash : s_alreadyAddedActors | std::views::keys) {
-        if (!s_knownActors.contains(hash)) {
-            RemoveEntity(hash);
-        }
+    const bool buildInspectorModel = IsEntityInspectorVisible();
+    const bool drawWorldBoxes = GetSettings().ShouldShowEntityBoxesIn3DView();
+#ifdef _DEBUG
+    const bool trackArrowTrails = Log::isLogTypeEnabled<ARROW_SHOT_CAPTURE>();
+#else
+    constexpr bool trackArrowTrails = false;
+#endif
+
+    if (!buildInspectorModel && !drawWorldBoxes && !trackArrowTrails) {
+        return;
     }
 
-    s_alreadyAddedActors = s_knownActors;
+    std::scoped_lock lock(g_actorListMutex);
+    if (buildInspectorModel) {
+        // remove actors in s_alreadyAddedActors that are no longer in s_knownActors
+        for (const auto& hash : s_alreadyAddedActors | std::views::keys) {
+            if (!s_knownActors.contains(hash)) {
+                RemoveEntity(hash);
+            }
+        }
 
+        s_alreadyAddedActors = s_knownActors;
+    }
+
+    if (buildInspectorModel || drawWorldBoxes) {
+        UpdateActorEntities(buildInspectorModel, drawWorldBoxes);
+    }
+
+#ifdef _DEBUG
+    if (trackArrowTrails) {
+        UpdateArrowTrails();
+    }
+#endif
+}
+
+void EntityDebugger::UpdateActorEntities(bool buildInspectorModel, bool drawWorldBoxes) {
     // find the current player (GameROMPlayer)
     BEMatrix34 playerPos = {};
     for (const auto& actorData : s_knownActors | std::views::values) {
@@ -229,22 +267,55 @@ void EntityDebugger::UpdateEntityMemory() {
         }
     }
 
-    const bool logAnimationSlots = m_logAnimationSlots.load(std::memory_order_relaxed);
+    const bool logAnimationSlots = buildInspectorModel && m_logAnimationSlots.load(std::memory_order_relaxed);
 
     // add actors that aren't in the overlay already
     for (auto& [actorId, actorInfo] : s_knownActors) {
         uint32_t actorPtr = actorInfo.second;
         const std::string& actorName = actorInfo.first;
 
-        auto addField = [&]<typename T>(const std::string& name, uint32_t offset) -> void {
+        BEMatrix34 mtx = CemuHooks::getMemory<BEMatrix34>(actorPtr + offsetof(ActorWiiU, mtx));
+        BEVec3 aabbMin = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.min));
+        BEVec3 aabbMax = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.max));
+
+        if (drawWorldBoxes) {
+            glm::fvec3 pos = mtx.getPos().getLE();
+            float distance = glm::distance(m_playerPos, pos);
+            bool matchesFilter = m_filter.empty() || actorName.find(m_filter) != std::string::npos;
+
+            if (matchesFilter && distance >= m_worldAABBMinDistance && distance <= m_worldAABBMaxDistance) {
+                glm::fquat rot = mtx.getRotLE();
+                glm::fvec3 localMin = aabbMin.getLE();
+                glm::fvec3 localMax = aabbMax.getLE();
+                glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
+
+                if (glm::all(glm::greaterThan(halfExtents, glm::vec3(0.0f)))) {
+                    glm::fvec3 worldCenter = pos + glm::mat3_cast(rot) * ((localMin + localMax) * 0.5f);
+                    DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 1), 1.0f);
+                }
+                else {
+                    DebugDraw::instance().Dot(pos, 0.15f, IM_COL32(255, 255, 255, 255 / 1));
+                }
+            }
+        }
+
+        if (!buildInspectorModel) {
+            continue;
+        }
+
+        auto addField = [&]<typename T>(std::string_view name, uint32_t offset) -> void {
             uint32_t address = actorPtr + offset;
-            AddOrUpdateEntity(actorId, actorName, name, address, CemuHooks::getMemory<T>(address), true);
+            AddOrUpdateEntity(actorId, actorName, name, address, CemuHooks::getMemory<T>(address));
         };
 
-        auto addMemoryRange = [&](const std::string& name, const uint32_t addressPtr, const uint32_t size) -> void {
+        auto addMemoryRange = [&](std::string_view name, const uint32_t addressPtr, const uint32_t size) -> void {
+            if (HasEntityValue(actorId, name)) {
+                return;
+            }
+
             uint32_t address = 0;
             if (CemuHooks::readMemoryBE(addressPtr, &address); address != 0) {
-                AddOrUpdateEntity(actorId, actorName, name, address, MemoryRange{ address, address + size, std::make_unique<MemoryEditor>() }, true);
+                AddOrUpdateEntity(actorId, actorName, name, address, MemoryRange{ address, address + size, std::make_unique<MemoryEditor>() });
             }
         };
 
@@ -266,37 +337,14 @@ void EntityDebugger::UpdateEntityMemory() {
             //Log::print<VERBOSE>("CanUseCamera = {:08X}", hexFlags);
         }
 
-        BEMatrix34 mtx = CemuHooks::getMemory<BEMatrix34>(actorPtr + offsetof(ActorWiiU, mtx));
         AddOrUpdateEntity(actorId, actorName, "mtx", actorPtr + offsetof(ActorWiiU, mtx), mtx);
         if (playerPos.pos_x.getLE() != 0.0f) {
             SetPosition(actorId, playerPos.getPos(), mtx.getPos());
         }
         SetRotation(actorId, mtx.getRotLE());
 
-        BEVec3 aabbMin = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.min));
-        BEVec3 aabbMax = CemuHooks::getMemory<BEVec3>(actorPtr + offsetof(ActorWiiU, aabb.max));
         if (aabbMin.x.getLE() != 0.0f) {
             SetAABB(actorId, aabbMin.getLE(), aabbMax.getLE());
-        }
-
-        float distance = glm::distance(m_playerPos, mtx.getPos().getLE());
-        glm::fvec3 pos = mtx.getPos().getLE();
-        glm::fquat rot = mtx.getRotLE();
-
-        glm::fvec3 localMin = aabbMin.getLE();
-        glm::fvec3 localMax = aabbMax.getLE();
-        glm::fvec3 localCenter = (localMin + localMax) * 0.5f;
-        glm::fvec3 halfExtents = (localMax - localMin) * 0.5f;
-        bool matchesFilter = m_filter.empty() || actorName.find(m_filter) != std::string::npos;
-
-        if (GetSettings().ShouldShowEntityBoxesIn3DView() && matchesFilter && distance >= m_worldAABBMinDistance && distance <= m_worldAABBMaxDistance) {
-            if (glm::all(glm::greaterThan(halfExtents, glm::vec3(0.0f)))) {
-                glm::fvec3 worldCenter = pos + glm::mat3_cast(rot) * localCenter;
-                DebugDraw::instance().Box(worldCenter, halfExtents, rot, IM_COL32(255, 255, 255, 255 / 1), 1.0f);
-            }
-            else {
-                DebugDraw::instance().Dot(pos, 0.15f, IM_COL32(255, 255, 255, 255 / 1));
-            }
         }
 
         // uint32_t physicsMtxPtr = 0;
@@ -340,7 +388,7 @@ void EntityDebugger::UpdateEntityMemory() {
                 Log::print<INFO>("ASList animations of {} (ASList at {:08X}):\n{}", actorName, asListPtr, animations);
             }
 
-            AddOrUpdateEntity(actorId, actorName, "ASList::getAnimation", asListPtr, std::move(animations), true);
+            AddOrUpdateEntity(actorId, actorName, "ASList::getAnimation", asListPtr, std::move(animations));
         }
 
         addField.operator()<uint32_t>("hashId", offsetof(ActorWiiU, hashId));
@@ -349,46 +397,6 @@ void EntityDebugger::UpdateEntityMemory() {
         addMemoryRange("chemicals", actorPtr + offsetof(ActorWiiU, chemicalsPtr), 0x64);
         addMemoryRange("reactions", actorPtr + offsetof(ActorWiiU, reactionsPtr), 0x0C);
         // addField.operator()<float>("lodDrawDistanceMultiplier", offsetof(ActorWiiU, lodDrawDistanceMultiplier));
-    }
-
-#ifdef _DEBUG
-    if (Log::isLogTypeEnabled<ARROW_SHOT_CAPTURE>()) {
-        UpdateArrowTrails();
-    }
-#endif
-
-    // other systems might've added memory to the overlay, so hence this is a separate loop
-    for (auto& entity : m_entities | std::views::values) {
-        if (!entity.isEntity)
-            continue;
-
-        for (auto& value : entity.values) {
-            if (!value.frozen)
-                continue;
-
-            std::visit([&](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, BEType<uint32_t>>) {
-                    CemuHooks::setMemory(value.value_address, arg);
-                }
-                else if constexpr (std::is_same_v<T, BEType<int32_t>>) {
-                    CemuHooks::setMemory(value.value_address, arg);
-                }
-                else if constexpr (std::is_same_v<T, BEType<float>>) {
-                    CemuHooks::setMemory(value.value_address, arg);
-                }
-                else if constexpr (std::is_same_v<T, BEVec3>) {
-                    CemuHooks::setMemory(value.value_address, arg);
-                }
-                else if constexpr (std::is_same_v<T, BEMatrix34>) {
-                    CemuHooks::setMemory(value.value_address, arg);
-                }
-                else if constexpr (std::is_same_v<T, uint8_t>) {
-                    CemuHooks::setMemory(value.value_address, arg);
-                }
-            },
-                       value.value);
-        }
     }
 }
 
@@ -443,9 +451,7 @@ void EntityDebugger::DrawEntityInspectorContent() {
         std::multimap<float, std::reference_wrapper<Entity>> sortedEntities;
         for (auto& entity : m_entities | std::views::values) {
             if (m_filter.empty() || entity.name.find(m_filter) != std::string::npos) {
-                bool isAnyValueFrozen = std::ranges::any_of(entity.values, [](auto& value) { return value.frozen; });
-                // give priority to frozen entities
-                sortedEntities.emplace(isAnyValueFrozen ? 0.0f - entity.priority : entity.priority, entity);
+                sortedEntities.emplace(entity.priority, entity);
             }
         }
 
@@ -457,14 +463,10 @@ void EntityDebugger::DrawEntityInspectorContent() {
             for (auto& value : entity.get().values) {
                 ImGui::PushID(value.value_name.c_str());
 
-                ImGui::Checkbox("##Frozen", &value.frozen);
-                ImGui::SameLine();
                 if (ImGui::Button("Copy")) {
                     ImGui::SetClipboardText(std::format("0x{:08x}", value.value_address).c_str());
                 }
                 ImGui::SameLine();
-
-                ImGui::BeginDisabled(!value.frozen && false);
 
                 std::visit([&]<typename T0>(T0&& arg) {
                     using T = std::decay_t<T0>;
@@ -558,8 +560,6 @@ void EntityDebugger::DrawEntityInspectorContent() {
                 },
                            value.value);
 
-                ImGui::EndDisabled();
-
                 ImGui::PopID();
             }
 
@@ -568,19 +568,33 @@ void EntityDebugger::DrawEntityInspectorContent() {
     }
 }
 
-void EntityDebugger::AddOrUpdateEntity(uint32_t actorId, const std::string& entityName, const std::string& valueName, uint32_t address, ValueVariant&& value, bool isEntity) {
-    const auto& [entityIt, _] = m_entities.try_emplace(actorId, Entity{ entityName, isEntity, 0.0f, {}, {}, {}, {} });
+void EntityDebugger::AddOrUpdateEntity(uint32_t actorId, std::string_view entityName, std::string_view valueName, uint32_t address, ValueVariant&& value) {
+    auto entityIt = m_entities.find(actorId);
+    if (entityIt == m_entities.end()) {
+        entityIt = m_entities.try_emplace(actorId, Entity{ std::string(entityName), 0.0f, {}, {}, {}, {} }).first;
+    }
 
     const auto& valueIt = std::ranges::find_if(entityIt->second.values, [&](EntityValue& val) {
         return val.value_name == valueName;
     });
 
     if (valueIt == entityIt->second.values.end()) {
-        entityIt->second.values.emplace_back(valueName, false, false, address, std::move(value));
+        entityIt->second.values.emplace_back(std::string(valueName), false, address, std::move(value));
     }
-    else if (!valueIt->frozen && !std::holds_alternative<MemoryRange>(value)) {
+    else if (!std::holds_alternative<MemoryRange>(value)) {
         valueIt->value = std::move(value);
     }
+}
+
+bool EntityDebugger::HasEntityValue(uint32_t actorId, std::string_view valueName) const {
+    const auto entityIt = m_entities.find(actorId);
+    if (entityIt == m_entities.end()) {
+        return false;
+    }
+
+    return std::ranges::any_of(entityIt->second.values, [&](const EntityValue& val) {
+        return val.value_name == valueName;
+    });
 }
 
 void EntityDebugger::SetPosition(uint32_t actorId, const BEVec3& ws_playerPos, const BEVec3& ws_entityPos) {

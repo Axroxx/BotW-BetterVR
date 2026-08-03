@@ -11,7 +11,7 @@ using ValueVariant = std::variant<BEType<uint32_t>, BEType<int32_t>, BEType<uint
 
 class EntityDebugger {
 public:
-    void AddOrUpdateEntity(uint32_t actorId, const std::string& entityName, const std::string& valueName, uint32_t address, ValueVariant&& value, bool isEntity = false);
+    void AddOrUpdateEntity(uint32_t actorId, std::string_view entityName, std::string_view valueName, uint32_t address, ValueVariant&& value);
     void SetPosition(uint32_t actorId, const BEVec3& ws_playerPos, const BEVec3& ws_entityPos);
     void SetRotation(uint32_t actorId, const glm::fquat rotation);
     void SetAABB(uint32_t actorId, glm::fvec3 min, glm::fvec3 max);
@@ -25,7 +25,6 @@ public:
 
     struct EntityValue {
         std::string value_name;
-        bool frozen = false;
         bool expanded = false;
         uint32_t value_address;
         ValueVariant value;
@@ -33,7 +32,6 @@ public:
 
     struct Entity {
         std::string name;
-        bool isEntity;
         float priority;
         BEVec3 position;
         glm::fquat rotation;
@@ -46,8 +44,11 @@ public:
     glm::fvec3 m_playerPos = {};
 
 private:
+    void UpdateActorEntities(bool buildInspectorModel, bool drawWorldBoxes);
+    bool HasEntityValue(uint32_t actorId, std::string_view valueName) const;
+
     std::atomic_bool m_logAnimationSlots = false;
-    std::string m_filter = std::string(256, '\0');
+    std::string m_filter;
     bool m_showWorldLabels = false;
     float m_worldAABBMinDistance = 1.0f;
     float m_worldAABBMaxDistance = 100.0f;
