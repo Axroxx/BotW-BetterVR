@@ -49,11 +49,9 @@ namespace VulkanUtils {
             return;
         }
 
-        VkImageMemoryBarrier2 barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
         barrier.oldLayout = oldLayout;
         barrier.newLayout = newLayout;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -68,27 +66,15 @@ namespace VulkanUtils {
             .layerCount = VK_REMAINING_ARRAY_LAYERS
         };
 
-        VkDependencyInfo dependencyInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR };
-        dependencyInfo.imageMemoryBarrierCount = 1;
-        dependencyInfo.pImageMemoryBarriers = &barrier;
-        vkroots::tables::CommandBufferDispatches.find(cmdBuffer)->CmdPipelineBarrier2(cmdBuffer, &dependencyInfo);
+        vkroots::tables::CommandBufferDispatches.find(cmdBuffer)->CmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
-    static void PipelineBarrier(VkCommandBuffer cmdBuffer, VkAccessFlags2 srcAccessMask, VkAccessFlags2 dstAccessMask, VkPipelineStageFlags2 srcStageMask, VkPipelineStageFlags2 dstStageMask) {
-        VkMemoryBarrier2 barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    static void PipelineBarrier(VkCommandBuffer cmdBuffer, VkAccessFlags srcAccessMask, VkAccessFlags dstAccessMask, VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask) {
+        VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
         barrier.srcAccessMask = srcAccessMask;
-        barrier.srcStageMask = srcStageMask;
         barrier.dstAccessMask = dstAccessMask;
-        barrier.dstStageMask = dstStageMask;
 
-        VkDependencyInfo dependencyInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR };
-        dependencyInfo.memoryBarrierCount = 1;
-        dependencyInfo.pMemoryBarriers = &barrier;
-        vkroots::tables::CommandBufferDispatches.find(cmdBuffer)->CmdPipelineBarrier2(cmdBuffer, &dependencyInfo);
-    }
-
-    static void DebugPipelineBarrier2(VkCommandBuffer cmdBuffer) {
-        return PipelineBarrier(cmdBuffer, VK_ACCESS_2_MEMORY_READ_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT_KHR, VK_ACCESS_2_MEMORY_READ_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR);
+        vkroots::tables::CommandBufferDispatches.find(cmdBuffer)->CmdPipelineBarrier(cmdBuffer, srcStageMask, dstStageMask, 0, 1, &barrier, 0, nullptr, 0, nullptr);
     }
 
     static void DebugPipelineBarrier(VkCommandBuffer cmdBuffer) {
@@ -130,7 +116,6 @@ namespace VulkanUtils {
             VK_ACCESS_MEMORY_WRITE_BIT;
 
         vkroots::tables::CommandBufferDispatches.find(cmdBuffer)->CmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
-        // return PipelineBarrier(cmdBuffer, VK_ACCESS_2_MEMORY_READ_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT_KHR, VK_ACCESS_2_MEMORY_READ_BIT_KHR | VK_ACCESS_2_MEMORY_WRITE_BIT_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT_KHR);
     }
 
 }

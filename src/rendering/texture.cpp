@@ -49,16 +49,11 @@ void BaseVulkanTexture::vkCopyToImage(VkCommandBuffer cmdBuffer, VkImage dstImag
     dispatch->CmdCopyImage(cmdBuffer, m_vkImage, m_vkCurrLayout, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     // AMD GPU FIX: Add memory barrier after copy to ensure data is visible
-    VkMemoryBarrier2 postCopyBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
-    postCopyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    postCopyBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    postCopyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    postCopyBarrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    VkMemoryBarrier postCopyBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+    postCopyBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    postCopyBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 
-    VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-    depInfo.memoryBarrierCount = 1;
-    depInfo.pMemoryBarriers = &postCopyBarrier;
-    dispatch->CmdPipelineBarrier2(cmdBuffer, &depInfo);
+    dispatch->CmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &postCopyBarrier, 0, nullptr, 0, nullptr);
 }
 
 void BaseVulkanTexture::vkClear(VkCommandBuffer cmdBuffer, VkClearColorValue color) {
