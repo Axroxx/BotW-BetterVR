@@ -72,11 +72,11 @@ void CemuHooks::hook_FixCameraSaveFilesAndInventory(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
     uint32_t originCaller = hCPU->gpr[0];
-    uint32_t isEnabling3DFramebufferCapture = hCPU->gpr[3];
-    EyeSide side = (EyeSide)hCPU->gpr[4];
-    uint32_t frameIdx = hCPU->gpr[5];
+    uint32_t tempLayerCopyObject = hCPU->gpr[3];
+    uint32_t frameIdx = hCPU->gpr[4];
+    EyeSide side = (EyeSide)hCPU->gpr[5];
 
-    Log::print<PPC>("[{:08X}] hook_FixCameraSaveFilesAndInventory: isEnabling3DFramebufferCapture={:08X}, side={}, frameIdx={}", originCaller, isEnabling3DFramebufferCapture, side, frameIdx);
+    Log::print<PPC>("[{:08X}] hook_FixCameraSaveFilesAndInventory: tempLayerCopyObject={:08X}, side={}, frameIdx={}", originCaller, tempLayerCopyObject, side, frameIdx);
     if (auto* renderer = VRManager::instance().XR->GetRenderer(); renderer != nullptr) {
         renderer->SignalGameCapturing3DFrameBuffer((long)frameIdx);
     }

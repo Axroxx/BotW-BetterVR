@@ -278,6 +278,13 @@ void RND_Renderer::EndFrame() {
     // decrement camera capture counter since its active only for a few frames
     if (m_cameraIsCapturing3DFrameBuffer > 0) {
         --m_cameraIsCapturing3DFrameBuffer;
+
+        // nothing else clears it: both capture-generation paths re-add it across Reset()
+        if (m_cameraIsCapturing3DFrameBuffer == 0) {
+            for (RenderFrame& frame : m_renderFrames) {
+                frame.issueFlags &= ~(uint32_t)CaptureIssue_MonoCapture;
+            }
+        }
     }
 
     m_lastFrameWorkTimeMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - m_frameStartTime).count();
