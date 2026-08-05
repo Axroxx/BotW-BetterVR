@@ -30,6 +30,35 @@ void CemuHooks::hook_BeginCameraSide(PPCInterpreter_t* hCPU) {
     Log::print<RENDERING>("{0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0}", side);
 }
 
+// uses the zNear/zFar already on the projection, so set those before calling
+static void ApplyProjectionFov(BESeadPerspectiveProjection& perspectiveProjection, const XrFovf& fov) {
+    data_VRProjectionMatrixOut newProjection = RenderUtils::CalculateFOVAndOffset(fov);
+
+    perspectiveProjection.aspect = newProjection.aspectRatio;
+    perspectiveProjection.fovYRadiansOrAngle = newProjection.fovY;
+    float halfAngle = newProjection.fovY.getLE() * 0.5f;
+    perspectiveProjection.fovySin = sinf(halfAngle);
+    perspectiveProjection.fovyCos = cosf(halfAngle);
+    perspectiveProjection.fovyTan = tanf(halfAngle);
+    perspectiveProjection.offset.x = newProjection.offsetX;
+    perspectiveProjection.offset.y = newProjection.offsetY;
+
+    glm::fmat4 newMatrix = RenderUtils::CalculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), fov);
+    perspectiveProjection.matrix = newMatrix;
+
+    glm::fmat4 newDeviceMatrix = newMatrix;
+    float zScale = perspectiveProjection.deviceZScale.getLE();
+    float zOffset = perspectiveProjection.deviceZOffset.getLE();
+    newDeviceMatrix[2][0] *= zScale;
+    newDeviceMatrix[2][1] *= zScale;
+    newDeviceMatrix[2][2] = (newDeviceMatrix[2][2] + newDeviceMatrix[3][2] * zOffset) * zScale;
+    newDeviceMatrix[2][3] = newDeviceMatrix[2][3] * zScale + newDeviceMatrix[3][3] * zOffset;
+    perspectiveProjection.deviceMatrix = newDeviceMatrix;
+
+    perspectiveProjection.dirty = false;
+    perspectiveProjection.deviceDirty = false;
+}
+
 static std::optional<XrFovf> GetGameProjectionFOV(OpenXR::EyeSide side, const BESeadPerspectiveProjection& perspectiveProjection, long frameIdx = -1) {
     auto* renderer = VRManager::instance().XR->GetRenderer();
     if (renderer == nullptr) {
@@ -764,11 +793,6 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    if (UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
-        return;
-    }
-
-
     uint32_t projectionIn = hCPU->gpr[3];
     uint32_t projectionOut = hCPU->gpr[12];
     OpenXR::EyeSide side = hCPU->gpr[0] == 0 ? EyeSide::LEFT : EyeSide::RIGHT;
@@ -782,6 +806,21 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
         return;
     }
 
+    // captures keep the game's near/far but not its aspect, which patch_AspectRatio.asm has set
+    // to the headset's per-eye one
+    if (UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
+        std::optional<float> gameFovY = RenderUtils::SanitizeGameFovY(perspectiveProjection.fovYRadiansOrAngle.getLE());
+        if (!gameFovY.has_value()) {
+            return;
+        }
+
+        ApplyProjectionFov(perspectiveProjection, RenderUtils::CreateSymmetricFov(gameFovY.value(), RenderUtils::CapturedImageAspectRatio));
+
+        writeMemory(projectionOut, &perspectiveProjection);
+        hCPU->gpr[3] = projectionOut;
+        return;
+    }
+
     perspectiveProjection.zFar = GetSettings().GetZFar();
     perspectiveProjection.zNear = GetSettings().GetZNear();
 
@@ -790,30 +829,10 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
         return;
     }
     XrFovf currFOV = currFovOpt.value();
-    auto newProjection = RenderUtils::CalculateFOVAndOffset(currFOV);
-
-    perspectiveProjection.aspect = newProjection.aspectRatio;
-    perspectiveProjection.fovYRadiansOrAngle = newProjection.fovY;
-    float halfAngle = newProjection.fovY.getLE() * 0.5f;
-    perspectiveProjection.fovySin = sinf(halfAngle);
-    perspectiveProjection.fovyCos = cosf(halfAngle);
-    perspectiveProjection.fovyTan = tanf(halfAngle);
-    perspectiveProjection.offset.x = newProjection.offsetX;
-    perspectiveProjection.offset.y = newProjection.offsetY;
-
-    glm::fmat4 newMatrix = RenderUtils::CalculateProjectionMatrix(perspectiveProjection.zNear.getLE(), perspectiveProjection.zFar.getLE(), currFOV);
-    perspectiveProjection.matrix = newMatrix;
-
-    // calculate device matrix
-    glm::fmat4 newDeviceMatrix = newMatrix;
+    ApplyProjectionFov(perspectiveProjection, currFOV);
 
     float zScale = perspectiveProjection.deviceZScale.getLE();
     float zOffset = perspectiveProjection.deviceZOffset.getLE();
-
-    newDeviceMatrix[2][0] *= zScale;
-    newDeviceMatrix[2][1] *= zScale;
-    newDeviceMatrix[2][2] = (newDeviceMatrix[2][2] + newDeviceMatrix[3][2] * zOffset) * zScale;
-    newDeviceMatrix[2][3] = newDeviceMatrix[2][3] * zScale + newDeviceMatrix[3][3] * zOffset;
 
     {
         auto* rendererForDebugDraw = VRManager::instance().XR->GetRenderer();
@@ -830,10 +849,6 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
             }
         }
     }
-    perspectiveProjection.deviceMatrix = newDeviceMatrix;
-
-    perspectiveProjection.dirty = false;
-    perspectiveProjection.deviceDirty = false;
 
     writeMemory(projectionOut, &perspectiveProjection);
     hCPU->gpr[3] = projectionOut;

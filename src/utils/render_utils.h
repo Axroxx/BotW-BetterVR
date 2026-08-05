@@ -24,6 +24,9 @@ namespace RenderUtils {
     inline constexpr float RecordingRenderAspectRatio = 16.0f / 9.0f;
     inline constexpr float RecordingRenderAspectRatioTolerance = 0.01f;
 
+    // the fixed 854x480 capture texture ScreenAppCamera::calledFromM159 (0x02F47A0C) allocates
+    inline constexpr float CapturedImageAspectRatio = 854.0f / 480.0f;
+
     inline bool ShouldAdjustForRecordingRenderAspect(std::optional<float> renderAspectRatio) {
         return renderAspectRatio.has_value() && std::isfinite(renderAspectRatio.value()) && fabsf(renderAspectRatio.value() - RecordingRenderAspectRatio) <= RecordingRenderAspectRatioTolerance;
     }
