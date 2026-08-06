@@ -13,13 +13,7 @@ It currently supports the following features:
 
 ### Requirements
 
-#### Supported VR headsets:
-
-The app currently utilizes OpenXR, which is supported on all the major headsets (Valve Index, HTC Vive, Oculus Rift, Meta Quest,
-Windows Mixed Reality etc.). However, controller bindings are currently only provided for Oculus Touch controllers.
-While more integrated solutions are being found out, there's probably ways to setup OpenXR mappings through SteamVR or other applications.
-
-#### Other Requirements:
+* It supports all OpenXR headsets, as long as the VR controllers have enough buttons.
 
 * A gaming PC with a CPU that is good at single-threaded workloads (a recent Intel i5 or Ryzen 5 are recommended at least)! The GPU matters a bit, but the CPU is the bottleneck here.
 
@@ -161,6 +155,7 @@ leoetlino: For the [BotW Decomp project](https://github.com/zeldaret/botw), whic
 Exzap: Technical support and optimization help  
 Mako Marci: Edited the trailer, made the logo and controller guide  
 Tim, Mako Marci, Solarwolf07, Elliott Tate & Derra: Helped with testing, recording, feedback and support  
+WunderbarVR: Made cool trailers  
 
 ### Licenses
 
