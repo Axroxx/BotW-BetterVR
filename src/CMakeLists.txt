@@ -34,6 +34,7 @@ target_sources(BetterVR_Layer PUBLIC
     ${CMAKE_SOURCE_DIR}/src/hooking/weapon.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/imgui_menus.h
     ${CMAKE_SOURCE_DIR}/src/hooking/imgui_menus.cpp
+    ${CMAKE_SOURCE_DIR}/src/hooking/supporters_generated.h
     ${CMAKE_SOURCE_DIR}/src/hooking/controls.cpp
     ${CMAKE_SOURCE_DIR}/src/hooking/entity_debugger.h
     ${CMAKE_SOURCE_DIR}/src/hooking/entity_debugger.cpp

@@ -9,6 +9,7 @@
 #include "utils/profiler.h"
 #include "utils/mod_settings.h"
 #include "weapon.h"
+#include "supporters_generated.h"
 
 template <typename DrawWidget>
 static void DrawSettingRow(const ImVec2& windowWidth, const char* label, DrawWidget&& drawWidget) {
@@ -81,6 +82,33 @@ static void DrawSectionHeader(const char* label) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
     ImGui::Text(label);
     ImGui::PopStyleColor();
+}
+
+static void DrawSupporterWall() {
+    if (Supporters::List.empty()) {
+        return;
+    }
+
+    ImGui::SeparatorText("Supporters");
+    ImGui::TextWrapped("These people are funding the development of the mod. Thank you!");
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    int columns = std::clamp((int)(ImGui::GetContentRegionAvail().x / 260.0f), 1, 4);
+    if (ImGui::BeginTable("##Supporters", columns, ImGuiTableFlags_NoSavedSettings)) {
+        for (const auto& supporter : Supporters::List) {
+            const char* icon = ICON_KI_STAR;
+            if (supporter.platform == Supporters::Platform::GITHUB) {
+                icon = ICON_KI_GITHUB;
+            }
+            else if (supporter.platform == Supporters::Platform::PATREON) {
+                icon = ICON_KI_HEART;
+            }
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%s %s", icon, supporter.name);
+        }
+        ImGui::EndTable();
+    }
 }
 
 static void DrawCompactProfilerSummary() {
