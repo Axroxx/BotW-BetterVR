@@ -389,9 +389,22 @@ private:
     long SelectNewestHudReadyFrame() const;
 
 protected:
+    void FramePumpLoop();
+    void StopFramePump();
+
     XrSession m_session;
     bool m_sessionRunning = false;
     XrFrameState m_frameState = { XR_TYPE_FRAME_STATE };
+
+    std::thread m_framePumpThread;
+    std::mutex m_framePumpMutex;
+    std::condition_variable m_framePumpCv;
+    XrFrameState m_pumpedFrameState = { XR_TYPE_FRAME_STATE };
+    bool m_framePumpSlotReady = false;
+    bool m_framePumpWaitRequested = false;
+    bool m_framePumpStopRequested = false;
+    bool m_xrFrameActive = false;
+    uint64_t m_skippedXrFrameCount = 0;
     mutable std::optional<std::array<XrView, 2>> m_currViews;
     std::array<RenderFrame, 2> m_renderFrames;
     Stable3DReference m_stable3D = {};

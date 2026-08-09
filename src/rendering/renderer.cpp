@@ -83,12 +83,14 @@ void RND_Renderer::EndSession() {
         return;
     }
     m_sessionRunning = false;
+    StopFramePump();
     if (XrResult result = xrEndSession(m_session); XR_FAILED(result)) {
         Log::print<ERROR>("Failed to end OpenXR session (result {})!", (int)result);
     }
 }
 
 RND_Renderer::~RND_Renderer() {
+    StopFramePump();
     if (m_sessionRunning && m_session != XR_NULL_HANDLE) {
         xrRequestExitSession(m_session);
         EndSession();
@@ -117,12 +119,45 @@ void RND_Renderer::StartFrame() {
 
     BetterVRProfiler::SetEnabled(shouldEnableProfiler);
     BetterVRProfiler::AdvanceFrame();
+
+    if (shouldEnableProfiler && Log::IsCategoryEnabled(VERBOSE)) {
+        static uint32_t s_profilerLogCountdown = 0;
+        if (++s_profilerLogCountdown >= 600) {
+            s_profilerLogCountdown = 0;
+            for (const auto& snapshot : BetterVRProfiler::GetSnapshots()) {
+                if (snapshot.averageFrameMs >= 0.02 || snapshot.maxFrameMs >= 0.5) {
+                    Log::print<VERBOSE>("PROFILER {}: avg={:.3f}ms last={:.3f}ms max={:.3f}ms calls={}", snapshot.name, snapshot.averageFrameMs, snapshot.lastFrameMs, snapshot.maxFrameMs, snapshot.lastFrameCalls);
+                }
+            }
+            Log::print<VERBOSE>("PROFILER FramePacing: wait={:.3f}ms frame={:.3f}ms overhead={:.3f}ms skippedXr={}", m_lastWaitTimeMs, m_lastFrameTimeMs, m_lastOverheadMs, m_skippedXrFrameCount);
+        }
+    }
+
     m_isInitialized = true;
 
-    XrFrameWaitInfo waitFrameInfo = { XR_TYPE_FRAME_WAIT_INFO };
     auto waitStart = std::chrono::high_resolution_clock::now();
-    checkXRResult(xrWaitFrame(m_session, &waitFrameInfo, &m_frameState), "Failed to wait for next frame!");
+    if (!m_framePumpThread.joinable()) {
+        m_framePumpWaitRequested = true;
+        m_framePumpThread = std::thread(&RND_Renderer::FramePumpLoop, this);
+    }
+
+    bool xrSlotReady = false;
+    {
+        std::lock_guard<std::mutex> lock(m_framePumpMutex);
+        if (m_framePumpSlotReady) {
+            m_frameState = m_pumpedFrameState;
+            m_framePumpSlotReady = false;
+            xrSlotReady = true;
+        }
+    }
     m_lastWaitTimeMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - waitStart).count();
+
+    if (!xrSlotReady) {
+        m_xrFrameActive = false;
+        ++m_skippedXrFrameCount;
+        return;
+    }
+    m_xrFrameActive = true;
 
     // Runtime predicted cadence
     m_predictedDisplayPeriodMs = (double)m_frameState.predictedDisplayPeriod / 1e6;
@@ -149,10 +184,62 @@ void RND_Renderer::StartFrame() {
     m_frameInputsPending = true;
     m_frameViewLatchFailed = false;
     m_frameInputLatchFailed = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_framePumpMutex);
+        m_framePumpWaitRequested = true;
+    }
+    m_framePumpCv.notify_one();
+}
+
+void RND_Renderer::FramePumpLoop() {
+    while (true) {
+        {
+            std::unique_lock<std::mutex> lock(m_framePumpMutex);
+            m_framePumpCv.wait(lock, [this] { return m_framePumpWaitRequested || m_framePumpStopRequested; });
+            if (m_framePumpStopRequested) {
+                return;
+            }
+            m_framePumpWaitRequested = false;
+        }
+
+        XrFrameWaitInfo waitFrameInfo = { XR_TYPE_FRAME_WAIT_INFO };
+        XrFrameState frameState = { XR_TYPE_FRAME_STATE };
+        XrResult result = xrWaitFrame(m_session, &waitFrameInfo, &frameState);
+        if (XR_FAILED(result)) {
+            Log::print<ERROR>("xrWaitFrame failed with result {}, stopping frame pump", (int)result);
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(m_framePumpMutex);
+        m_pumpedFrameState = frameState;
+        m_framePumpSlotReady = true;
+    }
+}
+
+void RND_Renderer::StopFramePump() {
+    {
+        std::lock_guard<std::mutex> lock(m_framePumpMutex);
+        m_framePumpStopRequested = true;
+    }
+    m_framePumpCv.notify_one();
+    if (m_framePumpThread.joinable()) {
+        m_framePumpThread.join();
+    }
+
+    // the renderer outlives EndSession, so leave the pump restartable
+    std::lock_guard<std::mutex> lock(m_framePumpMutex);
+    m_framePumpStopRequested = false;
+    m_framePumpSlotReady = false;
+    m_framePumpWaitRequested = false;
 }
 
 
 void RND_Renderer::EndFrame() {
+    if (!m_xrFrameActive) {
+        return;
+    }
+
     static uint32_t s_endFrameCount = 0;
     s_endFrameCount++;
 
@@ -313,6 +400,7 @@ void RND_Renderer::EndFrame() {
     }
 
     VRManager::instance().D3D12->EndFrame();
+    m_xrFrameActive = false;
 }
 
 void RND_Renderer::LatchFrameCameraReference(long frameIdx) {
