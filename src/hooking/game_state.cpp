@@ -11,7 +11,6 @@ CemuHooks::HybridEventSettings CemuHooks::s_currentEventSettings = {};
 std::unordered_map<std::string, CemuHooks::HybridEventSettings> CemuHooks::s_eventSettings = {};
 
 uint32_t CemuHooks::s_playerAddress = 0;
-uint32_t CemuHooks::s_damageStateNameAddress = 0;
 uint32_t CemuHooks::s_isLadderClimbing = 0;
 uint32_t CemuHooks::s_isRiding = 0;
 uint32_t CemuHooks::s_isRidingSandSeal = 0;
@@ -24,19 +23,16 @@ constexpr CemuHooks::HybridEventSettings defaultFirstPersonSettings = {
 
 constexpr uint32_t orig_PlayerNormalChangeStateInnerChangeChildFuncAddr = 0x037B8284;
 
-static bool ShouldBlockFirstPersonPlayerNormalState(std::string_view stateName, uint32_t stateNamePtr) {
+static bool ShouldBlockFirstPersonPlayerNormalState(uint32_t stateNamePtr) {
+    // the large/medium/small damage reaction states; the get-up state (0x101E0234/0x101E0C1C) must stay allowed since it's the only exit out of a ragdoll
     switch (stateNamePtr) {
-    case 0x101E0234:
     case 0x101E0910:
     case 0x101E0930:
     case 0x101E0940:
-    case 0x101E0C1C:
         return true;
     default:
-        break;
+        return false;
     }
-
-    return stateName == "DamageSUpper" || stateName == "DamageLarge" || stateName == "DamageFlipped" || stateName == "Launch" || stateName == "LargeDamage";
 }
 
 bool CemuHooks::HasActiveCutscene() {
@@ -278,11 +274,10 @@ void CemuHooks::hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU) {
     std::string requestedState = GameUtils::GetString(stateNamePtr);
     s_lastRequestedPlayerNormalState = requestedState;
 
-    if (IsFirstPerson() && GetSettings().ShouldPreventFirstPersonRagdoll() && ShouldBlockFirstPersonPlayerNormalState(requestedState, stateNamePtr)) {
-        if (s_damageStateNameAddress != 0) {
-            Log::print<PPC>("Redirecting PlayerNormal state '{}' to 'Damage' in first person", requestedState);
-            hCPU->gpr[4] = s_damageStateNameAddress;
-        }
+    if (IsFirstPerson() && GetSettings().ShouldPreventFirstPersonRagdoll() && ShouldBlockFirstPersonPlayerNormalState(stateNamePtr)) {
+        Log::print<PPC>("Suppressing PlayerNormal state '{}' in first person", requestedState);
+        hCPU->instructionPointer = hCPU->sprNew.LR;
+        return;
     }
 
     if (requestedState != s_currentPlayerNormalState) {

@@ -806,8 +806,7 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
         return;
     }
 
-    // captures keep the game's near/far but not its aspect, which patch_AspectRatio.asm has set
-    // to the headset's per-eye one
+    // captures use the game's FOV
     if (UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
         std::optional<float> gameFovY = RenderUtils::SanitizeGameFovY(perspectiveProjection.fovYRadiansOrAngle.getLE());
         if (!gameFovY.has_value()) {
@@ -1183,23 +1182,29 @@ static void ApplyStoredActionFloatParamOverrides() {
 
     std::scoped_lock lock(storedActionFloatParamsLock);
 
-    for (auto& entries : storedActionFloatParams | std::views::values) {
-        for (auto& entry : entries) {
+    for (auto it = storedActionFloatParams.begin(); it != storedActionFloatParams.end();) {
+        std::erase_if(it->second, [](ActionFloatParamPointerOverride& entry) {
             uint32_t currentPointer = CemuHooks::getMemory<BEType<uint32_t>>(entry.destPointerAddress).getLE();
-            if (!entry.storedOriginalPointer && currentPointer != 0 && currentPointer != kPlayerLaunchZeroFloat) {
-                entry.originalPointer = currentPointer;
-                entry.storedOriginalPointer = true;
+            if (!entry.storedOriginalPointer) {
+                if (currentPointer != 0 && currentPointer != kPlayerLaunchZeroFloat) {
+                    entry.originalPointer = currentPointer;
+                    entry.storedOriginalPointer = true;
+                }
+                return false;
             }
 
-            if (!entry.storedOriginalPointer) {
-                continue;
+            // the slot no longer holds a pointer this override has put or seen there, so the action object was freed (player recreation) and this memory must not be touched again
+            if (currentPointer != entry.originalPointer && currentPointer != kPlayerLaunchZeroFloat) {
+                return true;
             }
 
             uint32_t targetPointer = (CemuHooks::IsFirstPerson() && GetSettings().ShouldPreventFirstPersonRagdoll()) ? kPlayerLaunchZeroFloat : entry.originalPointer;
             if (currentPointer != targetPointer) {
                 CemuHooks::setMemory<uint32_t>(entry.destPointerAddress, targetPointer);
             }
-        }
+            return false;
+        });
+        it = it->second.empty() ? storedActionFloatParams.erase(it) : std::next(it);
     }
 }
 
@@ -1211,14 +1216,26 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     uint32_t currentCameraVtbl = hCPU->gpr[5];
 
 
-    // check if any patched parameters exist for this camera vtbl
+    constexpr uint32_t kCameraChaseVtbl = 0x101B34F4;
+    constexpr uint32_t kCameraTailVtbl = 0x101BC278;
+    constexpr uint32_t kCameraMagneCatchVtbl = 0x101BAB4C;
+
+    // check if any patched parameters exist for this camera instance
     {
-        std::scoped_lock(storedCameraParametersLock);
+        std::scoped_lock lock(storedCameraParametersLock);
 
         auto it = storedCameraParameters.find(currCameraInstance);
+        if (it != storedCameraParameters.end() && currentCameraVtbl != kCameraChaseVtbl) {
+            // entries were stored for a CameraChase that used to live at this address, so they describe a freed object
+            storedCameraParameters.erase(it);
+            it = storedCameraParameters.end();
+        }
         if (it != storedCameraParameters.end()) {
-            for (auto& paramEntry : it->second) {
+            std::erase_if(it->second, [](CameraParamValueOffset& paramEntry) {
                 uint32_t originalValuePtr = getMemory<BEType<uint32_t>>(paramEntry.offsetInsideCamera).getLE();
+                if (originalValuePtr < 0x10000000 || originalValuePtr >= 0x50000000 || (originalValuePtr & 3) != 0) {
+                    return true;
+                }
                 BEType<float>* paramValueBE = (BEType<float>*)(s_memoryBaseAddress + originalValuePtr);
 
                 // on first patch, store original value
@@ -1235,13 +1252,10 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
                     // restore original value in third person
                     *paramValueBE = paramEntry.originalValue;
                 }
-            }
+                return false;
+            });
         }
     }
-
-    constexpr uint32_t kCameraChaseVtbl = 0x101B34F4;
-    constexpr uint32_t kCameraTailVtbl = 0x101BC278;
-    constexpr uint32_t kCameraMagneCatchVtbl = 0x101BAB4C;
 
     static uint32_t s_lastLoggedCameraVtbl = 0;
     static uint32_t s_lastLoggedCameraInstance = 0;
@@ -1288,7 +1302,7 @@ void CemuHooks::UpdateFloatParamOverrides() {
 constexpr uint32_t orig_GetStaticParam_float_funcAddr = 0x030E9BE0;
 
 static bool ShouldZeroFirstPersonDamageFloatParam(std::string_view paramName) {
-    return paramName.find("Speed") != std::string_view::npos || paramName.starts_with("JumpHeight") || paramName.starts_with("AddLinearImpulse") || paramName.starts_with("AddRollImpulse") || paramName == "NoRagdollTime";
+    return paramName.find("Speed") != std::string_view::npos || paramName.starts_with("JumpHeight") || paramName.starts_with("AddLinearImpulse") || paramName.starts_with("AddRollImpulse");
 }
 
 // hook for ksys::act::ai::ActionBase::getStaticParam<FLOAT> calls
@@ -1332,7 +1346,7 @@ void CemuHooks::hook_OverwriteFloatParam(PPCInterpreter_t* hCPU) {
     {
         std::string paramNameOwned = std::string(paramNameStr);
 
-        std::scoped_lock(storedCameraParametersLock);
+        std::scoped_lock lock(storedCameraParametersLock);
 
         auto& paramList = storedCameraParameters[actionPtr];
         // store parameter offset if not already stored

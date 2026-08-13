@@ -132,17 +132,17 @@ moduleMatches = 0x6267BFD0
 ;0x024AC8DC = cmpw r3, r3
 ;0x024AC7B4 = nop
 
-; track and redirect first-person PlayerNormal damage state changes to the safe standard Damage state
+; track and suppress first-person PlayerNormal damage reaction state changes
 0x02D0A558 = bla import.coreinit.hook_PlayerNormalChangeState
 
 ; neutralize PlayerLaunch movement for Link by overriding the launch float params to 0.0f
+; NoRagdollTime (0x02CAE098) is deliberately left alone: it's the window during which ragdolling is suppressed, so zeroing it causes instant ragdolls
 0x02CAE018 = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAE038 = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAE058 = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAE078 = bla import.coreinit.hook_OverwriteFloatParam
-0x02CAE098 = bla import.coreinit.hook_OverwriteFloatParam
 
-; neutralize PlayerLargeDamage movement for Link by overriding its speed, jump, impulse, and ragdoll float params to 0.0f
+; neutralize PlayerLargeDamage movement for Link by overriding its speed, jump and impulse float params to 0.0f (NoRagdollTime at 0x02CAB5AC also left alone)
 0x02CAB32C = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB350 = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB374 = bla import.coreinit.hook_OverwriteFloatParam
@@ -161,7 +161,6 @@ moduleMatches = 0x6267BFD0
 0x02CAB548 = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB56C = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB58C = bla import.coreinit.hook_OverwriteFloatParam
-0x02CAB5AC = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB5CC = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB5EC = bla import.coreinit.hook_OverwriteFloatParam
 0x02CAB60C = bla import.coreinit.hook_OverwriteFloatParam

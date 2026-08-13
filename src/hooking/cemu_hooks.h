@@ -126,7 +126,6 @@ public:
     static bool s_twoHandGripConsumesGrabInput;
     static std::atomic_uint32_t s_recordingOutputMode;
     static uint32_t s_playerAddress;
-    static uint32_t s_damageStateNameAddress;
     static uint32_t s_playerMtxAddress;
     static uint32_t s_cameraMtxAddress;
     static glm::fvec3 s_playerPos;

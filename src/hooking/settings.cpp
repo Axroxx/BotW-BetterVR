@@ -143,11 +143,6 @@ void CemuHooks::hook_UpdateSettings(PPCInterpreter_t* hCPU) {
     // Log::print("Updated settings!");
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (s_damageStateNameAddress == 0) {
-        s_damageStateNameAddress = hCPU->gpr[8];
-        Log::print<PPC>("Registered Damage state string address: {:#X}", s_damageStateNameAddress);
-    }
-
     uint32_t ppc_tableOfCutsceneEventSettings = hCPU->gpr[6];
     uint32_t recordingOutputMode = 0;
     readMemoryBE(0x10416BF4, &recordingOutputMode);

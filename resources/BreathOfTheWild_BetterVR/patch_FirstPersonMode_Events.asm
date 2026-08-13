@@ -87,8 +87,6 @@ stw r6, 0x10(r1)
 
 lis r6, data_TableOfCutsceneEventsSettings@ha
 addi r6, r6, data_TableOfCutsceneEventsSettings@l
-lis r8, str_Damage@ha
-addi r8, r8, str_Damage@l
 bl import.coreinit.hook_UpdateSettings
 lwz r5, 0x14(r1)
 lwz r6, 0x10(r1)
@@ -137,9 +135,6 @@ mtlr r0
 
 li r4, -1 ; Execute the instruction that got replaced
 blr
-
-str_Damage:
-.string "Damage"
 
 0x031FAAF0 = bla vr_updateSettings
 
