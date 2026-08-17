@@ -1095,21 +1095,6 @@ void CemuHooks::hook_EndCameraSide(PPCInterpreter_t* hCPU) {
 
     OpenXR::EyeSide side = hCPU->gpr[3] == 0 ? OpenXR::EyeSide::LEFT : OpenXR::EyeSide::RIGHT;
 
-    // todo: sometimes this can deadlock apparently?
-    if (VRManager::instance().XR->GetRenderer()->IsInitialized() && side == OpenXR::EyeSide::RIGHT) {
-        m_heldWeaponsLastUpdate[0]++;
-        m_heldWeaponsLastUpdate[1]++;
-        if (m_heldWeaponsLastUpdate[0] >= 6) {
-            m_heldWeapons[0] = 0;
-            s_handWeaponTypes[0] = WeaponType::UnknownWeapon;
-        }
-        if (m_heldWeaponsLastUpdate[1] >= 6) {
-            m_heldWeapons[1] = 0;
-            s_handWeaponTypes[1] = WeaponType::UnknownWeapon;
-            s_arrowNockedInRightHand = false;
-        }
-    }
-
     Log::print<RENDERING>("{0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0}", side);
     Log::print<RENDERING>("===============================================================================");
     Log::print<RENDERING>("");

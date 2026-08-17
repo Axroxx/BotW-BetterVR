@@ -156,6 +156,8 @@ void CemuHooks::hook_UpdateSettings(PPCInterpreter_t* hCPU) {
 
     ++s_framesSinceLastCameraUpdate;
 
+    UpdateHeldWeaponStaleness();
+
 #ifdef _DEBUG
     constexpr uint32_t maxScreenIdx = std::to_underlying(ScreenId::ScreenId_END);
     std::unordered_set<ScreenId> currentEnabledScreens;

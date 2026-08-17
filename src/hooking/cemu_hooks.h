@@ -117,7 +117,9 @@ public:
     std::unique_ptr<class EntityDebugger> m_entityDebugger;
     static std::array<class WeaponMotionAnalyser, 2> m_motionAnalyzers;
     static std::array<uint32_t, 2> m_heldWeapons;
+    // counted in game frames, so it may only ever be advanced by UpdateHeldWeaponStaleness
     static std::array<uint32_t, 2> m_heldWeaponsLastUpdate;
+    static constexpr uint32_t HeldWeaponStaleFrames = 6;
     static std::array<WeaponType, 2> s_handWeaponTypes;
     static bool s_arrowNockedInRightHand;
 
@@ -178,6 +180,7 @@ public:
     static glm::fvec3 GetAppliedRoomscaleHeadPosition();
     static float GetRoomscaleFadeAmount();
     static void UpdateFloatParamOverrides();
+    static void UpdateHeldWeaponStaleness();
 
     uint64_t GetCurrentTitleId() const {
         if (gameMeta_getTitleId == nullptr) {

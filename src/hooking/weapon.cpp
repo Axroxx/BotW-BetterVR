@@ -22,6 +22,28 @@ std::array s_cameraPositions = {
     glm::fvec3(0.0f)
 };
 
+// Must be driven once per game frame, since hook_ChangeWeaponMtx rebinds a held weapon at that same
+// rate. Ticking it on a rendering hook instead evicts a live weapon within the frame that bound it.
+void CemuHooks::UpdateHeldWeaponStaleness() {
+    RND_Renderer* renderer = VRManager::instance().XR->GetRenderer();
+    if (renderer == nullptr || !renderer->IsInitialized()) {
+        return;
+    }
+
+    m_heldWeaponsLastUpdate[0]++;
+    m_heldWeaponsLastUpdate[1]++;
+
+    if (m_heldWeaponsLastUpdate[0] >= HeldWeaponStaleFrames) {
+        m_heldWeapons[0] = 0;
+        s_handWeaponTypes[0] = WeaponType::UnknownWeapon;
+    }
+    if (m_heldWeaponsLastUpdate[1] >= HeldWeaponStaleFrames) {
+        m_heldWeapons[1] = 0;
+        s_handWeaponTypes[1] = WeaponType::UnknownWeapon;
+        s_arrowNockedInRightHand = false;
+    }
+}
+
 static float ComputeAttackDamageMultiplier(float swingPower) {
     const float normalizedPower = glm::clamp((swingPower - 0.15f) / 0.85f, 0.0f, 1.0f);
     const float rampedPower = normalizedPower * normalizedPower * (3.0f - 2.0f * normalizedPower);
