@@ -1129,6 +1129,29 @@ void CemuHooks::hook_UseCameraDistance(PPCInterpreter_t* hCPU) {
     }
 }
 
+// Decides both camera collision passes: the early-out in sub_2E61FC0 and the sub_2E622FC predicate.
+// Both only produce a corrected camera matrix, which the headset pose overwrites before anything
+// reads it, so they only matter where the game camera is what gets rendered: third person, and the
+// black-bar event cameras.
+void CemuHooks::hook_SkipCameraCollision(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    static const bool keepCollision = GetEnvironmentVariableA("BETTERVR_KEEP_CAMERA_COLLISION", nullptr, 0) != 0;
+
+    const bool skipCollision = !keepCollision
+        && VRManager::instance().XR->GetRenderer() != nullptr
+        && IsInGame()
+        && !IsThirdPerson()
+        && !UseBlackBarsDuringEvents();
+    hCPU->gpr[3] = skipCollision ? 1u : 0u;
+
+    static std::atomic_int s_lastDecision = -1;
+    if (s_lastDecision.exchange(skipCollision ? 1 : 0) != (skipCollision ? 1 : 0)) {
+        Log::print<INFO>("[CameraCollision] {} camera collision (thirdPerson={}, cutscene={})",
+            skipCollision ? "skipping" : "running", IsThirdPerson(), HasActiveCutscene());
+    }
+}
+
 void CemuHooks::hook_SetActorOpacity(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 

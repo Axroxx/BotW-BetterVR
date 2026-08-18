@@ -55,6 +55,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_RouteActorJob", &hook_RouteActorJob);
 
         osLib_registerHLEFunction("coreinit", "hook_UseCameraDistance", &hook_UseCameraDistance);
+        osLib_registerHLEFunction("coreinit", "hook_SkipCameraCollision", &hook_SkipCameraCollision);
         osLib_registerHLEFunction("coreinit", "hook_ReplaceCameraMode", &hook_ReplaceCameraMode);
         osLib_registerHLEFunction("coreinit", "hook_GetEventName", &hook_GetEventName);
         osLib_registerHLEFunction("coreinit", "hook_PlayerNormalChangeState", &hook_PlayerNormalChangeState);
@@ -236,6 +237,7 @@ private:
     static void hook_RouteActorJob(PPCInterpreter_t* hCPU);
 
     static void hook_UseCameraDistance(PPCInterpreter_t* hCPU);
+    static void hook_SkipCameraCollision(PPCInterpreter_t* hCPU);
     static void hook_ReplaceCameraMode(PPCInterpreter_t* hCPU);
     static void hook_GetEventName(PPCInterpreter_t* hCPU);
     static void hook_PlayerNormalChangeState(PPCInterpreter_t* hCPU);
