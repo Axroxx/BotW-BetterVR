@@ -611,7 +611,7 @@ std::optional<OpenXR::InputState> OpenXR::UpdateActions(XrTime predictedFrameTim
 
             auto& buttonState = newState.inGame.grabState[side];
             if (newState.inGame.grab[side].isActive == XR_TRUE) {
-                auto buttonPressed = newState.inGame.grab[side].currentState > 0.75f;
+                auto buttonPressed = newState.inGame.grab[side].currentState > 0.51f;
                 CheckButtonState(buttonPressed, buttonState);
             }
         }
