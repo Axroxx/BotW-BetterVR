@@ -633,3 +633,704 @@ blr
 0x037A7438 = ba Profile_Actor__job2_1_ragdoll_related
 0x037A7E30 = ba Profile_Actor__job2_2
 0x037A7C04 = ba Profile_Actor__job4
+
+
+; ==================================================================================
+; Subdivisions of PPC_SystemStateMachine. These wrap the call sites inside
+; GameScene::calcAndRunStateMachine rather than the callee prologues, so no prologue
+; needs replicating. Each incoming argument and each return value is spilled around
+; the hook calls because the HLE transition may clobber volatiles.
+; Note gameScene::CalcGraphicsStuff is called from here too but already has its own
+; marker, so the state machine total already contains it.
+
+PPC_PreCalcWorldPre                 = 47
+PPC_CalcEntryJob                    = 48
+PPC_StateMachineRun                 = 49
+PPC_CalcControllerAndUi             = 50
+PPC_MCMgrCalc                       = 51
+PPC_PhysicsMemSysCalc               = 52
+PPC_TeraStuff                       = 53
+
+0x03415600 = target_ksys__PreCalcWorldPre:
+0x03415CD0 = target_ksys__calcEntryJob:
+0x03625E00 = target_StateMachine__run:
+0x03415AF8 = target_ksys__CalcControllerAndUi:
+0x031FD360 = target_MCMgr__calc:
+0x037FFE74 = target_PhysicsMemSys__calc:
+0x03417E5C = target_teraStuff:
+
+Profile_PreCalcWorldPre:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_PreCalcWorldPre
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_ksys__PreCalcWorldPre@ha
+addi r12, r12, target_ksys__PreCalcWorldPre@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_PreCalcWorldPre
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+Profile_CalcEntryJob:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_CalcEntryJob
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_ksys__calcEntryJob@ha
+addi r12, r12, target_ksys__calcEntryJob@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_CalcEntryJob
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+Profile_StateMachineRun:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_StateMachineRun
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_StateMachine__run@ha
+addi r12, r12, target_StateMachine__run@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_StateMachineRun
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+Profile_CalcControllerAndUi:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_CalcControllerAndUi
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_ksys__CalcControllerAndUi@ha
+addi r12, r12, target_ksys__CalcControllerAndUi@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_CalcControllerAndUi
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+Profile_MCMgrCalc:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_MCMgrCalc
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_MCMgr__calc@ha
+addi r12, r12, target_MCMgr__calc@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_MCMgrCalc
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+Profile_PhysicsMemSysCalc:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_PhysicsMemSysCalc
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_PhysicsMemSys__calc@ha
+addi r12, r12, target_PhysicsMemSys__calc@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_PhysicsMemSysCalc
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+Profile_TeraStuff:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_TeraStuff
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_teraStuff@ha
+addi r12, r12, target_teraStuff@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_TeraStuff
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+0x02C2D190 = bla Profile_TeraStuff
+0x02C2D198 = bla Profile_PreCalcWorldPre
+0x02C2D1E0 = bla Profile_PhysicsMemSysCalc
+0x02C2D204 = bla Profile_MCMgrCalc
+0x02C2D30C = bla Profile_CalcEntryJob
+0x02C2D47C = bla Profile_StateMachineRun
+0x02C2D484 = bla Profile_CalcControllerAndUi
+0x02C2D48C = bla Profile_StateMachineRun
+
+; ---------------------------------------------------------------------------
+; Subdivisions of ksys::calcEntryJob @ 0x03415CD0.
+;
+; These split the two blocking WorkerMgr::sync waits from the work calcEntryJob
+; does inline, separating time spent in the Havok jobs from time spent in the
+; passes on the main thread.
+; ---------------------------------------------------------------------------
+
+PPC_EntryControllerUi      = 54
+PPC_EntryWorkerSync1       = 55
+PPC_EntryWorkerSync2       = 56
+PPC_EntryTerrainAuto15     = 57
+PPC_EntryGrassCut          = 58
+PPC_EntryInvoker3          = 59
+PPC_EntryInvoker4          = 60
+PPC_EntryAttention         = 61
+
+0x03415AF8 = target_EntryControllerUi:
+0x030CBB84 = target_EntryWorkerSync1:
+0x030CBB84 = target_EntryWorkerSync2:
+0x036F3768 = target_EntryTerrainAuto15:
+0x0340F03C = target_EntryGrassCut:
+0x031FD370 = target_EntryInvoker3:
+0x031FD394 = target_EntryInvoker4:
+0x03415C6C = target_EntryAttention:
+
+; ksys::CalcControllerAndUi, called inline between run and sync
+Profile_EntryControllerUi:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryControllerUi
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryControllerUi@ha
+addi r12, r12, target_EntryControllerUi@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryControllerUi
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; sead::WorkerMgr::sync, the first block on the Havok workers
+Profile_EntryWorkerSync1:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryWorkerSync1
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryWorkerSync1@ha
+addi r12, r12, target_EntryWorkerSync1@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryWorkerSync1
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; sead::WorkerMgr::sync, the second block
+Profile_EntryWorkerSync2:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryWorkerSync2
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryWorkerSync2@ha
+addi r12, r12, target_EntryWorkerSync2@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryWorkerSync2
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; Terrain::__auto15, four args so r4-r6 must survive the hook
+Profile_EntryTerrainAuto15:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryTerrainAuto15
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryTerrainAuto15@ha
+addi r12, r12, target_EntryTerrainAuto15@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryTerrainAuto15
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; GrassCutJob::runInner
+Profile_EntryGrassCut:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryGrassCut
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryGrassCut@ha
+addi r12, r12, target_EntryGrassCut@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryGrassCut
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; MCMgr::requestInvoker3
+Profile_EntryInvoker3:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryInvoker3
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryInvoker3@ha
+addi r12, r12, target_EntryInvoker3@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryInvoker3
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; MCMgr::requestInvoker4OrSound
+Profile_EntryInvoker4:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryInvoker4
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryInvoker4@ha
+addi r12, r12, target_EntryInvoker4@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryInvoker4
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; ksys::CalcAttentionAndVibration, the targeting and highlight pass
+Profile_EntryAttention:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryAttention
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryAttention@ha
+addi r12, r12, target_EntryAttention@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryAttention
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+0x034160F0 = bla Profile_EntryControllerUi
+0x034160F8 = bla Profile_EntryWorkerSync1
+0x03416248 = bla Profile_EntryWorkerSync2
+0x03416480 = bla Profile_EntryTerrainAuto15
+0x03416528 = bla Profile_EntryGrassCut
+0x03416530 = bla Profile_EntryInvoker3
+0x03416538 = bla Profile_EntryInvoker4
+0x0341656C = bla Profile_EntryAttention
+
+PPC_EntryBaseProcPre       = 62
+PPC_EntryWorkerRun1        = 63
+PPC_EntryGoIdle            = 64
+PPC_EntryPushExtraJobs     = 65
+PPC_EntryWorkerRun2        = 66
+
+0x03790990 = target_EntryBaseProcPre:
+0x030CB940 = target_EntryWorkerRun1:
+0x03790804 = target_EntryGoIdle:
+0x030CB8F0 = target_EntryPushExtraJobs:
+0x030CB940 = target_EntryWorkerRun2:
+
+; sub_3790990(BaseProcMgr), before the queues are pushed
+Profile_EntryBaseProcPre:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryBaseProcPre
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryBaseProcPre@ha
+addi r12, r12, target_EntryBaseProcPre@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryBaseProcPre
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; sead::WorkerMgr::run, first. sync is ~0 ms so the calling thread very likely runs the jobs here
+Profile_EntryWorkerRun1:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryWorkerRun1
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryWorkerRun1@ha
+addi r12, r12, target_EntryWorkerRun1@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryWorkerRun1
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; ksys::act::BaseProcMgr::goIdle
+Profile_EntryGoIdle:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryGoIdle
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryGoIdle@ha
+addi r12, r12, target_EntryGoIdle@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryGoIdle
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; ksys::act::BaseProcMgr::pushExtraJobsEx
+Profile_EntryPushExtraJobs:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryPushExtraJobs
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryPushExtraJobs@ha
+addi r12, r12, target_EntryPushExtraJobs@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryPushExtraJobs
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; sead::WorkerMgr::run, second
+Profile_EntryWorkerRun2:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryWorkerRun2
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryWorkerRun2@ha
+addi r12, r12, target_EntryWorkerRun2@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryWorkerRun2
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+0x03415FDC = bla Profile_EntryBaseProcPre
+0x034160EC = bla Profile_EntryWorkerRun1
+0x03416100 = bla Profile_EntryGoIdle
+0x034161F8 = bla Profile_EntryPushExtraJobs
+0x03416204 = bla Profile_EntryWorkerRun2
+
+PPC_EntryEffectCalc        = 67
+PPC_EntryXLinkCalc         = 68
+
+0x03783F74 = target_EntryEffectCalc:
+0x0383B398 = target_EntryXLinkCalc:
+
+; Effect::calc
+Profile_EntryEffectCalc:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryEffectCalc
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryEffectCalc@ha
+addi r12, r12, target_EntryEffectCalc@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryEffectCalc
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; XLink::calc, the effect and sound linkage system
+Profile_EntryXLinkCalc:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryXLinkCalc
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryXLinkCalc@ha
+addi r12, r12, target_EntryXLinkCalc@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryXLinkCalc
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+0x03415D18 = bla Profile_EntryEffectCalc
+0x03415D2C = bla Profile_EntryXLinkCalc
+
+; The MessageDispatcher call at 0x03415D44 is a bctrl, so the trampoline must leave CTR
+; alone and simply branch through it.
+
+PPC_EntryMessageDispatch    = 69
+
+Profile_EntryMessageDispatch:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryMessageDispatch
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryMessageDispatch
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+0x03415D44 = bla Profile_EntryMessageDispatch
+
+PPC_EntryTeraCheck         = 70
+PPC_EntryIsSpecialJob      = 71
+PPC_EntryWorldMgrCheck     = 72
+PPC_EntryGraphicsCalc      = 73
+
+0x03414668 = target_EntryTeraCheck:
+0x0378F190 = target_EntryIsSpecialJob:
+0x0367920C = target_EntryWorldMgrCheck:
+0x03409478 = target_EntryGraphicsCalc:
+
+; checkTeraSystemInstanceStatus, the first call and the gate on the whole body
+Profile_EntryTeraCheck:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryTeraCheck
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryTeraCheck@ha
+addi r12, r12, target_EntryTeraCheck@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryTeraCheck
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; BaseProcMgr::isSpecialJobType
+Profile_EntryIsSpecialJob:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryIsSpecialJob
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryIsSpecialJob@ha
+addi r12, r12, target_EntryIsSpecialJob@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryIsSpecialJob
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; sub_367920C(WorldMgr::sInstance)
+Profile_EntryWorldMgrCheck:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryWorldMgrCheck
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryWorldMgrCheck@ha
+addi r12, r12, target_EntryWorldMgrCheck@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryWorldMgrCheck
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+; sub_3409478(Graphics::sInstance)
+Profile_EntryGraphicsCalc:
+mflr r0
+stwu r1, -0x20(r1)
+stw r0, 0x24(r1)
+stw r3, 0x08(r1)
+li r3, PPC_EntryGraphicsCalc
+bla import.coreinit.hook_ProfileSectionBegin
+lwz r3, 0x08(r1)
+lis r12, target_EntryGraphicsCalc@ha
+addi r12, r12, target_EntryGraphicsCalc@l
+mtctr r12
+bctrl
+stw r3, 0x0C(r1)
+li r3, PPC_EntryGraphicsCalc
+bla import.coreinit.hook_ProfileSectionEnd
+lwz r3, 0x0C(r1)
+lwz r0, 0x24(r1)
+mtlr r0
+addi r1, r1, 0x20
+blr
+
+0x03415CFC = bla Profile_EntryTeraCheck
+0x03416498 = bla Profile_EntryIsSpecialJob
+0x034164AC = bla Profile_EntryWorldMgrCheck
+0x03416500 = bla Profile_EntryGraphicsCalc
