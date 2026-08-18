@@ -39,6 +39,8 @@ struct WeaponProfile {
     float stabLinearSteadinessThreshold;   // [unitless] min Z-component ratio of velocity direction
     float stabAngularSteadinessThreshold;  // [rad/s] max angular velocity during stab
     float stabTravelDistance;              // [m] forward travel before stab activates hitbox
+    float stabAccSmoothingTimeConstant;    // [s] EMA time constant for the stab acceleration gate
+    float stabVelocityThreshold;           // [m/s] sustained forward speed that also opens the stab gate
 
     // Slash detection
     float slashSpeedThreshold;      // [rad/s] minimum angular velocity (XY plane) to maintain slash
@@ -111,10 +113,12 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
 
     // Shared defaults (Relaxed preset)
     p.stabSpeedThreshold = 0.05f;
-    p.stabAccThreshold = 5.0f;
+    p.stabAccThreshold = 4.0f;
     p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 3.0f); // ~60 deg cone to avoid over-penalizing wrist angle
     p.stabAngularSteadinessThreshold = 4.5f;
-    p.stabTravelDistance = 0.15f;
+    p.stabTravelDistance = 0.12f;
+    p.stabAccSmoothingTimeConstant = 0.050f;
+    p.stabVelocityThreshold = 1.0f;
 
     p.slashSpeedThreshold = 1.0f;
     p.slashAccThreshold = 14.0f;
@@ -137,9 +141,7 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             break;
 
         case SwingSensitivity::SWING_NORMAL:
-            p.stabAccThreshold = 6.0f;
             p.stabLinearSteadinessThreshold = glm::cos(glm::pi<float>() / 4.0f); // ~45 deg cone, still stricter than relaxed
-            p.stabTravelDistance = 0.17f;
             p.slashAccThreshold = 20.0f;
             p.slashVelocityThreshold = 7.0f;
             p.slashSpeedThreshold = 1.5f;
@@ -216,7 +218,7 @@ private:
 
     // ---- Detection pipeline ----
     void detectAttackType(const glm::fvec3& position, const glm::fquat& rotation, XrTime inputTime, float dt);
-    void checkAttackSteadiness(float dt);
+    void checkAttackSteadiness(XrTime inputTime, float dt);
     void updateAttackActivity(const glm::fquat& rotation, const glm::fvec3& position);
     void updateSwingPower();
 
@@ -236,8 +238,10 @@ private:
 
     // ---- Smoothed signals (EMA-filtered) ----
     glm::fvec3 m_smoothedLinAccel = {};
+    glm::fvec3 m_smoothedLinAccelSlow = {};
     float m_smoothedFlatAngAcc = 0.0f;
     float m_smoothedAngDrift = 0.0f;
+    float m_smoothedFrameDt = 0.0f;
 
     // ---- Current-frame computed values (used across detection methods) ----
     glm::fvec3 m_localLinVel = {};
@@ -258,6 +262,8 @@ private:
 
     XrTime m_lastGoodSwingTime = 0;
     XrTime m_lastGoodStabTime = 0;
+    XrTime m_lockTime = 0;
+    XrTime m_refractoryUntil = 0;
 
     glm::fvec3 m_lockedPosition = {};
     glm::fvec3 m_lockedAngle = {};
@@ -321,6 +327,9 @@ inline void WeaponMotionAnalyser::computeSmoothedSignals(float dt) {
     m_smoothedLinAccel = glm::mix(m_smoothedLinAccel, m_localLinAccel, alpha);
     m_smoothedFlatAngAcc = std::lerp(m_smoothedFlatAngAcc, m_flatAngAcc, alpha);
     m_smoothedAngDrift = std::lerp(m_smoothedAngDrift, m_angularDrift, alpha);
+
+    const float alphaSlow = (dt > 0.0f) ? 1.0f - std::exp(-dt / m_profile.stabAccSmoothingTimeConstant) : 0.0f;
+    m_smoothedLinAccelSlow = glm::mix(m_smoothedLinAccelSlow, m_localLinAccel, alphaSlow);
 }
 
 inline void WeaponMotionAnalyser::updateArmCalibration(float handToHeadDist) {
@@ -339,28 +348,32 @@ inline void WeaponMotionAnalyser::detectAttackType(const glm::fvec3& position, c
     if (m_lockedAttackType != AttackType::None)
         return;
 
-    // Scale travel distance based on arm calibration
-    const float armScale = m_calibratedArmLength / m_profile.referenceArmLength;
+    // Keeps the return-to-guard motion after an attack from immediately re-firing.
+    const bool inRefractory = inputTime < m_refractoryUntil;
 
     // ---- Stab detection ----
-    if (glm::length2(m_localLinVel) < 1e-8f) {
-        // Near-zero velocity: skip stab checks to avoid NaN from normalize
-    }
-    else {
+    bool stabGateOk = false;
+    if (glm::length2(m_localLinVel) >= 1e-8f && !inRefractory) {
         const glm::fvec3 stabDir = glm::normalize(m_localLinVel);
         const bool stabDirectionOk = std::abs(stabDir.z) > m_profile.stabLinearSteadinessThreshold;
         const bool stabAngularOk = std::abs(m_localAngVel.x) < m_profile.stabAngularSteadinessThreshold
                                 && std::abs(m_localAngVel.y) < m_profile.stabAngularSteadinessThreshold;
-        const bool stabAccelOk = -m_smoothedLinAccel.z > m_profile.stabAccThreshold;
+        const bool stabImpulseOk = -m_smoothedLinAccelSlow.z > m_profile.stabAccThreshold
+                                || -m_localLinVel.z > m_profile.stabVelocityThreshold;
 
-        if (stabDirectionOk && stabAngularOk && stabAccelOk) {
-            m_lockedPosition = position;
+        stabGateOk = stabDirectionOk && stabAngularOk && stabImpulseOk;
+        if (stabGateOk) {
+            // Latched at the streak start so the whole thrust counts toward the travel gate.
+            if (m_goodStabAccumTime == 0.0f) {
+                m_lockedPosition = position;
+            }
             m_goodStabAccumTime += dt;
             m_lastGoodStabTime = inputTime;
             Log::print<CONTROLS>("Stab detect attack");
             if (m_goodStabAccumTime > m_profile.minGoodStabDuration) {
                 m_lockedAttackType = AttackType::Stab;
                 m_peakAttackVelocity = 0.0f;
+                m_lockTime = inputTime;
             }
         }
         else if ((inputTime - m_lastGoodStabTime) > m_profile.goodSampleGracePeriod) {
@@ -369,27 +382,33 @@ inline void WeaponMotionAnalyser::detectAttackType(const glm::fvec3& position, c
     }
 
     // ---- Slash detection ----
-    // Two paths: angular acceleration spike OR sustained high angular velocity
-    const float flatAngVelMag = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
-    const bool slashByAccel = m_smoothedFlatAngAcc > m_profile.slashAccThreshold;
-    const bool slashByVelocity = flatAngVelMag > m_profile.slashVelocityThreshold;
+    // Two paths: angular acceleration spike OR sustained high angular velocity.
+    // A stab-quality frame or a fresh stab lock keeps the slash path from claiming it.
+    if (!stabGateOk && m_lockedAttackType != AttackType::Stab) {
+        const float flatAngVelMag = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
+        const bool slashByAccel = !inRefractory && m_smoothedFlatAngAcc > m_profile.slashAccThreshold;
+        const bool slashByVelocity = flatAngVelMag > m_profile.slashVelocityThreshold;
 
-    if (slashByAccel || slashByVelocity) {
-        m_goodSwingAccumTime += dt;
-        m_lockedAngle = rotation * glm::fvec3(0.0f, 0.0f, 1.0f);
-        m_lastGoodSwingTime = inputTime;
-        Log::print<CONTROLS>("Slash attack detected (accel={}, vel={})", slashByAccel, slashByVelocity);
-        if (m_goodSwingAccumTime > m_profile.minGoodSwingDuration) {
-            m_lockedAttackType = AttackType::Slash;
-            m_peakAttackVelocity = 0.0f;
+        if (slashByAccel || slashByVelocity) {
+            if (m_goodSwingAccumTime == 0.0f) {
+                m_lockedAngle = rotation * glm::fvec3(0.0f, 0.0f, 1.0f);
+            }
+            m_goodSwingAccumTime += dt;
+            m_lastGoodSwingTime = inputTime;
+            Log::print<CONTROLS>("Slash attack detected (accel={}, vel={})", slashByAccel, slashByVelocity);
+            if (m_goodSwingAccumTime > m_profile.minGoodSwingDuration) {
+                m_lockedAttackType = AttackType::Slash;
+                m_peakAttackVelocity = 0.0f;
+                m_lockTime = inputTime;
+            }
         }
-    }
-    else if ((inputTime - m_lastGoodSwingTime) > m_profile.goodSampleGracePeriod) {
-        m_goodSwingAccumTime = 0.0f;
+        else if ((inputTime - m_lastGoodSwingTime) > m_profile.goodSampleGracePeriod) {
+            m_goodSwingAccumTime = 0.0f;
+        }
     }
 }
 
-inline void WeaponMotionAnalyser::checkAttackSteadiness(float dt) {
+inline void WeaponMotionAnalyser::checkAttackSteadiness(XrTime inputTime, float dt) {
     bool isBadSample = false;
 
     switch (m_lockedAttackType) {
@@ -426,6 +445,12 @@ inline void WeaponMotionAnalyser::checkAttackSteadiness(float dt) {
         }
     }
 
+    // Scales with frame time so a lock cannot cancel on the same samples that set it.
+    const XrTime lockGrace = std::max((XrTime)33e6, (XrTime)(2.5f * m_smoothedFrameDt * 1e9f));
+    if (inputTime - m_lockTime < lockGrace) {
+        isBadSample = false;
+    }
+
     // Decrement model: good frames heal, bad frames accumulate
     if (isBadSample) {
         m_badSampleAccumTime += dt;
@@ -434,8 +459,20 @@ inline void WeaponMotionAnalyser::checkAttackSteadiness(float dt) {
         m_badSampleAccumTime = std::max(0.0f, m_badSampleAccumTime - dt);
     }
 
-    if (m_badSampleAccumTime >= m_profile.maxBadDuration) {
+    const float maxBadDuration = std::max(m_profile.maxBadDuration, 2.5f * m_smoothedFrameDt);
+    if (m_badSampleAccumTime >= maxBadDuration) {
         m_badSampleAccumTime = 0.0f;
+        if (m_attackActive) {
+            m_refractoryUntil = inputTime + (XrTime)250e6;
+        }
+        if (m_lockedAttackType == AttackType::Slash) {
+            m_goodSwingAccumTime = 0.0f;
+            m_lastGoodSwingTime = 0;
+        }
+        else {
+            m_goodStabAccumTime = 0.0f;
+            m_lastGoodStabTime = 0;
+        }
         m_lockedAttackType = AttackType::None;
     }
 }
@@ -529,14 +566,31 @@ inline void WeaponMotionAnalyser::Update(
         ? static_cast<float>(inputTime - m_prevSampleTime) / 1e9f
         : 0.0f;
 
+    // ---- Hold on tracking dropouts ----
+    // Untracked samples carry garbage positions that would poison calibration and derivatives.
+    constexpr XrSpaceLocationFlags requiredFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+    if ((handLocation.locationFlags & requiredFlags) != requiredFlags) {
+        computeLocalSignals(linearVelocity, angularVelocity, rotation, dt);
+        m_prevAngularVelocity = angularVelocity;
+        m_prevLocalLinVel = m_localLinVel;
+        m_prevSampleTime = inputTime;
+        return;
+    }
+
     // ---- Compute all signals ----
     computeLocalSignals(linearVelocity, angularVelocity, rotation, dt);
     m_angularDrift = computeAngularDrift(angularVelocity, dt);
     computeSmoothedSignals(dt);
 
+    if (dt > 0.0f) {
+        m_smoothedFrameDt = (m_smoothedFrameDt == 0.0f) ? dt : std::lerp(m_smoothedFrameDt, dt, 1.0f - std::exp(-dt / 0.5f));
+    }
+
     // ---- Auto-calibrate arm length ----
     const float handToHeadDist = glm::distance(position, headsetPosition);
-    updateArmCalibration(handToHeadDist);
+    if (handToHeadDist <= 1.2f) {
+        updateArmCalibration(handToHeadDist);
+    }
 
     // ---- Store sample ----
     m_samples[m_sampleIdx] = {
@@ -556,8 +610,10 @@ inline void WeaponMotionAnalyser::Update(
     m_sampleIdx = (m_sampleIdx + 1) % MAX_SAMPLES;
 
     // ---- Run detection pipeline ----
-    detectAttackType(position, rotation, inputTime, dt);
-    checkAttackSteadiness(dt);
+    // Clamped so a menu pause or frame spike cannot dump seconds into the accumulators.
+    const float dtAccum = std::min(dt, 0.05f);
+    detectAttackType(position, rotation, inputTime, dtAccum);
+    checkAttackSteadiness(inputTime, dtAccum);
     updateAttackActivity(rotation, position);
     updateSwingPower();
 
@@ -595,8 +651,10 @@ inline void WeaponMotionAnalyser::Reset() {
     m_swingPower = 0.0f;
     m_peakAttackVelocity = 0.0f;
     m_smoothedLinAccel = {};
+    m_smoothedLinAccelSlow = {};
     m_smoothedFlatAngAcc = 0.0f;
     m_smoothedAngDrift = 0.0f;
+    m_lockTime = 0;
     m_prevLocalLinVel = {};
     m_prevFlatAngVel = {};
     m_prevAngularVelocity = {};
@@ -621,12 +679,12 @@ inline WeaponDebugSnapshot WeaponMotionAnalyser::GetDebugSnapshot() const {
     snapshot.hitboxEnabled = m_isHitboxEnabled;
     snapshot.swingPower = m_swingPower;
     snapshot.badSampleAccumTime = m_badSampleAccumTime;
-    snapshot.maxBadDuration = m_profile.maxBadDuration;
+    snapshot.maxBadDuration = std::max(m_profile.maxBadDuration, 2.5f * m_smoothedFrameDt);
     snapshot.calibratedArmLength = m_calibratedArmLength;
 
     snapshot.forwardStabSpeed = -m_localLinVel.z;
     snapshot.stabSpeedThreshold = m_profile.stabSpeedThreshold;
-    snapshot.forwardStabAcceleration = -m_smoothedLinAccel.z;
+    snapshot.forwardStabAcceleration = -m_smoothedLinAccelSlow.z;
     snapshot.stabAccThreshold = m_profile.stabAccThreshold;
     snapshot.stabAngularXY = glm::length(glm::fvec3(m_localAngVel.x, m_localAngVel.y, 0.0f));
     snapshot.stabAngularSteadinessThreshold = m_profile.stabAngularSteadinessThreshold;

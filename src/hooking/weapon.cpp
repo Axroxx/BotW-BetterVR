@@ -469,7 +469,10 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
     // Haptic feedback
     if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
-        float rumbleVelocity = std::max(0.0f, motionAnalyser.GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
+        // A thrust rarely beats the hand-speed threshold, so swing power provides a floor.
+        const float speedRumble = std::max(0.0f, motionAnalyser.GetHandSpeed() - WeaponMotionAnalyser::HAND_VELOCITY_LENGTH_THRESHOLD);
+        const float powerRumble = motionAnalyser.GetSwingPower() * 1.4f;
+        float rumbleVelocity = std::max(speedRumble, powerRumble);
 
         const int rumbleHands[2] = { 1, 0 };
         const int rumbleHandCount = isTwoHandGrip ? 2 : 1;
