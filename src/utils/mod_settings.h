@@ -501,15 +501,13 @@ struct EnumTable<WalkingDirection> {
 enum class SwingSensitivity : int32_t {
     SWING_EASY = 0,
     SWING_NORMAL = 1,
-    SWING_CUSTOM = 2,
 };
 
 template <>
 struct EnumTable<SwingSensitivity> {
     static constexpr auto entries = std::to_array<EnumEntry<SwingSensitivity>>({
         { SwingSensitivity::SWING_EASY, "SWING_EASY", "Relaxed" },
-        { SwingSensitivity::SWING_NORMAL, "SWING_NORMAL", "Normal" },
-        { SwingSensitivity::SWING_CUSTOM, "SWING_CUSTOM", "Custom" }
+        { SwingSensitivity::SWING_NORMAL, "SWING_NORMAL", "Normal" }
     });
 };
 
@@ -585,46 +583,9 @@ struct ModSettings {
     EnumSetting<WalkingDirection> walkingDirection{ "WalkingDirection", WalkingDirection::CAMERA };
     EnumSetting<TurnMode> turnMode{ "TurnMode", TurnMode::SMOOTH_NORMAL };
     EnumSetting<SwingSensitivity> swingSensitivity{ "SwingSensitivity", SwingSensitivity::SWING_NORMAL };
-    FloatSetting customStabSpeedThreshold{ "CustomStabSpeedThreshold", 0.05f, 0.01f, 0.50f };
-    FloatSetting customStabAccThreshold{ "CustomStabAccThreshold", 7.0f, 1.0f, 15.0f };
-    FloatSetting customStabSteadinessCone{ "CustomStabSteadinessCone", 30.0f, 15.0f, 85.0f };
-    FloatSetting customStabAngularSteadiness{ "CustomStabAngularSteadiness", 4.5f, 1.0f, 15.0f };
-    FloatSetting customStabTravelDistance{ "CustomStabTravelDistance", 0.20f, 0.05f, 0.50f };
-    FloatSetting customMinGoodStabDuration{ "CustomMinGoodStabDuration", 0.040f, 0.005f, 0.100f };
-    FloatSetting customSlashSpeedThreshold{ "CustomSlashSpeedThreshold", 1.5f, 0.1f, 5.0f };
-    FloatSetting customSlashAccThreshold{ "CustomSlashAccThreshold", 20.0f, 3.0f, 40.0f };
-    FloatSetting customSlashVelocityThreshold{ "CustomSlashVelocityThreshold", 7.0f, 1.0f, 15.0f };
-    FloatSetting customSlashAccDriftThreshold{ "CustomSlashAccDriftThreshold", 10.0f, 2.0f, 30.0f };
-    FloatSetting customSlashTravelAngle{ "CustomSlashTravelAngle", 36.0f, 10.0f, 90.0f };
-    FloatSetting customMinGoodSwingDuration{ "CustomMinGoodSwingDuration", 0.040f, 0.005f, 0.100f };
-    FloatSetting customMaxBadDuration{ "CustomMaxBadDuration", 0.022f, 0.005f, 0.100f };
-    FloatSetting customGoodSampleGracePeriod{ "CustomGoodSampleGracePeriod", 40.0f, 10.0f, 200.0f };
-    FloatSetting customSmoothingTimeConstant{ "CustomSmoothingTimeConstant", 0.020f, 0.005f, 0.100f };
-    FloatSetting customAngularDriftMinVelocity{ "CustomAngularDriftMinVelocity", 0.5f, 0.1f, 3.0f };
-    FloatSetting customDamageOutputScale{ "CustomDamageOutputScale", 1.0f, 0.10f, 2.00f };
 
     static std::span<ModSettingBase* const> GetOptions() {
         return SettingRegistry();
-    }
-
-    void ResetCustomWeaponSensitivity() {
-        customStabSpeedThreshold.Reset();
-        customStabAccThreshold.Reset();
-        customStabSteadinessCone.Reset();
-        customStabAngularSteadiness.Reset();
-        customStabTravelDistance.Reset();
-        customMinGoodStabDuration.Reset();
-        customSlashSpeedThreshold.Reset();
-        customSlashAccThreshold.Reset();
-        customSlashVelocityThreshold.Reset();
-        customSlashAccDriftThreshold.Reset();
-        customSlashTravelAngle.Reset();
-        customMinGoodSwingDuration.Reset();
-        customMaxBadDuration.Reset();
-        customGoodSampleGracePeriod.Reset();
-        customSmoothingTimeConstant.Reset();
-        customAngularDriftMinVelocity.Reset();
-        customDamageOutputScale.Reset();
     }
 
     CameraMode GetCameraMode() const { return cameraMode; }
@@ -666,7 +627,6 @@ struct ModSettings {
             default: return 0.0f;
         }
     }
-    float GetWeaponDamageOutputScale() const { return GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM ? customDamageOutputScale : 1.0f; }
 
     bool IsDebuggingToolsEnabled() const;
     bool ShouldShowRoomPhysics() const { return IsDebuggingToolsEnabled() && debugShowRoomscalePhysics; }

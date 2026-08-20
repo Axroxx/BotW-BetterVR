@@ -152,29 +152,6 @@ inline WeaponProfile WeaponProfile::ForSensitivity(SwingSensitivity sensitivity)
             p.minGoodStabDuration = 0.030f;
             p.smoothingTimeConstant = 0.020f;
             break;
-
-        case SwingSensitivity::SWING_CUSTOM: {
-            const ModSettings& settings = GetSettings();
-            p.stabSpeedThreshold = settings.customStabSpeedThreshold;
-            p.stabAccThreshold = settings.customStabAccThreshold;
-            p.stabLinearSteadinessThreshold = glm::cos(glm::radians(float(settings.customStabSteadinessCone)));
-            p.stabAngularSteadinessThreshold = settings.customStabAngularSteadiness;
-            p.stabTravelDistance = settings.customStabTravelDistance;
-
-            p.slashSpeedThreshold = settings.customSlashSpeedThreshold;
-            p.slashAccThreshold = settings.customSlashAccThreshold;
-            p.slashVelocityThreshold = settings.customSlashVelocityThreshold;
-            p.slashAccDriftThreshold = settings.customSlashAccDriftThreshold;
-            p.slashTravelAngle = glm::radians(float(settings.customSlashTravelAngle));
-
-            p.maxBadDuration = settings.customMaxBadDuration;
-            p.goodSampleGracePeriod = (XrTime)std::llround((double)(settings.customGoodSampleGracePeriod) * 1e6);
-            p.minGoodSwingDuration = settings.customMinGoodSwingDuration;
-            p.minGoodStabDuration = settings.customMinGoodStabDuration;
-            p.smoothingTimeConstant = settings.customSmoothingTimeConstant;
-            p.angularDriftMinVelocity = settings.customAngularDriftMinVelocity;
-            break;
-        }
     }
 
     return p;

@@ -477,7 +477,7 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
         const float power = motionAnalyser.GetSwingPower();
         const bool isDualGrippableWeapon = weaponType == WeaponType::LargeSword || weaponType == WeaponType::Spear;
         const float gripDamageMultiplier = isTwoHandGrip ? TWO_HAND_GRIP_DAMAGE_MULTIPLIER : (isDualGrippableWeapon ? SINGLE_HAND_DAMAGE_MULTIPLIER : 1.0f);
-        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * GetSettings().GetWeaponDamageOutputScale() * gripDamageMultiplier;
+        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * gripDamageMultiplier;
 
         writeMemory(weaponPtr, &weapon);
     }
