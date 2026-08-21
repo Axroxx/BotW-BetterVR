@@ -6,3 +6,6 @@ moduleMatches = 0x6267BFD0
 ; The commented-out waitForVsync in custom_sead_GameFramework_procFrame is unreachable code.
 0x0309D018 = blr ; sead::GameFrameworkCafe::waitForNextFrame_
 0x031FACC4 = blr ; sead::GameFrameworkCafe::waitForVsync
+
+; GX2DrawDone stays intact, Cemu uses it as a command-stream synchronization marker.
+0x031FAB00 = nop ; GX2SetGPUFence in sead::GameFrameworkCafe::presentAndDrawDone
