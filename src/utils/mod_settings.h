@@ -158,16 +158,16 @@ public:
     }
 
     template <typename Fmt = const char*>
-    void AddToGUI(bool* changed, float windowWidth, T minValue, T maxValue, Fmt&& format = "%.2f") {
-        ImGui::PushItemWidth(windowWidth * 0.35f);
+    void AddToGUI(bool* changed, T minValue, T maxValue, Fmt&& format = "%.2f") {
+        ImGui::PushItemWidth(-(ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemSpacing.x));
         AddSliderToGUI(changed, minValue, maxValue, std::forward<Fmt>(format));
         ImGui::PopItemWidth();
         ImGui::SameLine();
         this->AddResetToGUI(changed);
     }
 
-    void AddPercentToGUI(bool* changed, float windowWidth, float minPercent, float maxPercent) {
-        ImGui::PushItemWidth(windowWidth * 0.35f);
+    void AddPercentToGUI(bool* changed, float minPercent, float maxPercent) {
+        ImGui::PushItemWidth(-(ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemSpacing.x));
         this->AddWidgetToGUI(changed, [&](T* value) {
             float percent = (float)*value * 100.0f;
             if (!ImGui::SliderFloat("##value", &percent, minPercent, maxPercent, "%.0f%%")) {
@@ -371,7 +371,7 @@ public:
         this->ResetWithError(valueString);
     }
 
-    void AddRadioToGUI(bool* changed) {
+    void AddRadioToGUI(bool* changed, bool vertical = false) {
         const T current = this->load();
         bool first = true;
         ImGui::PushID(this->name);
@@ -379,7 +379,7 @@ public:
             if (first) {
                 first = false;
             }
-            else {
+            else if (!vertical) {
                 ImGui::SameLine();
             }
             if (ImGui::RadioButton(entry.displayName, entry.value == current)) {

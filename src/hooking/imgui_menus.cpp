@@ -11,77 +11,120 @@
 #include "weapon.h"
 #include "supporters_generated.h"
 
+static constexpr ImVec4 kDescriptionColor = ImVec4(0.52f, 0.60f, 0.67f, 1.0f);
+static constexpr ImVec4 kHintColor = ImVec4(0.35f, 0.95f, 0.45f, 1.0f);
+
+static void DrawPageHeader(const char* icon, const char* title, const char* subtitle) {
+    ImGui::Spacing();
+    if (ImGuiMenus::g_titleFont != nullptr) {
+        ImGui::PushFont(ImGuiMenus::g_titleFont);
+        ImGui::Text("%s  %s", icon, title);
+        ImGui::PopFont();
+    }
+    else {
+        ImGui::Text("%s  %s", icon, title);
+    }
+    if (subtitle != nullptr && subtitle[0] != '\0') {
+        ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
+        ImGui::TextWrapped("%s", subtitle);
+        ImGui::PopStyleColor();
+    }
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+}
+
+static void DrawSectionCaption(const char* label) {
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+    ImGui::TextUnformatted(label);
+    ImGui::PopStyleColor();
+}
+
+static void DrawPageNote(const char* text) {
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+}
+
+static bool BeginSettingsSection(const char* id, const char* caption = nullptr) {
+    if (caption != nullptr) {
+        DrawSectionCaption(caption);
+    }
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(10.0f, 9.0f));
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::PopStyleVar();
+        return false;
+    }
+    ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+    ImGui::TableSetupColumn("##widget", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+    return true;
+}
+
+static void EndSettingsSection() {
+    ImGui::EndTable();
+    ImGui::PopStyleVar();
+}
+
 template <typename DrawWidget>
-static void DrawSettingRow(const ImVec2& windowWidth, const char* label, DrawWidget&& drawWidget) {
+static void DrawSetting(const char* label, const char* description, DrawWidget&& drawWidget) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
-    ImGui::SameLine();
-
-    float startPos = windowWidth.x * 0.5f;
-    if (ImGui::GetCursorPosX() < startPos) {
-        ImGui::SetCursorPosX(startPos);
+    if (description != nullptr && description[0] != '\0') {
+        ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
+        ImGui::TextWrapped("%s", description);
+        ImGui::PopStyleColor();
     }
-
-    ImGui::PushItemWidth(windowWidth.x * 0.45f);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::PushID(label);
+    ImGui::PushItemWidth(-FLT_MIN);
     drawWidget();
     ImGui::PopItemWidth();
+    ImGui::PopID();
 }
 
-template <typename FormatDistanceFn>
-static void DrawLayerSettingsRow(const ImVec2& windowWidth, const char* label, bool* changed, FloatSetting& distanceSetting, FloatSetting& scaleSetting, FormatDistanceFn&& formatDistance) {
-    DrawSettingRow(windowWidth, label, [&]() {
-        auto applyValues = [&](float distance, float scale) {
-            distanceSetting = distance;
-            scaleSetting = scale;
-        };
+struct MenuPageEntry {
+    uint8_t page;
+    const char* label;
+};
 
-        float distance = distanceSetting;
-        float scale = scaleSetting;
+static constexpr MenuPageEntry kSettingsPages[] = {
+    { ImGuiMenus::PLAYSTYLE_PAGE, ICON_KI_FIGURE "  Playstyle" },
+    { ImGuiMenus::COMFORT_PAGE, ICON_KI_ADJUST "  Comfort" },
+    { ImGuiMenus::COMBAT_PAGE, ICON_KI_FIST "  Combat" },
+    { ImGuiMenus::CONTROLS_PAGE, ICON_KI_GAMEPAD "  Controls" },
+    { ImGuiMenus::INTERFACE_PAGE, ICON_KI_GRID "  Interface" },
+    { ImGuiMenus::PERFORMANCE_PAGE, ICON_KI_PODIUM "  Performance" },
+    { ImGuiMenus::SYSTEM_PAGE, ICON_KI_COG "  System" },
+};
 
-        float totalWidth = ImGui::GetContentRegionAvail().x;
-        float resetWidth = 45.0f;
-        float itemSpacing = ImGui::GetStyle().ItemSpacing.x;
-        float sliderWidth = (totalWidth - resetWidth - itemSpacing * 2.0f) * 0.5f;
+static constexpr MenuPageEntry kMorePages[] = {
+    { ImGuiMenus::GUIDE_PAGE, ICON_KI_INFO_CIRCLE "  Controller Guide" },
+    { ImGuiMenus::CREDITS_PAGE, ICON_KI_HEART "  Credits" },
+    { ImGuiMenus::DEBUG_PAGE, ICON_KI_WRENCH "  Debug" },
+};
 
-        ImGui::PushID(label);
-
-        ImGui::PushItemWidth(sliderWidth);
-        if (ImGui::SliderFloat("##distance", &distance, distanceSetting.min, distanceSetting.max, formatDistance(distance).c_str())) {
-            applyValues(std::clamp(distance, distanceSetting.min, distanceSetting.max), scaleSetting);
-            *changed = true;
-        }
-        ImGui::PopItemWidth();
-        ImGui::SameLine();
-
-        ImGui::PushItemWidth(sliderWidth);
-        if (ImGui::SliderFloat("##scale", &scale, scaleSetting.min, scaleSetting.max, "%.2fx scale")) {
-            applyValues(distanceSetting, std::clamp(scale, scaleSetting.min, scaleSetting.max));
-            *changed = true;
-        }
-        ImGui::PopItemWidth();
-        ImGui::SameLine();
-
-        if (ImGui::Button("Reset")) {
-            distanceSetting.Reset();
-            scaleSetting.Reset();
-            *changed = true;
-        }
-
-        ImGui::PopID();
-    });
-}
-
-static bool BeginStyledTab(const char* label, uint32_t selectedTab, uint32_t tabIdx, bool setTab, ImGuiTabItemFlags extraFlags = ImGuiTabItemFlags_None) {
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().FramePadding + ImVec2(0, 2.0f));
-    bool tabBar = ImGui::BeginTabItem(label, nullptr, ((setTab && selectedTab == tabIdx) ? ImGuiTabItemFlags_SetSelected : 0) | extraFlags);
-    ImGui::PopStyleVar();
-    return tabBar;
-}
-
-static void DrawSectionHeader(const char* label) {
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-    ImGui::Text(label);
+static void DrawSidebarGroup(const char* caption, std::span<const MenuPageEntry> entries, std::atomic_uint8_t& selectedPage) {
+    ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
+    ImGui::TextUnformatted(caption);
     ImGui::PopStyleColor();
+    for (const MenuPageEntry& entry : entries) {
+        if (!ImGuiMenus::IsPageAvailable(entry.page)) {
+            continue;
+        }
+        if (ImGui::Selectable(entry.label, selectedPage == entry.page, ImGuiSelectableFlags_None, ImVec2(0.0f, 30.0f))) {
+            selectedPage = entry.page;
+        }
+    }
+}
+
+static void DrawSidebar(std::atomic_uint8_t& selectedPage) {
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
+    DrawSidebarGroup("SETTINGS", kSettingsPages, selectedPage);
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    DrawSidebarGroup("MORE", kMorePages, selectedPage);
+    ImGui::PopStyleVar();
 }
 
 static void DrawSupporterWall() {
@@ -702,6 +745,15 @@ namespace WeaponAttackDebugger {
 }
 
 namespace ImGuiMenus {
+    ImFont* g_titleFont = nullptr;
+
+    bool IsPageAvailable(uint8_t page) {
+        if (page == DEBUG_PAGE) {
+            return GetSettings().IsDebuggingToolsEnabled();
+        }
+        return page < PAGE_COUNT;
+    }
+
     void DrawFPSOverlay(RND_Renderer* renderer) {
         ImGui::SetNextWindowBgAlpha(0.4f);
 
@@ -746,192 +798,233 @@ namespace ImGuiMenus {
 
 }
 
-void RND_Renderer::ImGuiOverlay::DrawSettingsTab(const ImVec2& windowWidth, bool* changed) {
+void RND_Renderer::ImGuiOverlay::DrawPlaystylePage(bool* changed) {
     auto& settings = GetSettings();
-    CameraMode cameraMode = settings.cameraMode;
+    const CameraMode cameraMode = settings.cameraMode;
 
-    DrawSettingRow(windowWidth, "Boot Directly Into BotW", [&]() {
-        settings.bootDirectlyIntoGame.AddToGUI(changed);
-    });
+    DrawPageHeader(ICON_KI_FIGURE, "Playstyle", "How you want to inhabit Hyrule.");
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    DrawSettingRow(windowWidth, "Camera Mode", [&]() {
-        settings.cameraMode.AddRadioToGUI(changed);
-    });
+    if (BeginSettingsSection("##CameraMode")) {
+        DrawSetting("Camera Mode", "First person puts you inside Link's body with motion controls. Third person keeps the original camera and plays with a regular controller.", [&]() {
+            settings.cameraMode.AddRadioToGUI(changed, true);
+        });
+        EndSettingsSection();
+    }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    DrawSectionHeader("Camera / Player Options");
     if (cameraMode == CameraMode::THIRD_PERSON) {
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.45f, 1.0f), "Use a regular controller and set up input in Cemu!");
-        DrawSettingRow(windowWidth, "Camera Distance", [&]() {
-            settings.thirdPlayerDistance.AddSliderToGUI(changed, 0.5f, 0.65f);
-        });
-        DrawSettingRow(windowWidth, "Shoot Arrows From Camera", [&]() {
-            settings.thirdPersonBowCameraAim.AddToGUI(changed);
-        });
-    }
-    else {
-        DrawSettingRow(windowWidth, "Height Offset", [&]() {
-            auto formatHeight = [&](float height) {
-                if (height < -.01f) {
-                    float heightInches = height * -39.3700787f;
-                    int32_t heightFeet = std::floor(heightInches / 12.0f);
-                    heightInches -= heightFeet * 12.0f;
-                    return std::format("-{0:.02f}m / {1}\'{2:.02f}\"", -height, heightFeet, heightInches);
-                }
-                if (height > .01f) {
-                    float heightInches = height * 39.3700787f;
-                    int32_t heightFeet = std::floor(heightInches / 12.0f);
-                    heightInches -= heightFeet * 12.0f;
-                    return std::format("+{0:.02f}m / {1}\'{2:.02f}\"", height, heightFeet, heightInches);
-                }
-                return std::string("0.0");
-            };
-            settings.playerHeightOffset.AddToGUI(changed, windowWidth.x, -0.5f, 1.0f, formatHeight);
-        });
-
-        DrawSettingRow(windowWidth, "Turn Mode", [&]() {
-            settings.turnMode.AddComboToGUI(changed);
-        });
-    }
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    DrawSectionHeader("Cutscenes");
-
-    if (cameraMode != CameraMode::THIRD_PERSON) {
-        DrawSettingRow(windowWidth, "Camera In Cutscenes", [&]() {
-            settings.cutsceneCameraMode.AddComboToGUI(changed);
-        });
-    }
-
-    DrawSettingRow(windowWidth, "Black Bars in Third-Person Cutscenes", [&]() {
-        settings.useBlackBarsForCutscenes.AddToGUI(changed);
-    });
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    DrawSectionHeader("UI");
-    DrawSettingRow(windowWidth, "UI Follows Where You Look", [&]() {
-        settings.uiFollowsGaze.AddToGUI(changed);
-    });
-
-    ImGui::Spacing();
-    DrawLayerSettingsRow(windowWidth, "Menu/HUD Distance & Size", changed, settings.hudDistance, settings.hudSize, FormatDistance);
-
-    ImGui::Spacing();
-    if (cameraMode == CameraMode::FIRST_PERSON) {
-        ImGui::Separator();
-        DrawSectionHeader("Input");
-        if (settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM) {
-            DrawSettingRow(windowWidth, "Attack Sensitivity", [&]() {
-                ImGui::TextUnformatted("Configured in the Custom Attack Sensitivity tab");
-            });
-        }
-        else {
-            DrawSettingRow(windowWidth, "Attack Sensitivity", [&]() {
-                int sensitivity = settings.GetSwingSensitivity() == SwingSensitivity::SWING_EASY ? 0 : 1;
-                if (ImGui::RadioButton("Relaxed##SwingSensitivity", &sensitivity, 0)) {
-                    settings.swingSensitivity = SwingSensitivity::SWING_EASY;
-                    *changed = true;
-                }
-                ImGui::SameLine();
-                if (ImGui::RadioButton("Normal##SwingSensitivity", &sensitivity, 1)) {
-                    settings.swingSensitivity = SwingSensitivity::SWING_NORMAL;
-                    *changed = true;
-                }
-            });
-        }
-        
-        DrawSettingRow(windowWidth, "Walking Direction", [&]() {
-            settings.walkingDirection.AddComboToGUI(changed);
-        });
-
-        DrawSettingRow(windowWidth, "Bow Aiming Arc Opacity", [&]() {
-            settings.bowArcOpacity.AddPercentToGUI(changed, windowWidth.x, 0.0f, 100.0f);
-        });
-
         ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, kHintColor);
+        ImGui::TextWrapped(ICON_KI_INFO_CIRCLE "  Use a regular controller and set up its input in Cemu!");
+        ImGui::PopStyleColor();
 
-        DrawSettingRow(windowWidth, "Thumbstick Deadzone", [&]() {
-            settings.stickDeadzone.AddPercentToGUI(changed, windowWidth.x, 0.0f, 50.0f);
-        });
-
-        DrawSettingRow(windowWidth, "Stick Direction Threshold", [&]() {
-            settings.axisThreshold.AddPercentToGUI(changed, windowWidth.x, 10.0f, 90.0f);
-        });
+        if (BeginSettingsSection("##ThirdPerson", "Third-Person Camera")) {
+            DrawSetting("Camera Distance", "How far the camera floats behind Link.", [&]() {
+                settings.thirdPlayerDistance.AddSliderToGUI(changed, 0.5f, 0.65f);
+            });
+            DrawSetting("Shoot Arrows From Camera", "Aims the bow from the camera's point of view instead of from Link's hands.", [&]() {
+                settings.thirdPersonBowCameraAim.AddToGUI(changed);
+            });
+            EndSettingsSection();
+        }
     }
     else {
-        ImGui::Text("");
+        if (BeginSettingsSection("##FirstPerson", "Body & Position")) {
+            DrawSetting("Play Position", "Standing lets your real-world steps move Link around the room. Pick Seated to keep Link's body planted while you sit.", [&]() {
+                settings.playMode.AddRadioToGUI(changed, true);
+            });
+            DrawSetting("Height Offset", "Raises or lowers your eye height in the game.", [&]() {
+                auto formatHeight = [&](float height) {
+                    if (height < -.01f) {
+                        float heightInches = height * -39.3700787f;
+                        int32_t heightFeet = std::floor(heightInches / 12.0f);
+                        heightInches -= heightFeet * 12.0f;
+                        return std::format("-{0:.02f}m / {1}\'{2:.02f}\"", -height, heightFeet, heightInches);
+                    }
+                    if (height > .01f) {
+                        float heightInches = height * 39.3700787f;
+                        int32_t heightFeet = std::floor(heightInches / 12.0f);
+                        heightInches -= heightFeet * 12.0f;
+                        return std::format("+{0:.02f}m / {1}\'{2:.02f}\"", height, heightFeet, heightInches);
+                    }
+                    return std::string("0.0");
+                };
+                settings.playerHeightOffset.AddToGUI(changed, -0.5f, 1.0f, formatHeight);
+            });
+            EndSettingsSection();
+        }
+    }
+}
+
+void RND_Renderer::ImGuiOverlay::DrawComfortPage(bool* changed) {
+    auto& settings = GetSettings();
+    const CameraMode cameraMode = settings.cameraMode;
+
+    DrawPageHeader(ICON_KI_ADJUST, "Comfort", "Options that keep the camera predictable and motion sickness away.");
+
+    if (cameraMode == CameraMode::FIRST_PERSON) {
+        if (BeginSettingsSection("##Turning", "Turning")) {
+            DrawSetting("Turn Mode", "Snap turning rotates you in fixed steps, which most players find more comfortable than smooth turning.", [&]() {
+                settings.turnMode.AddComboToGUI(changed);
+            });
+            EndSettingsSection();
+        }
     }
 
-    ImGui::NewLine();
-    if (ImGui::CollapsingHeader("Advanced Settings")) {
-        DrawSettingRow(windowWidth, "Use Custom Attack Sensitivity", [&]() {
-            bool useCustomAttackSensitivity = settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
-            if (ImGui::Checkbox("##UseCustomAttackSensitivity", &useCustomAttackSensitivity)) {
-                settings.swingSensitivity = useCustomAttackSensitivity ? SwingSensitivity::SWING_CUSTOM : SwingSensitivity::SWING_NORMAL;
-                if (!useCustomAttackSensitivity && VRManager::instance().XR->m_currMenuTab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) {
-                    VRManager::instance().XR->m_currMenuTab = ImGuiMenus::SETTINGS_TAB;
-                    VRManager::instance().XR->m_forceTabChange = true;
-                }
-                *changed = true;
-            }
+    if (BeginSettingsSection("##Cutscenes", "Cutscenes")) {
+        if (cameraMode == CameraMode::FIRST_PERSON) {
+            DrawSetting("Camera In Cutscenes", "Whether story cutscenes play out through Link's eyes or through the game's original third-person camera.", [&]() {
+                settings.cutsceneCameraMode.AddComboToGUI(changed);
+            });
+        }
+        DrawSetting("Black Bars In Third-Person Cutscenes", "Frames third-person cutscenes with cinematic black bars.", [&]() {
+            settings.useBlackBarsForCutscenes.AddToGUI(changed);
         });
+        if (cameraMode == CameraMode::FIRST_PERSON) {
+            DrawSetting("Keep First-Person Cutscenes Still", "Never lets a cutscene move the first-person camera for you.", [&]() {
+                settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(changed);
+            });
+        }
+        EndSettingsSection();
+    }
 
-        if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
-            DrawSettingRow(windowWidth, "Angular Velocity Fixer", [&]() {
+    if (cameraMode == CameraMode::FIRST_PERSON) {
+        if (BeginSettingsSection("##Body", "Body")) {
+            DrawSetting("Prevent Ragdolling", "Stops Link from being knocked down and dragged around, which can be disorienting in first person.", [&]() {
+                settings.preventFirstPersonRagdoll.AddToGUI(changed);
+            });
+            EndSettingsSection();
+        }
+    }
+    else {
+        DrawPageNote("More comfort options become available in First Person mode.");
+    }
+}
+
+void RND_Renderer::ImGuiOverlay::DrawCombatPage(bool* changed) {
+    auto& settings = GetSettings();
+
+    DrawPageHeader(ICON_KI_FIST, "Combat", "How your swings and stabs register.");
+
+    if (settings.cameraMode != CameraMode::FIRST_PERSON) {
+        DrawPageNote("Motion-based combat is only used in First Person mode. Switch the Camera Mode on the Playstyle page to use these options.");
+        return;
+    }
+
+    if (BeginSettingsSection("##Attacks", "Melee Attacks")) {
+        DrawSetting("Attack Sensitivity", "How decisive a motion needs to be before it counts as an attack. Relaxed lets light swings land, while Normal asks for a more deliberate motion.", [&]() {
+            settings.swingSensitivity.AddRadioToGUI(changed);
+        });
+        EndSettingsSection();
+    }
+}
+
+void RND_Renderer::ImGuiOverlay::DrawControlsPage(bool* changed) {
+    auto& settings = GetSettings();
+
+    DrawPageHeader(ICON_KI_GAMEPAD, "Controls", "How your VR controllers translate into game input.");
+
+    if (BeginSettingsSection("##Sticks", "Thumbsticks")) {
+        if (settings.cameraMode == CameraMode::FIRST_PERSON) {
+            DrawSetting("Walking Direction", "Walk in the direction you are looking, or in the direction your controller points.", [&]() {
+                settings.walkingDirection.AddComboToGUI(changed);
+            });
+        }
+        DrawSetting("Thumbstick Deadzone", "Ignores small stick movements, preventing drift when the stick rests slightly off-center.", [&]() {
+            settings.stickDeadzone.AddPercentToGUI(changed, 0.0f, 50.0f);
+        });
+        DrawSetting("Stick Direction Threshold", "How far the stick must be pushed before it counts as a direction press in menus.", [&]() {
+            settings.axisThreshold.AddPercentToGUI(changed, 10.0f, 90.0f);
+        });
+        EndSettingsSection();
+    }
+
+    if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
+        if (BeginSettingsSection("##Fixes", "Controller Fixes")) {
+            DrawSetting("Angular Velocity Fixer", "Works around Oculus Link reporting controller rotation speeds incorrectly, which breaks swing detection. Leave this on Auto unless swings feel wrong.", [&]() {
                 settings.buggyAngularVelocity.AddComboToGUI(changed);
             });
+            EndSettingsSection();
         }
-        else {
-            settings.buggyAngularVelocity = AngularVelocityFixerMode::AUTO;
-        }
+    }
+    else {
+        settings.buggyAngularVelocity = AngularVelocityFixerMode::AUTO;
+    }
+}
 
-        DrawSettingRow(windowWidth, "No Camera Movement In First-Person Cutscenes", [&]() {
-            settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(changed);
+void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
+    auto& settings = GetSettings();
+
+    DrawPageHeader(ICON_KI_GRID, "Interface", "Where the game's menus, HUD and aiming aids appear in your view.");
+
+    if (BeginSettingsSection("##Hud", "HUD & Menus")) {
+        DrawSetting("UI Follows Where You Look", "Gently re-centers the HUD and menus as you look around.", [&]() {
+            settings.uiFollowsGaze.AddToGUI(changed);
         });
-
-        DrawSettingRow(windowWidth, "Prevent Ragdolling In First-Person Mode", [&]() {
-            settings.preventFirstPersonRagdoll.AddToGUI(changed);
-        });
-
-        DrawSettingRow(windowWidth, "Enable Debugger Tools (Reduces Performance)", [&]() {
-            bool enableDebuggerTools = settings.enableDebuggerTools;
-            if (ImGui::Checkbox("##EnableDebuggerTools", &enableDebuggerTools)) {
-                settings.enableDebuggerTools = enableDebuggerTools;
+        DrawSetting("Menu & HUD Placement", "How far away and how large the game's menus and HUD appear.", [&]() {
+            float distance = settings.hudDistance;
+            if (ImGui::SliderFloat("##hudDistance", &distance, settings.hudDistance.min, settings.hudDistance.max, FormatDistance(distance).c_str())) {
+                settings.hudDistance = std::clamp(distance, settings.hudDistance.min, settings.hudDistance.max);
+                *changed = true;
+            }
+            ImGui::PushItemWidth(-(ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemSpacing.x));
+            float size = settings.hudSize;
+            if (ImGui::SliderFloat("##hudSize", &size, settings.hudSize.min, settings.hudSize.max, "%.2fx size")) {
+                settings.hudSize = std::clamp(size, settings.hudSize.min, settings.hudSize.max);
+                *changed = true;
+            }
+            ImGui::PopItemWidth();
+            ImGui::SameLine();
+            if (ImGui::Button("Reset")) {
+                settings.hudDistance.Reset();
+                settings.hudSize.Reset();
                 *changed = true;
             }
         });
+        EndSettingsSection();
     }
 
-    ImGui::NewLine();
-    DrawSettingRow(windowWidth, "", [&]() {
-        if (ImGui::Button("Reset All Settings")) {
-            for (ModSettingBase* option : settings.GetOptions()) {
-                option->Reset();
-            }
-            *changed = true;
-        }
-    });
+    if (BeginSettingsSection("##Aiming", "Aiming")) {
+        DrawSetting("Bow Arc Opacity", "Visibility of the predicted arrow arc while aiming your bow.", [&]() {
+            settings.bowArcOpacity.AddPercentToGUI(changed, 0.0f, 100.0f);
+        });
+        EndSettingsSection();
+    }
+}
 
-    if (settings.bootDirectlyIntoGame) {
-        CemuHooks* hooks = VRManager::instance().Hooks.get();
-        if (hooks != nullptr) {
-            const uint64_t currentTitleId = hooks->GetCurrentTitleId();
-            if (currentTitleId != 0) {
-                const std::string formattedTitleId = std::format("{:016X}", currentTitleId);
-                if (settings.bootDirectlyTitleId.Get() != formattedTitleId) {
-                    settings.bootDirectlyTitleId.Set(formattedTitleId);
-                    *changed = true;
+void RND_Renderer::ImGuiOverlay::DrawSystemPage(bool* changed) {
+    auto& settings = GetSettings();
+
+    DrawPageHeader(ICON_KI_COG, "System", "Startup behavior and maintenance.");
+
+    if (BeginSettingsSection("##Startup", "Startup")) {
+        DrawSetting("Boot Directly Into BotW", "Skips Cemu's game list and launches straight into Breath of the Wild.", [&]() {
+            settings.bootDirectlyIntoGame.AddToGUI(changed);
+        });
+        EndSettingsSection();
+    }
+
+    if (BeginSettingsSection("##Developer", "Developer")) {
+        DrawSetting("Enable Debugger Tools", "Unlocks the Debug page with entity inspection and logging options. Reduces performance while enabled.", [&]() {
+            settings.enableDebuggerTools.AddToGUI(changed);
+        });
+        EndSettingsSection();
+    }
+
+    if (BeginSettingsSection("##Maintenance", "Maintenance")) {
+        DrawSetting("Reset All Settings", "Puts every BetterVR setting back to its default value.", [&]() {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.18f, 0.18f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.22f, 0.22f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.45f, 0.12f, 0.12f, 1.0f));
+            if (ImGui::Button("Reset Everything")) {
+                for (ModSettingBase* option : settings.GetOptions()) {
+                    option->Reset();
                 }
+                *changed = true;
             }
-        }
+            ImGui::PopStyleColor(3);
+        });
+        EndSettingsSection();
     }
-
-    ImGui::EndTabItem();
 }
 
 static void DrawLogToggle(const char* label, BoolSetting& setting, bool* changed) {
@@ -942,7 +1035,9 @@ static void DrawLogToggle(const char* label, BoolSetting& setting, bool* changed
     }
 }
 
-void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
+void RND_Renderer::ImGuiOverlay::DrawDebugPage(bool* changed) {
+    DrawPageHeader(ICON_KI_WRENCH, "Debug", "Inspection and logging tools for mod development.");
+
     auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get();
     if (entityDebugger != nullptr) {
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
@@ -954,6 +1049,18 @@ void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
         ImGui::SeparatorText("Entity Debugger");
         entityDebugger->DrawEntityInspectorContent();
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::SeparatorText("Attack Debugger");
+    bool showLeftOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(EyeSide::LEFT);
+    if (ImGui::Checkbox("Left Hand", &showLeftOverlay)) {
+        ImGuiMenus::SetWeaponSensitivityOverlayVisible(EyeSide::LEFT, showLeftOverlay);
+    }
+    ImGui::SameLine();
+    bool showRightOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(EyeSide::RIGHT);
+    if (ImGui::Checkbox("Right Hand", &showRightOverlay)) {
+        ImGuiMenus::SetWeaponSensitivityOverlayVisible(EyeSide::RIGHT, showRightOverlay);
     }
 
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
@@ -972,13 +1079,11 @@ void RND_Renderer::ImGuiOverlay::DrawDebugTab(bool* changed) {
     ImGui::SeparatorText("Log Line Prefix");
     DrawLogToggle("Timestamps", settings.logTimestamps, changed);
     DrawLogToggle("Process & Thread IDs", settings.logThreadIds, changed);
-
-    ImGui::EndTabItem();
 }
 
-void RND_Renderer::ImGuiOverlay::DrawHelpGuideTab() {
+void RND_Renderer::ImGuiOverlay::DrawGuidePage() {
     if (m_helpImages.empty()) {
-        return ImGui::EndTabItem();
+        return;
     }
 
     auto moveHelpImage = [&](int direction) {
@@ -1047,48 +1152,50 @@ void RND_Renderer::ImGuiOverlay::DrawHelpGuideTab() {
         ImGui::Image((ImTextureID)image.m_imageDS, imageSize);
     }
     ImGui::EndChild();
-
-    ImGui::EndTabItem();
 }
 
-void RND_Renderer::ImGuiOverlay::DrawFPSOverlayTab(const ImVec2& windowWidth, bool* changed) {
-    ImGui::Dummy(ImVec2(0.0f, 10.0f));
-
+void RND_Renderer::ImGuiOverlay::DrawPerformancePage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawSettingRow(windowWidth, "Show FPS Overlay", [&]() {
-        settings.performanceOverlay.AddComboToGUI(changed);
-    });
+    DrawPageHeader(ICON_KI_PODIUM, "Performance", "Check how smoothly the mod is running and configure the FPS overlay.");
+
+    if (BeginSettingsSection("##Overlay", "FPS Overlay")) {
+        DrawSetting("Show FPS Overlay", "Draws a live FPS graph in the corner while you play.", [&]() {
+            settings.performanceOverlay.AddComboToGUI(changed);
+        });
+        if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
+            static const uint32_t freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
+            uint32_t currentFreq = settings.performanceOverlayFrequency;
+            int freqIdx = 5;
+            for (int i = 0; i < std::size(freqOptions); i++) {
+                if (freqOptions[i] == currentFreq) {
+                    freqIdx = i;
+                    break;
+                }
+            }
+
+            DrawSetting("Headset Refresh Rate", "The refresh rate your headset runs at, used to draw the graph's target lines.", [&]() {
+                if (ImGui::SliderInt("##RefreshRate", &freqIdx, 0, (int)std::size(freqOptions) - 1, std::format("{} Hz", freqOptions[freqIdx]).c_str())) {
+                    settings.performanceOverlayFrequency = freqOptions[freqIdx];
+                    *changed = true;
+                }
+            });
+        }
+        EndSettingsSection();
+    }
 
     if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
-        static const uint32_t freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
-        uint32_t currentFreq = settings.performanceOverlayFrequency;
-        int freqIdx = 5;
-        for (int i = 0; i < std::size(freqOptions); i++) {
-            if (freqOptions[i] == currentFreq) {
-                freqIdx = i;
-                break;
-            }
-        }
-
-        DrawSettingRow(windowWidth, "Refresh Rate of VR Headset for Graph", [&]() {
-            if (ImGui::SliderInt("##RefreshRate", &freqIdx, 0, (int)std::size(freqOptions) - 1, std::format("{} Hz", freqOptions[freqIdx]).c_str())) {
-                settings.performanceOverlayFrequency = freqOptions[freqIdx];
-                *changed = true;
-            }
-        });
-
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        DrawSectionCaption("Live Frame Timings");
         DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true, OverlayProfilerMode::NONE);
     }
 
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
     DrawBetterVRProfiler(true);
-
-    ImGui::EndTabItem();
 }
 
-void RND_Renderer::ImGuiOverlay::DrawCreditsTab() {
+void RND_Renderer::ImGuiOverlay::DrawCreditsPage() {
+    DrawPageHeader(ICON_KI_HEART, "Credits", "The people who make BetterVR possible.");
+
     ImGui::SeparatorText("Project Links");
     ImGui::TextLinkOpenURL(ICON_KI_GITHUB " https://github.com/Crementif/BotW-BetterVR");
     ImGui::Text("");
@@ -1115,93 +1222,6 @@ void RND_Renderer::ImGuiOverlay::DrawCreditsTab() {
     ImGui::Text("");
 
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
-    ImGui::EndTabItem();
-}
-
-void RND_Renderer::ImGuiOverlay::DrawCustomAttackSensitivityTab(const ImVec2& windowWidth, bool* changed) {
-    auto& settings = GetSettings();
-
-    DrawSectionHeader("Custom Stab Sensitivity");
-
-    DrawSettingRow(windowWidth, "Attack Debugger Windows", [&]() {
-        bool showLeftOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(EyeSide::LEFT);
-        if (ImGui::Checkbox("Left Hand", &showLeftOverlay)) {
-            ImGuiMenus::SetWeaponSensitivityOverlayVisible(EyeSide::LEFT, showLeftOverlay);
-        }
-        ImGui::SameLine();
-        bool showRightOverlay = ImGuiMenus::IsWeaponSensitivityOverlayVisible(EyeSide::RIGHT);
-        if (ImGui::Checkbox("Right Hand", &showRightOverlay)) {
-            ImGuiMenus::SetWeaponSensitivityOverlayVisible(EyeSide::RIGHT, showRightOverlay);
-        }
-    });
-
-    DrawSettingRow(windowWidth, "Stab Speed Threshold", [&]() {
-        settings.customStabSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.01f, 0.50f, "%.2f m/s");
-    });
-    DrawSettingRow(windowWidth, "Stab Accel Threshold", [&]() {
-        settings.customStabAccThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, "%.1f m/s^2");
-    });
-    DrawSettingRow(windowWidth, "Stab Aim Cone", [&]() {
-        settings.customStabSteadinessCone.AddToGUI(changed, windowWidth.x, 15.0f, 85.0f, "%.0f deg");
-    });
-    DrawSettingRow(windowWidth, "Stab Twist Limit", [&]() {
-        settings.customStabAngularSteadiness.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, "%.1f rad/s");
-    });
-    DrawSettingRow(windowWidth, "Stab Travel Distance", [&]() {
-        settings.customStabTravelDistance.AddToGUI(changed, windowWidth.x, 0.05f, 0.50f, "%.2f m");
-    });
-    DrawSettingRow(windowWidth, "Stab Lock Time", [&]() {
-        settings.customMinGoodStabDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
-    });
-
-    ImGui::Spacing();
-    DrawSectionHeader("Custom Swing Sensitivity");
-
-    DrawSettingRow(windowWidth, "Swing Speed Threshold", [&]() {
-        settings.customSlashSpeedThreshold.AddToGUI(changed, windowWidth.x, 0.1f, 5.0f, "%.1f rad/s");
-    });
-    DrawSettingRow(windowWidth, "Swing Accel Threshold", [&]() {
-        settings.customSlashAccThreshold.AddToGUI(changed, windowWidth.x, 3.0f, 40.0f, "%.1f rad/s^2");
-    });
-    DrawSettingRow(windowWidth, "Swing Velocity Threshold", [&]() {
-        settings.customSlashVelocityThreshold.AddToGUI(changed, windowWidth.x, 1.0f, 15.0f, "%.1f rad/s");
-    });
-    DrawSettingRow(windowWidth, "Swing Drift Limit", [&]() {
-        settings.customSlashAccDriftThreshold.AddToGUI(changed, windowWidth.x, 2.0f, 30.0f, "%.1f rad/s^2");
-    });
-    DrawSettingRow(windowWidth, "Swing Travel Angle", [&]() {
-        settings.customSlashTravelAngle.AddToGUI(changed, windowWidth.x, 10.0f, 90.0f, "%.0f deg");
-    });
-    DrawSettingRow(windowWidth, "Swing Lock Time", [&]() {
-        settings.customMinGoodSwingDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
-    });
-
-    ImGui::Spacing();
-    DrawSectionHeader("Shared Tuning");
-
-    DrawSettingRow(windowWidth, "Bad Sample Timeout", [&]() {
-        settings.customMaxBadDuration.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
-    });
-    DrawSettingRow(windowWidth, "Grace Period", [&]() {
-        settings.customGoodSampleGracePeriod.AddToGUI(changed, windowWidth.x, 10.0f, 200.0f, "%.0f ms");
-    });
-    DrawSettingRow(windowWidth, "Input Smoothing", [&]() {
-        settings.customSmoothingTimeConstant.AddToGUI(changed, windowWidth.x, 0.005f, 0.100f, "%.3f s");
-    });
-    DrawSettingRow(windowWidth, "Drift Min Velocity", [&]() {
-        settings.customAngularDriftMinVelocity.AddToGUI(changed, windowWidth.x, 0.1f, 3.0f, "%.1f rad/s");
-    });
-    DrawSettingRow(windowWidth, "Damage Output Scale", [&]() {
-        settings.customDamageOutputScale.AddToGUI(changed, windowWidth.x, 0.10f, 2.00f, "%.2fx");
-    });
-    DrawSettingRow(windowWidth, "", [&]() {
-        if (ImGui::Button("Reset Custom Weapon Sensitivity")) {
-            settings.ResetCustomWeaponSensitivity();
-            *changed = true;
-        }
-    });
-
-    ImGui::EndTabItem();
 }
 
 static const char* GetControllerModMenuPrompt() {
@@ -1227,9 +1247,9 @@ static const char* GetControllerMenuNavPrompt() {
         case ControllerType::HPReverbG2:
         case ControllerType::ViveCosmos:
         case ControllerType::ValveIndex:
-            return ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_LT " " ICON_KI_BUTTON_RT " Tabs";
+            return ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_LT " " ICON_KI_BUTTON_RT " Switch Page";
         default:
-            return ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_L " " ICON_KI_BUTTON_R " Tabs";
+            return ICON_KI_STICK_LEFT_TOP " Navigate      " ICON_KI_BUTTON_A " Select      " ICON_KI_BUTTON_B " Exit      " ICON_KI_BUTTON_L " " ICON_KI_BUTTON_R " Switch Page";
     }
 }
 
@@ -1298,81 +1318,78 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
         shouldLogSavedSettingsOnClose = false;
     }
 
-    ImVec2 fullWindowWidth = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-    ImVec2 windowWidth = fullWindowWidth * ImVec2(0.925f, 1.0f);
+    ImVec2 displaySize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+    ImVec2 windowSize = displaySize * ImVec2(0.925f, 1.0f);
 
-    const bool hasCustomAttackSensitivityTab = settings.GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
-    const bool hasDebugTab = settings.IsDebuggingToolsEnabled();
-    auto& selectedTab = VRManager::instance().XR->m_currMenuTab;
-    if (!hasDebugTab && selectedTab == ImGuiMenus::DEBUG_TAB) {
-        selectedTab = ImGuiMenus::SETTINGS_TAB;
-        VRManager::instance().XR->m_forceTabChange = true;
-    }
-    if (!hasCustomAttackSensitivityTab && selectedTab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) {
-        selectedTab = ImGuiMenus::SETTINGS_TAB;
-        VRManager::instance().XR->m_forceTabChange = true;
+    auto& selectedPage = VRManager::instance().XR->m_currMenuTab;
+    if (!ImGuiMenus::IsPageAvailable(selectedPage)) {
+        selectedPage = ImGuiMenus::PLAYSTYLE_PAGE;
     }
 
-    bool setTab = VRManager::instance().XR->m_forceTabChange;
     bool shouldStayOpen = true;
 
-    ImGui::SetNextWindowPos(fullWindowWidth * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(windowWidth, ImGuiCond_Always);
+    ImGui::SetNextWindowPos(displaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
     if (ImGui::Begin("BetterVR Settings & Help##Settings", &shouldStayOpen, ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
         bool changed = false;
-
-        ImGui::Indent(10.0f);
-        ImGui::Dummy(ImVec2(10.0f, 0.0f));
-
         float footerHeight = ImGui::GetFrameHeight() * 1.5f;
-        if (ImGui::BeginChild("Content", ImVec2(0, -footerHeight), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImGui::GetStyle().FramePadding + ImVec2(0, 2.0f));
-            if (ImGui::BeginTabBar("HelpMenuTabs")) {
-                ImGui::PopStyleVar();
 
-                if (BeginStyledTab(ICON_KI_COG "Settings", selectedTab, ImGuiMenus::SETTINGS_TAB, setTab)) {
-                    selectedTab = ImGuiMenus::SETTINGS_TAB;
-                    DrawSettingsTab(windowWidth, &changed);
-                }
-                if (hasDebugTab && BeginStyledTab("Debug", selectedTab, ImGuiMenus::DEBUG_TAB, setTab)) {
-                    selectedTab = ImGuiMenus::DEBUG_TAB;
-                    DrawDebugTab(&changed);
-                }
-                if (BeginStyledTab(ICON_KI_INFO_CIRCLE " Help & Controller Guide", selectedTab, ImGuiMenus::HELP_TAB, setTab)) {
-                    selectedTab = ImGuiMenus::HELP_TAB;
-                    DrawHelpGuideTab();
-                }
-                if (BeginStyledTab(ICON_KI_PODIUM " FPS Overlay", selectedTab, ImGuiMenus::FPS_OVERLAY_TAB, setTab)) {
-                    selectedTab = ImGuiMenus::FPS_OVERLAY_TAB;
-                    DrawFPSOverlayTab(windowWidth, &changed);
-                }
-                if (BeginStyledTab(ICON_KI_HEART " Credits", selectedTab, ImGuiMenus::CREDITS_TAB, setTab)) {
-                    selectedTab = ImGuiMenus::CREDITS_TAB;
-                    DrawCreditsTab();
-                }
-                if (hasCustomAttackSensitivityTab && BeginStyledTab("Custom Attack Sensitivity", selectedTab, ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB, setTab)) {
-                    selectedTab = ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB;
-                    DrawCustomAttackSensitivityTab(windowWidth, &changed);
-                }
+        float sidebarWidth = std::min(215.0f, windowSize.x * 0.3f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08627451f, 0.11764706f, 0.13725491f, 1.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 12.0f));
+        if (ImGui::BeginChild("Sidebar", ImVec2(sidebarWidth, -footerHeight), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding)) {
+            DrawSidebar(selectedPage);
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
 
-                ImGui::EndTabBar();
+        ImGui::SameLine(0.0f, 0.0f);
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 8.0f));
+        ImGui::PushID(selectedPage);
+        if (ImGui::BeginChild("Content", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+            switch (selectedPage) {
+                case ImGuiMenus::PLAYSTYLE_PAGE: DrawPlaystylePage(&changed); break;
+                case ImGuiMenus::COMFORT_PAGE: DrawComfortPage(&changed); break;
+                case ImGuiMenus::COMBAT_PAGE: DrawCombatPage(&changed); break;
+                case ImGuiMenus::CONTROLS_PAGE: DrawControlsPage(&changed); break;
+                case ImGuiMenus::INTERFACE_PAGE: DrawInterfacePage(&changed); break;
+                case ImGuiMenus::PERFORMANCE_PAGE: DrawPerformancePage(&changed); break;
+                case ImGuiMenus::SYSTEM_PAGE: DrawSystemPage(&changed); break;
+                case ImGuiMenus::GUIDE_PAGE: DrawGuidePage(); break;
+                case ImGuiMenus::CREDITS_PAGE: DrawCreditsPage(); break;
+                case ImGuiMenus::DEBUG_PAGE: DrawDebugPage(&changed); break;
+                default: break;
             }
-            else {
-                ImGui::PopStyleVar();
-            }
-            ImGui::EndChild();
+        }
+        ImGui::EndChild();
+        ImGui::PopID();
+        ImGui::PopStyleVar();
 
-            if (changed) {
-                shouldLogSavedSettingsOnClose = true;
-                ImGui::SaveIniSettingsToDisk("BetterVR_settings.ini");
+        if (settings.bootDirectlyIntoGame) {
+            CemuHooks* hooks = VRManager::instance().Hooks.get();
+            if (hooks != nullptr) {
+                const uint64_t currentTitleId = hooks->GetCurrentTitleId();
+                if (currentTitleId != 0) {
+                    const std::string formattedTitleId = std::format("{:016X}", currentTitleId);
+                    if (settings.bootDirectlyTitleId.Get() != formattedTitleId) {
+                        settings.bootDirectlyTitleId.Set(formattedTitleId);
+                        changed = true;
+                    }
+                }
             }
         }
 
-        ImGui::Unindent(10.0f);
+        if (changed) {
+            shouldLogSavedSettingsOnClose = true;
+            ImGui::SaveIniSettingsToDisk("BetterVR_settings.ini");
+        }
+
         ImGui::Separator();
         ImGui::Spacing();
         const char* navText = GetControllerMenuNavPrompt();

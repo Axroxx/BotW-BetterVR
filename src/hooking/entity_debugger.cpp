@@ -167,7 +167,7 @@ static void UpdateArrowTrails() {
 
 static bool IsEntityInspectorVisible() {
     const auto& xr = VRManager::instance().XR;
-    return xr->m_isMenuOpen.load(std::memory_order_relaxed) && xr->m_currMenuTab.load(std::memory_order_relaxed) == ImGuiMenus::DEBUG_TAB;
+    return xr->m_isMenuOpen.load(std::memory_order_relaxed) && xr->m_currMenuTab.load(std::memory_order_relaxed) == ImGuiMenus::DEBUG_PAGE;
 }
 
 void EntityDebugger::UpdateEntityMemory() {

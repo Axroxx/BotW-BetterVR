@@ -114,8 +114,8 @@ void RND_Renderer::StartFrame() {
     if (auto* xr = VRManager::instance().XR.get(); xr != nullptr) {
         const bool isMenuOpen = xr->m_isMenuOpen.load(std::memory_order_relaxed);
         const uint8_t currentTab = xr->m_currMenuTab.load(std::memory_order_relaxed);
-        const bool isDebugTabOpen = isMenuOpen && GetSettings().enableDebuggerTools.load(std::memory_order_relaxed) && currentTab == ImGuiMenus::DEBUG_TAB;
-        const bool isProfilerTabOpen = isMenuOpen && currentTab == ImGuiMenus::FPS_OVERLAY_TAB;
+        const bool isDebugTabOpen = isMenuOpen && GetSettings().enableDebuggerTools.load(std::memory_order_relaxed) && currentTab == ImGuiMenus::DEBUG_PAGE;
+        const bool isProfilerTabOpen = isMenuOpen && currentTab == ImGuiMenus::PERFORMANCE_PAGE;
         const PerformanceOverlayMode performanceOverlay = GetSettings().performanceOverlay.load(std::memory_order_relaxed);
         const bool showsProfilerOverlay = !isMenuOpen && performanceOverlay == PerformanceOverlayMode::WINDOW_AND_VR_WITH_PROFILER;
         shouldEnableProfiler = isDebugTabOpen || isProfilerTabOpen || showsProfilerOverlay;

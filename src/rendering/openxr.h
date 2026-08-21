@@ -175,7 +175,6 @@ public:
     std::atomic<GameState> m_gameState{};
     std::atomic_bool m_isMenuOpen = false;
     std::atomic_uint8_t m_currMenuTab = 0;
-    std::atomic_bool m_forceTabChange = false;
 
     // We'll manage the rumble commands priority inside controls.cpp
     struct RumbleParameters {

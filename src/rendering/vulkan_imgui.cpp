@@ -41,10 +41,17 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     static const ImWchar icon_ranges[] = { ICON_MIN_KI, ICON_MAX_16_KI, 0 };
     iconCfg.GlyphRanges = icon_ranges;
     ImFont* iconFont = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(kenney_compressed_data, kenney_compressed_size, 16.0f, &iconCfg);
-    if (iconFont == nullptr || textFont == nullptr) {
+
+    ImFont* titleFont = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(roboto_compressed_data, roboto_compressed_size, 22.0f, &fontCfg);
+    ImFontConfig titleIconCfg = iconCfg;
+    titleIconCfg.GlyphMinAdvanceX = 22.0f;
+    ImFont* titleIconFont = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(kenney_compressed_data, kenney_compressed_size, 22.0f, &titleIconCfg);
+
+    if (iconFont == nullptr || textFont == nullptr || titleFont == nullptr || titleIconFont == nullptr) {
         Log::print<ERROR>("Failed to load custom fonts for ImGui overlay, using default font");
     }
     else {
+        ImGuiMenus::g_titleFont = titleFont;
         ImGui::GetIO().Fonts->Build();
     }
 
@@ -549,45 +556,22 @@ void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const
     bool l1 = applyInput(ImGuiKey_GamepadL1, pageLeft || ((hold & VPAD_BUTTON_L) != 0), VERTICAL_REFIRE_DELAY, 6);
     bool r1 = applyInput(ImGuiKey_GamepadR1, pageRight || ((hold & VPAD_BUTTON_R) != 0), VERTICAL_REFIRE_DELAY, 7);
 
-    const bool hasCustomAttackSensitivityTab = GetSettings().GetSwingSensitivity() == SwingSensitivity::SWING_CUSTOM;
-    const bool hasDebugTab = GetSettings().enableDebuggerTools;
-    auto& currTab = VRManager::instance().XR->m_currMenuTab;
-    auto isTabAvailable = [&](uint8_t tab) {
-        if (tab == ImGuiMenus::DEBUG_TAB) {
-            return hasDebugTab;
-        }
-        if (tab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) {
-            return hasCustomAttackSensitivityTab;
-        }
-        return true;
-    };
-
-    if (!hasDebugTab && currTab == ImGuiMenus::DEBUG_TAB) {
-        currTab = ImGuiMenus::SETTINGS_TAB;
-    }
-    if (!hasCustomAttackSensitivityTab && currTab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) {
-        currTab = ImGuiMenus::SETTINGS_TAB;
+    auto& currPage = VRManager::instance().XR->m_currMenuTab;
+    if (!ImGuiMenus::IsPageAvailable(currPage)) {
+        currPage = ImGuiMenus::PLAYSTYLE_PAGE;
     }
 
-    VRManager::instance().XR->m_forceTabChange = false;
     if (l1 || r1) {
-        uint8_t prevTab = currTab;
-        uint8_t nextTab = currTab;
-        if (l1) {
-            do {
-                nextTab = (nextTab == ImGuiMenus::SETTINGS_TAB) ? ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB : (nextTab - 1);
-            } while (!isTabAvailable(nextTab));
-        }
-        if (r1) {
-            do {
-                nextTab = (nextTab == ImGuiMenus::CUSTOM_ATTACK_SENSITIVITY_TAB) ? ImGuiMenus::SETTINGS_TAB : (nextTab + 1);
-            } while (!isTabAvailable(nextTab));
-        }
-        currTab = nextTab;
-
-        if (prevTab != currTab) {
-            VRManager::instance().XR->m_forceTabChange = true;
-        }
+        uint8_t nextPage = currPage;
+        do {
+            if (l1) {
+                nextPage = (nextPage == 0) ? (ImGuiMenus::PAGE_COUNT - 1) : (nextPage - 1);
+            }
+            else {
+                nextPage = (nextPage + 1) % ImGuiMenus::PAGE_COUNT;
+            }
+        } while (!ImGuiMenus::IsPageAvailable(nextPage));
+        currPage = nextPage;
     }
 
     // prevent exiting menu if a popup or field is being edited
