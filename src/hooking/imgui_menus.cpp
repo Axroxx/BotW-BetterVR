@@ -1102,6 +1102,8 @@ void RND_Renderer::ImGuiOverlay::DrawCreditsTab() {
     ImGui::Text("");
     ImGui::Text("- Crementif");
 
+    DrawSupporterWall();
+
     ImGui::SeparatorText("Credits");
     ImGui::Text("Crementif: Main Developer");
     ImGui::Text("Holydh: Inputs and Gestures");

@@ -9,6 +9,10 @@
 #include "utils/render_utils.h"
 #include "hooking/imgui_menus.h"
 
+static constexpr XrTime DefaultDisplayPeriodNs = 11'111'111;
+static constexpr XrTime MaxInputExtrapolationPeriods = 4;
+static constexpr XrTime MinInputSampleDeltaNs = 2'000'000;
+
 std::atomic_bool RND_Renderer::Layer2D::s_isBowAimingActive = false;
 
 static float GetSnapTurnFadeAmount() {
@@ -137,8 +141,12 @@ void RND_Renderer::StartFrame() {
 
     auto waitStart = std::chrono::high_resolution_clock::now();
     if (!m_framePumpThread.joinable()) {
-        m_framePumpWaitRequested = true;
+        {
+            std::lock_guard<std::mutex> lock(m_framePumpMutex);
+            m_framePumpWaitRequested = true;
+        }
         m_framePumpThread = std::thread(&RND_Renderer::FramePumpLoop, this);
+        m_framePumpCv.notify_one();
     }
 
     bool xrSlotReady = false;
@@ -146,6 +154,7 @@ void RND_Renderer::StartFrame() {
         std::lock_guard<std::mutex> lock(m_framePumpMutex);
         if (m_framePumpSlotReady) {
             m_frameState = m_pumpedFrameState;
+            m_frameStateReceivedAt = m_pumpedFrameStateReceivedAt;
             m_framePumpSlotReady = false;
             xrSlotReady = true;
         }
@@ -155,6 +164,8 @@ void RND_Renderer::StartFrame() {
     if (!xrSlotReady) {
         m_xrFrameActive = false;
         ++m_skippedXrFrameCount;
+        // without this the whole game frame would reuse the previous controller pose and timestamp
+        m_frameInputLatched = false;
         return;
     }
     m_xrFrameActive = true;
@@ -181,9 +192,8 @@ void RND_Renderer::StartFrame() {
     VRManager::instance().D3D12->StartFrame();
     VRManager::instance().XR->UpdateSpaces(m_frameState.predictedDisplayTime);
     m_frameViewsPending = true;
-    m_frameInputsPending = true;
     m_frameViewLatchFailed = false;
-    m_frameInputLatchFailed = false;
+    m_frameInputLatched = false;
 
     {
         std::lock_guard<std::mutex> lock(m_framePumpMutex);
@@ -211,9 +221,15 @@ void RND_Renderer::FramePumpLoop() {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(m_framePumpMutex);
-        m_pumpedFrameState = frameState;
-        m_framePumpSlotReady = true;
+        const auto waitEnd = std::chrono::steady_clock::now();
+
+        {
+            std::lock_guard<std::mutex> lock(m_framePumpMutex);
+            m_pumpedFrameState = frameState;
+            m_pumpedFrameStateReceivedAt = waitEnd;
+            m_framePumpSlotReady = true;
+        }
+        m_framePumpCv.notify_all();
     }
 }
 
@@ -222,7 +238,7 @@ void RND_Renderer::StopFramePump() {
         std::lock_guard<std::mutex> lock(m_framePumpMutex);
         m_framePumpStopRequested = true;
     }
-    m_framePumpCv.notify_one();
+    m_framePumpCv.notify_all();
     if (m_framePumpThread.joinable()) {
         m_framePumpThread.join();
     }
@@ -436,28 +452,50 @@ bool RND_Renderer::EnsureFrameViewsLatched() const {
     return true;
 }
 
-bool RND_Renderer::EnsureFrameInputLatched() {
-    if (!m_frameInputsPending) {
-        return !m_frameInputLatchFailed;
+std::optional<XrTime> RND_Renderer::ComputeInputSampleTime() const {
+    if (m_frameState.predictedDisplayTime == 0) {
+        return std::nullopt;
     }
 
-    m_frameInputsPending = false;
-    m_frameInputLatchFailed = false;
+    const XrTime periodNs = m_frameState.predictedDisplayPeriod > 0 ? (XrTime)m_frameState.predictedDisplayPeriod : DefaultDisplayPeriodNs;
+    const XrTime elapsedNs = (XrTime)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - m_frameStateReceivedAt).count();
+    const XrTime sampleTime = m_frameState.predictedDisplayTime + std::clamp<XrTime>(elapsedNs, 0, periodNs * MaxInputExtrapolationPeriods);
 
-    if (!EnsureFrameViewsLatched() || !m_currViews.has_value()) {
-        m_frameInputLatchFailed = true;
+    // Two locates closer together than this differ mostly by runtime velocity noise, and dividing
+    // that noise by a sub-millisecond dt would swamp the acceleration signal the slash detector
+    // runs on. Keep the standing sample instead of manufacturing a new one.
+    if (sampleTime - m_lastInputSampleTime < MinInputSampleDeltaNs) {
+        return std::nullopt;
+    }
+
+    return sampleTime;
+}
+
+bool RND_Renderer::EnsureFrameInputLatched() {
+    if (m_frameInputLatched) {
+        return true;
+    }
+
+    const std::optional<XrTime> sampleTime = ComputeInputSampleTime();
+    if (!sampleTime.has_value()) {
         return false;
     }
 
-    const XrPosef& leftPose = m_currViews->at(OpenXR::EyeSide::LEFT).pose;
-    const XrPosef& rightPose = m_currViews->at(OpenXR::EyeSide::RIGHT).pose;
+    auto views = GetPoses();
+    if (!views.has_value()) {
+        return false;
+    }
+
+    const XrPosef& leftPose = views->at(OpenXR::EyeSide::LEFT).pose;
+    const XrPosef& rightPose = views->at(OpenXR::EyeSide::RIGHT).pose;
     glm::quat middleOrientation = glm::slerp(ToGLM(leftPose.orientation), ToGLM(rightPose.orientation), 0.5f);
 
-    if (!VRManager::instance().XR->UpdateActions(m_frameState.predictedDisplayTime, middleOrientation, CemuHooks::IsShowingMenu()).has_value()) {
-        m_frameInputLatchFailed = true;
+    if (!VRManager::instance().XR->UpdateActions(sampleTime.value(), middleOrientation, CemuHooks::IsShowingMenu()).has_value()) {
         return false;
     }
 
+    m_lastInputSampleTime = sampleTime.value();
+    m_frameInputLatched = true;
     return true;
 }
 

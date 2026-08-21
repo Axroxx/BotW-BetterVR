@@ -143,6 +143,7 @@ public:
 
     bool EnsureFrameViewsLatched() const;
     bool EnsureFrameInputLatched();
+    std::optional<XrTime> ComputeInputSampleTime() const;
     bool HasCurrentFrameViewsLatched() const { return !m_frameViewsPending && !m_frameViewLatchFailed && m_currViews.has_value(); }
     bool DidCurrentFrameViewLatchFail() const { return m_frameViewLatchFailed; }
 
@@ -395,11 +396,14 @@ protected:
     XrSession m_session;
     bool m_sessionRunning = false;
     XrFrameState m_frameState = { XR_TYPE_FRAME_STATE };
+    std::chrono::steady_clock::time_point m_frameStateReceivedAt = {};
+    XrTime m_lastInputSampleTime = 0;
 
     std::thread m_framePumpThread;
     std::mutex m_framePumpMutex;
     std::condition_variable m_framePumpCv;
     XrFrameState m_pumpedFrameState = { XR_TYPE_FRAME_STATE };
+    std::chrono::steady_clock::time_point m_pumpedFrameStateReceivedAt = {};
     bool m_framePumpSlotReady = false;
     bool m_framePumpWaitRequested = false;
     bool m_framePumpStopRequested = false;
@@ -424,9 +428,8 @@ protected:
     uint64_t m_nextStereoGeneration = 1;
     uint64_t m_nextCaptureActivityOrdinal = 1;
     mutable bool m_frameViewsPending = false;
-    bool m_frameInputsPending = false;
+    bool m_frameInputLatched = false;
     mutable bool m_frameViewLatchFailed = false;
-    bool m_frameInputLatchFailed = false;
     uint64_t m_current3DPresentedCount = 0;
     uint64_t m_stable3DReusedCount = 0;
     uint64_t m_3DSuppressedCount = 0;
