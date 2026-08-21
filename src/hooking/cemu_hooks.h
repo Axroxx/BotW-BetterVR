@@ -148,13 +148,38 @@ public:
         return GetFramesSinceLastCameraUpdate() <= 4 && !IsScreenOpen(ScreenId::PauseMenuInfo_00);
     }
     static bool IsShowingMenu() {
-        return !IsInGame() || IsScreenOpen(ScreenId::ShopBG_00) || IsScreenOpen(ScreenId::MessageDialog);
+        return IsFlatCameraModeActive() || !IsInGame() || IsScreenOpen(ScreenId::ShopBG_00) || IsScreenOpen(ScreenId::MessageDialog);
     }
     static bool IsRiding(bool ignoreSandSeal = false) {
         if (ignoreSandSeal) {
             return s_isRiding > 0;
         }
         return s_isRiding > 0 || s_isRidingSandSeal > 0;
+    }
+    static bool IsScopeModeActive() {
+        constexpr uint32_t RuneMgrInstanceAddress = 0x10463798;
+        constexpr uint32_t RuneMgrFlagsOffset = 0x4C;
+        constexpr uint32_t TelescopeActiveMask = 1 << 5;
+
+        const uint32_t runeMgr = getMemory<BEType<uint32_t>>(RuneMgrInstanceAddress).getLE();
+        return runeMgr != 0 && (getMemory<BEType<uint32_t>>(runeMgr + RuneMgrFlagsOffset).getLE() & TelescopeActiveMask) != 0;
+    }
+    static bool IsCameraFinderModeActive() {
+        constexpr uint32_t RuneMgrInstanceAddress = 0x10463798;
+        constexpr uint32_t RuneMgrFlagsOffset = 0x4C;
+        constexpr uint32_t RuneMgrSelectedRuneOffset = 0x1D4;
+        // Bit 4 is shared by every equipped rune, so also require RuneType_Camera.
+        constexpr uint32_t RuneActiveMask = 1 << 4;
+        constexpr uint32_t CameraRune = 5;
+
+        const uint32_t runeMgr = getMemory<BEType<uint32_t>>(RuneMgrInstanceAddress).getLE();
+        return runeMgr != 0 && (getMemory<BEType<uint32_t>>(runeMgr + RuneMgrFlagsOffset).getLE() & RuneActiveMask) != 0 && getMemory<BEType<uint32_t>>(runeMgr + RuneMgrSelectedRuneOffset).getLE() == CameraRune;
+    }
+    static bool IsFlatCameraModeActive() {
+        return IsScopeModeActive() || IsCameraFinderModeActive();
+    }
+    static bool UseFlatCameraPresentation() {
+        return IsFlatCameraModeActive() && !IsAnyFadeScreenVisible();
     }
     static bool UseMonoFrameBufferTemporarilyDuringMenusOrPictures();
 

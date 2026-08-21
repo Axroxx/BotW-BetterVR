@@ -81,6 +81,10 @@ std::optional<CemuHooks::HybridEventSettings> CemuHooks::GetFirstPersonSettingsF
 }
 
 bool CemuHooks::IsFirstPerson() {
+    if (IsFlatCameraModeActive()) {
+        return false;
+    }
+
     if (HasActiveCutscene()) {
         // always third-person
         if (GetSettings().GetCutsceneCameraMode() == EventMode::ALWAYS_THIRD_PERSON) {
@@ -116,7 +120,7 @@ bool CemuHooks::IsThirdPerson() {
 }
 
 bool CemuHooks::UseBlackBarsDuringEvents() {
-    if (!HasActiveCutscene() || IsFirstPerson()) {
+    if (IsFlatCameraModeActive() || !HasActiveCutscene() || IsFirstPerson()) {
         return false;
     }
 

@@ -36,6 +36,9 @@ static float GetSnapTurnFadeAmount() {
 }
 
 bool RND_Renderer::IsCurrent3DPresentationAllowed(const RenderFrame& frame) const {
+    if (CemuHooks::UseFlatCameraPresentation()) {
+        return false;
+    }
     if (!CemuHooks::IsInGame()) {
         return false;
     }
@@ -49,6 +52,9 @@ bool RND_Renderer::IsCurrent3DPresentationAllowed(const RenderFrame& frame) cons
 }
 
 bool RND_Renderer::IsStable3DReuseAllowed(const RenderFrame& frame) const {
+    if (CemuHooks::UseFlatCameraPresentation()) {
+        return false;
+    }
     const bool isMonoFallbackFrame = (frame.issueFlags & CaptureIssue_MonoCapture) != 0;
     if (!isMonoFallbackFrame && !CemuHooks::IsInGame()) {
         return false;

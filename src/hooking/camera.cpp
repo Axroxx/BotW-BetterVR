@@ -7,9 +7,7 @@
 #include "utils/game_utils.h"
 #include "utils/render_utils.h"
 
-bool CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures() {
-    return IsScreenOpen(ScreenId::PauseMenuInfo_00) || VRManager::instance().XR->GetRenderer()->IsGameCapturing3DFrameBuffer();
-}
+static std::atomic<float> s_flatCameraFovYRadians = glm::radians(90.0f);
 
 static std::optional<XrFovf> TryGetRenderFOV(OpenXR::EyeSide side, long frameIdx = -1) {
     auto* renderer = VRManager::instance().XR->GetRenderer();
@@ -30,7 +28,14 @@ void CemuHooks::hook_BeginCameraSide(PPCInterpreter_t* hCPU) {
     Log::print<RENDERING>("{0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0} {0}", side);
 }
 
-// uses the zNear/zFar already on the projection, so set those before calling
+bool CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures() {
+    return !IsAnyFadeScreenVisible() && (IsFlatCameraModeActive() || IsScreenOpen(ScreenId::PauseMenuInfo_00) || VRManager::instance().XR->GetRenderer()->IsGameCapturing3DFrameBuffer());
+}
+
+// Write a frustum into a sead::PerspectiveProjection: the scalars the game reads back, the
+// projection matrix, and the device matrix its depth range is folded into. zNear/zFar are taken
+// from the projection as it stands, so the caller decides whether to keep the game's clip planes
+// or substitute the VR ones before calling.
 static void ApplyProjectionFov(BESeadPerspectiveProjection& perspectiveProjection, const XrFovf& fov) {
     data_VRProjectionMatrixOut newProjection = RenderUtils::CalculateFOVAndOffset(fov);
 
@@ -445,6 +450,10 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
         return;
     }
 
+    if (UseFlatCameraPresentation()) {
+        return;
+    }
+
     // read the camera matrix from the game's memory
     uint32_t ppc_cameraMatrixOffsetIn = hCPU->gpr[31];
     ActCamera actCam = {};
@@ -592,7 +601,7 @@ void CemuHooks::hook_UpdateCameraForGameplay(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (IsThirdPerson() || !s_hasGameplayCameraTarget || GetFramesSinceLastCameraUpdate() > 4 || UseBlackBarsDuringEvents()) {
+    if (IsFlatCameraModeActive() || IsThirdPerson() || !s_hasGameplayCameraTarget || GetFramesSinceLastCameraUpdate() > 4 || UseBlackBarsDuringEvents()) {
         return;
     }
 
@@ -618,6 +627,10 @@ void CemuHooks::hook_AdjustGameplayCameraPivot(PPCInterpreter_t* hCPU) {
 // real controller's right stick asked for
 void CemuHooks::hook_AddGameCameraStickYaw(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    if (IsFlatCameraModeActive()) {
+        return;
+    }
 
     const float yawDelta = (float)hCPU->fpr[1].fp0;
     if (yawDelta == 0.0f || !std::isfinite(yawDelta) || ShouldAdoptGameCameraYaw()) {
@@ -653,7 +666,7 @@ void CemuHooks::hook_CaptureClimbWallSurface(PPCInterpreter_t* hCPU) {
 void CemuHooks::hook_SnapTurnCameraPivot(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (!IsFirstPerson() || HasActiveCutscene()) {
+    if (IsFlatCameraModeActive() || !IsFirstPerson() || HasActiveCutscene()) {
         return;
     }
 
@@ -687,7 +700,7 @@ static bool ApplyYawDeltaToCameraTailPivot(PPCInterpreter_t* hCPU, float yawDelt
 void CemuHooks::hook_SnapTurnCameraTailPivot(PPCInterpreter_t* hCPU) {
     hCPU->instructionPointer = hCPU->sprNew.LR;
 
-    if (!IsFirstPerson() || HasActiveCutscene()) {
+    if (IsFlatCameraModeActive() || !IsFirstPerson() || HasActiveCutscene()) {
         return;
     }
 
@@ -755,6 +768,12 @@ void CemuHooks::hook_GetRenderCamera(PPCInterpreter_t* hCPU) {
     readMemory(cameraIn, &camera);
 
     Log::print<RENDERING>("[{}] Getting render camera", side);
+    if (UseFlatCameraPresentation()) {
+        glm::mat4 flatCameraView = glm::mat4(camera.mtx.getLEMatrix());
+        s_lastCameraMtx = glm::inverse(flatCameraView);
+        return;
+    }
+
     auto [gameplayPos, gameplayRot] = ResolveGameplayBasePose(camera);
     UpdateGameplayReferenceCameraMtx(gameplayPos, gameplayRot);
     auto [newPos, newRot] = BuildGameplayCameraPose(gameplayPos, gameplayRot, side);
@@ -807,6 +826,7 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
     }
 
     // captures use the game's FOV
+    const bool isFlatCameraMode = UseFlatCameraPresentation();
     if (UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
         std::optional<float> gameFovY = RenderUtils::SanitizeGameFovY(perspectiveProjection.fovYRadiansOrAngle.getLE());
         if (!gameFovY.has_value()) {
@@ -814,6 +834,10 @@ void CemuHooks::hook_GetRenderProjection(PPCInterpreter_t* hCPU) {
         }
 
         ApplyProjectionFov(perspectiveProjection, RenderUtils::CreateSymmetricFov(gameFovY.value(), RenderUtils::CapturedImageAspectRatio));
+
+        if (isFlatCameraMode) {
+            s_flatCameraFovYRadians.store(perspectiveProjection.fovYRadiansOrAngle.getLE(), std::memory_order_relaxed);
+        }
 
         writeMemory(projectionOut, &perspectiveProjection);
         hCPU->gpr[3] = projectionOut;
@@ -1038,6 +1062,16 @@ void CemuHooks::hook_CheckIfCameraCanSeePos(PPCInterpreter_t* hCPU) {
     readMemory(posPtr, &center);
 
     Frustum frustum;
+
+    if (UseFlatCameraPresentation()) {
+        XrFovf flatCameraFov = RenderUtils::CreateSymmetricFov(s_flatCameraFovYRadians.load(std::memory_order_relaxed), RenderUtils::CapturedImageAspectRatio);
+        glm::mat4 view = glm::mat4(camera.mtx.getLEMatrix());
+        glm::mat4 proj = glm::transpose(RenderUtils::CalculateProjectionMatrix(nearClip, farClip, flatCameraFov));
+        frustum.update(proj * view);
+        hCPU->gpr[3] = frustum.checkSphere(center.getLE(), radius) ? 1 : 0;
+        return;
+    }
+
     bool visible = false;
 
     for (int i = 0; i < 2; ++i) {
@@ -1268,13 +1302,25 @@ void CemuHooks::hook_ReplaceCameraMode(PPCInterpreter_t* hCPU) {
     static uint32_t s_lastLoggedCameraVtbl = 0;
     static uint32_t s_lastLoggedCameraInstance = 0;
     static uint32_t s_lastLoggedCameraChaseInstance = 0;
+    static bool s_wasFlatCameraMode = false;
 
+    const bool isFlatCameraMode = IsFlatCameraModeActive();
     const bool isSnapTurnCamera = currentCameraVtbl == kCameraChaseVtbl || currentCameraVtbl == kCameraTailVtbl;
+    if (s_wasFlatCameraMode != isFlatCameraMode) {
+        s_hasBaseYaw = false;
+        s_pendingGameYawCorrection = 0.0f;
+        s_pendingGameStickYawDelta = 0.0f;
+        if (isFlatCameraMode) {
+            s_flatCameraFovYRadians.store(glm::radians(90.0f), std::memory_order_relaxed);
+        }
+        Log::print<INFO>("Flat camera mode {} (scope={}, CameraFinder={})", isFlatCameraMode ? "started" : "ended", IsScopeModeActive(), IsCameraFinderModeActive());
+        s_wasFlatCameraMode = isFlatCameraMode;
+    }
 
     if (currentCameraVtbl != s_lastLoggedCameraVtbl ||
         currCameraInstance != s_lastLoggedCameraInstance ||
         cameraChaseInstance != s_lastLoggedCameraChaseInstance) {
-        Log::print<INFO>("Camera changed (vtbl={:#X}, camera={:#X}, chase={:#X}, snapTurnActive={})", currentCameraVtbl, currCameraInstance, cameraChaseInstance, isSnapTurnCamera);
+        Log::print<INFO>("Camera changed (vtbl={:#X}, camera={:#X}, chase={:#X}, snapTurnActive={}, flatCameraActive={})", currentCameraVtbl, currCameraInstance, cameraChaseInstance, isSnapTurnCamera, isFlatCameraMode);
         s_lastLoggedCameraVtbl = currentCameraVtbl;
         s_lastLoggedCameraInstance = currCameraInstance;
         s_lastLoggedCameraChaseInstance = cameraChaseInstance;
