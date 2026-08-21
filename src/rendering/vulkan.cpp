@@ -49,35 +49,39 @@ uint32_t RND_Vulkan::FindMemoryType(uint32_t memoryTypeBitsRequirement, VkMemory
 }
 
 
-VkResult VRLayer::VkDeviceOverrides::GetPhysicalDeviceSurfacePresentModesKHR(const vkroots::VkDeviceDispatch& pDispatch, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* pPresentModeCount, VkPresentModeKHR* pPresentModes) {
-    // check all supported present modes
-    uint32_t testPresentModes = 0;
-    VkResult result = pDispatch.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &testPresentModes, VK_NULL_HANDLE);
-
-    std::vector<VkPresentModeKHR> supportedPresentModes;
-    supportedPresentModes.resize(testPresentModes);
-
-    result = pDispatch.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &testPresentModes, supportedPresentModes.data());
-
-    checkAssert(result == VK_SUCCESS, "Failed to get physical device surface present modes!");
-
-    // if VK_PRESENT_MODE_IMMEDIATE_KHR is present, always just return that
-    for (uint32_t i = 0; i < testPresentModes; i++) {
-        if (supportedPresentModes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-            // immediate is supported, only return 1 mode
-            if (pPresentModes != VK_NULL_HANDLE) {
-                pPresentModes[0] = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            }
-            else {
-                *pPresentModeCount = 1;
-            }
-        }
+static std::optional<VkPresentModeKHR> PickUnthrottledPresentMode(const vkroots::VkDeviceDispatch& pDispatch, VkSurfaceKHR surface) {
+    if (surface == VK_NULL_HANDLE) {
+        return std::nullopt;
     }
 
-    // otherwise, we just try and use whatever mode is available
-    return pDispatch.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
+    uint32_t presentModeCount = 0;
+    if (pDispatch.GetPhysicalDeviceSurfacePresentModesKHR(pDispatch.PhysicalDevice, surface, &presentModeCount, nullptr) != VK_SUCCESS || presentModeCount == 0) {
+        return std::nullopt;
+    }
+
+    std::vector<VkPresentModeKHR> supportedPresentModes(presentModeCount);
+    if (pDispatch.GetPhysicalDeviceSurfacePresentModesKHR(pDispatch.PhysicalDevice, surface, &presentModeCount, supportedPresentModes.data()) != VK_SUCCESS) {
+        return std::nullopt;
+    }
+    supportedPresentModes.resize(presentModeCount);
+
+    for (VkPresentModeKHR wantedMode : { VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR }) {
+        if (std::ranges::find(supportedPresentModes, wantedMode) != supportedPresentModes.end()) {
+            return wantedMode;
+        }
+    }
+    return std::nullopt;
 }
 
 VkResult VRLayer::VkDeviceOverrides::CreateSwapchainKHR(const vkroots::VkDeviceDispatch& pDispatch, VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
-    return pDispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+    std::optional<VkPresentModeKHR> unthrottledMode = PickUnthrottledPresentMode(pDispatch, pCreateInfo->surface);
+    if (!unthrottledMode.has_value() || unthrottledMode.value() == pCreateInfo->presentMode) {
+        return pDispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+    }
+
+    Log::print<RENDERING>("Replacing Cemu swapchain present mode {} with {} so presenting the mirror window never blocks the thread that drives OpenXR", (uint32_t)pCreateInfo->presentMode, (uint32_t)unthrottledMode.value());
+
+    VkSwapchainCreateInfoKHR createInfo = *pCreateInfo;
+    createInfo.presentMode = unthrottledMode.value();
+    return pDispatch.CreateSwapchainKHR(device, &createInfo, pAllocator, pSwapchain);
 }
