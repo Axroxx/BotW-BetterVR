@@ -30,7 +30,13 @@ static const ExtraMenuGlyph kExtraMenuGlyphs[] = {
     { (ImWchar)ICON_KI_HELP_CODEPOINT, help_glyph_body, help_glyph_title },
     { (ImWchar)ICON_KI_PLAYER_CODEPOINT, player_glyph_body, player_glyph_title },
     { (ImWchar)ICON_KI_SWORD_CODEPOINT, sword_glyph_body, sword_glyph_title },
+    { (ImWchar)ICON_KI_PATREON_CODEPOINT, patreon_glyph_body, patreon_glyph_title },
 };
+
+static bool OpenLinkInShell(ImGuiContext*, const char* url) {
+    ImGuiMenus::OpenLinkInBrowser(url);
+    return true;
+}
 
 static void FillCustomGlyphRect(ImFontAtlas* atlas, int rectIndex, const unsigned char* alphaPixels) {
     if (rectIndex < 0) {
@@ -53,6 +59,8 @@ static void FillCustomGlyphRect(ImFontAtlas* atlas, int rectIndex, const unsigne
 
 RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, VkFormat fbFormat): m_outputRes(fbRes) {
     ImGui::CreateContext();
+    ImGui::GetPlatformIO().Platform_OpenInShellFn = &OpenLinkInShell;
+    Log::print<INFO>("Installed the ImGui link handler, links in the mod menu can open a browser");
     ImGui::GetIO().IniFilename = "BetterVR_settings.ini";
     InitSettings();
     ImGui::LoadIniSettingsFromDisk("BetterVR_settings.ini");

@@ -15,6 +15,9 @@
 static constexpr ImVec4 kDescriptionColor = ImVec4(0.63f, 0.71f, 0.78f, 1.0f);
 static constexpr ImVec4 kSectionCaptionColor = ImVec4(0.40f, 0.66f, 1.0f, 1.0f);
 static constexpr ImVec4 kHintColor = ImVec4(0.35f, 0.95f, 0.45f, 1.0f);
+static constexpr ImVec4 kHighTierSupporterColor = ImVec4(0.78f, 0.53f, 1.0f, 1.0f);
+static constexpr ImVec4 kSupporterColor = ImVec4(0.29f, 0.80f, 0.90f, 1.0f);
+static constexpr ImVec4 kCreditNameColor = ImVec4(1.0f, 0.80f, 0.42f, 1.0f);
 
 // text and read-only tables give the cursor nothing to land on, so pages that trail off into them need a weightless
 // focus stop to keep going: imgui scrolls whatever it focuses into view, which is the only scrolling this menu has.
@@ -205,6 +208,74 @@ static void ApplyPaneNavFallback(ImGuiWindow* sidebarWindow, ImGuiWindow* conten
     }
 }
 
+void ImGuiMenus::OpenLinkInBrowser(const char* url) {
+    if (url == nullptr || (_strnicmp(url, "https://", 8) != 0 && _strnicmp(url, "http://", 7) != 0)) {
+        Log::print<WARNING>("Refusing to open link that isn't a http(s) URL: {}", url != nullptr ? url : "(null)");
+        return;
+    }
+
+    // opening the browser can block for a while, so keep it off the render thread
+    std::thread([link = std::string(url)]() {
+        HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        INT_PTR shellResult = (INT_PTR)ShellExecuteA(nullptr, "open", link.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (shellResult <= 32) {
+            Log::print<WARNING>("Failed to open {} in the default browser (error {})", link, shellResult);
+        }
+        else {
+            Log::print<INFO>("Opened {} in the default browser, it's behind the game window", link);
+        }
+        if (SUCCEEDED(comResult)) {
+            CoUninitialize();
+        }
+    }).detach();
+}
+
+static void DrawLink(const char* label, const char* url) {
+    if (ImGui::TextLink(label)) {
+        Log::print<INFO>("Mod menu link pressed: {}", url);
+        ImGuiMenus::OpenLinkInBrowser(url);
+    }
+    ImGui::SetItemTooltip("Open %s", url);
+}
+
+struct CreditEntry {
+    const char* icon;
+    const char* names;
+    const char* role;
+};
+
+static constexpr CreditEntry kCredits[] = {
+    { ICON_KI_WRENCH, "Crementif", "Main developer" },
+    { ICON_KI_GAMEPAD, "Holydh", "Inputs and gestures" },
+    { ICON_KI_SWORD, "Acudofy", "Sword and stab analysis system" },
+    { ICON_KI_SEARCH, "leoetlino", "Made the BotW Decomp project, which was useful while reverse engineering" },
+    { ICON_KI_GAUGE, "Exzap", "Technical support and optimization help" },
+    { ICON_KI_PAINT_BRUSH, "Mako Marci", "Made the logo, controller guide and trailer" },
+    { ICON_KI_USERS, "Tim, Mako Marci, Solarwolf07, Elliott Tate and Derra", "Helped with QA testing, recording, feedback and support" },
+    { ICON_KI_MOVIE, "WunderbarVR", "Made cool trailers" },
+};
+
+static void DrawCreditsList() {
+    int index = 0;
+    for (const auto& credit : kCredits) {
+        ImGui::PushStyleColor(ImGuiCol_Text, kCreditNameColor);
+        ImGui::Text("%s %s:", credit.icon, credit.names);
+        ImGui::PopStyleColor();
+
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
+        ImGui::TextWrapped("%s", credit.role);
+        ImGui::PopStyleColor();
+
+        index++;
+        if (index % 2 == 0 && index < (int)std::size(kCredits)) {
+            ImGui::PushID(index);
+            DrawNavScrollStop("##CreditStop");
+            ImGui::PopID();
+        }
+    }
+}
+
 static void DrawSupporterWall() {
     if (Supporters::List.empty()) {
         return;
@@ -223,11 +294,11 @@ static void DrawSupporterWall() {
                 icon = ICON_KI_GITHUB;
             }
             else if (supporter.platform == Supporters::Platform::PATREON) {
-                icon = ICON_KI_HEART;
+                icon = ICON_KI_PATREON;
             }
 
             ImGui::TableNextColumn();
-            ImGui::Text("%s %s", icon, supporter.name);
+            ImGui::TextColored(supporter.tier == Supporters::Tier::HIGH ? kHighTierSupporterColor : kSupporterColor, "%s %s", icon, supporter.name);
         }
         ImGui::EndTable();
     }
@@ -1219,16 +1290,12 @@ void RND_Renderer::ImGuiOverlay::DrawGuidePage(const char* icon, const char* tit
 void RND_Renderer::ImGuiOverlay::DrawCreditsPage() {
     DrawPageHeader(ICON_KI_HEART, "Credits");
 
-    ImGui::SeparatorText("Project Links");
-    ImGui::TextLinkOpenURL(ICON_KI_GITHUB " https://github.com/Crementif/BotW-BetterVR");
-    ImGui::Text("");
-
-    ImGui::SeparatorText("Donate to Support Development");
     ImGui::TextWrapped("Hey there!");
     ImGui::Text("");
     ImGui::TextWrapped("This mod is free and open-source, but it took a lot of late nights to create.");
-    ImGui::TextWrapped("If you're enjoying the mod and want to vote on new features, you can donate here. Thanks!");
-    ImGui::TextLinkOpenURL("https://github.com/sponsors/Crementif/");
+    ImGui::TextWrapped("If you're enjoying the mod, you can donate here to suggest additions and help test features early. Thanks!");
+    DrawLink(ICON_KI_GITHUB " https://github.com/sponsors/Crementif/", "https://github.com/sponsors/Crementif/");
+    DrawLink(ICON_KI_PATREON " https://patreon.com/crementif", "https://patreon.com/crementif");
     ImGui::Text("");
     ImGui::Text("- Crementif");
     DrawNavScrollStop("##AfterDonate");
@@ -1237,13 +1304,7 @@ void RND_Renderer::ImGuiOverlay::DrawCreditsPage() {
     DrawNavScrollStop("##AfterSupporters");
 
     ImGui::SeparatorText("Credits");
-    ImGui::Text("Crementif: Main Developer");
-    ImGui::Text("Holydh: Inputs and Gestures");
-    ImGui::Text("Acudofy: Sword and Stab Analysis System");
-    ImGui::Text("leoetlino: Made the BotW Decomp project, which was useful while reverse engineering");
-    ImGui::Text("Exzap: Technical support and optimization help");
-    ImGui::Text("Mako Marci: Made Logo, Controller Guide and Trailer");
-    ImGui::Text("Tim, Mako Marci, Solarwolf07, Elliott Tate and Derra: Helped with QA testing, recording, feedback and support");
+    DrawCreditsList();
     ImGui::Text("");
 
     ImGui::Dummy(ImVec2(0.0f, 10.0f));

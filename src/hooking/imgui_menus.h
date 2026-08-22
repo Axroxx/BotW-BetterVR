@@ -22,6 +22,8 @@ namespace ImGuiMenus {
 
     bool IsPageAvailable(uint8_t page);
 
+    void OpenLinkInBrowser(const char* url);
+
     extern ImFont* g_titleFont;
 
     void DrawFPSOverlay(class RND_Renderer* renderer);
