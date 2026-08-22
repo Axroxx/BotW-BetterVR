@@ -69,11 +69,11 @@ bla import.coreinit.hook_ModifyBoneMatrix
 ; restore bone index finally
 mr r6, r27
 
-cmpwi r7, 0
-beq custom_gsys_ModelUnit_getBoneLocalMatrix_Restore
+mr r27, r7 ; r7 is volatile, keep the face-material flag across the vtable call below
 
+; r9 = gsys::ModelUnit*, r10 = material index, r11 = visible
 cmpwi r9, 0
-beq custom_gsys_ModelUnit_getBoneLocalMatrix_HairDone
+beq custom_gsys_ModelUnit_getBoneLocalMatrix_HeadMaterialDone
 stw r8, 0x24(r1)
 mr r3, r9
 mr r4, r10
@@ -84,7 +84,10 @@ mtctr r12
 bctrl
 lwz r8, 0x24(r1)
 
-custom_gsys_ModelUnit_getBoneLocalMatrix_HairDone:
+custom_gsys_ModelUnit_getBoneLocalMatrix_HeadMaterialDone:
+cmpwi r27, 0
+beq custom_gsys_ModelUnit_getBoneLocalMatrix_Restore
+
 lis r12, player_face_model_unit@ha
 addi r12, r12, player_face_model_unit@l
 stw r29, 0(r12)
