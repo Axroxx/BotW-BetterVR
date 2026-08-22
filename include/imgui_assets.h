@@ -43,7 +43,7 @@ void SetupImGuiStyle() {
     style.Colors[ImGuiCol_Border] = ImVec4(0.078431375f, 0.09803922f, 0.11764706f, 1.0f);
     style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
     style.Colors[ImGuiCol_FrameBg] = ImVec4(0.24705882f, 0.30588236f, 0.35686275f, 1.0f);
-    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.11764706f, 0.2f, 0.2784314f, 1.0f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.40f, 0.50f, 0.60f, 1.0f);
     style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.08627451f, 0.11764706f, 0.13725491f, 1.0f);
     style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08627451f, 0.11764706f, 0.13725491f, 0.65f);
     style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.078431375f, 0.09803922f, 0.11764706f, 1.0f);
