@@ -96,6 +96,7 @@ public:
         double lastCallMs = 0.0;
         double maxCallMs = 0.0;
         uint32_t lastFrameCalls = 0;
+        bool isPpcSection = false;
     };
 
     class Scope {
@@ -135,6 +136,15 @@ public:
         return s_enabled.load(std::memory_order_relaxed);
     }
 
+    static bool IsPpcSection(Section section) {
+        return std::string_view(s_sectionNames[(size_t)section]).starts_with("PPC");
+    }
+
+    // the PPC sections only ever fire when patch_debug_PPC_Profiling.asm is part of the running graphics pack
+    static bool HasPpcSamples() {
+        return s_hasPpcSamples.load(std::memory_order_relaxed);
+    }
+
     static void SetEnabled(bool enabled) {
         bool wasEnabled = s_enabled.load(std::memory_order_relaxed);
         if (wasEnabled == enabled) {
@@ -150,6 +160,10 @@ public:
     static void Record(Section section, std::chrono::nanoseconds duration) {
         if (!IsEnabled()) {
             return;
+        }
+
+        if (!s_hasPpcSamples.load(std::memory_order_relaxed) && IsPpcSection(section)) {
+            s_hasPpcSamples.store(true, std::memory_order_relaxed);
         }
 
         uint64_t durationNs = duration.count() > 0 ? (uint64_t)duration.count() : 0ull;
@@ -277,6 +291,7 @@ public:
             .lastCallMs = NsToMs(state.lastCallNs.load(std::memory_order_relaxed)),
             .maxCallMs = NsToMs(state.maxCallNs.load(std::memory_order_relaxed)),
             .lastFrameCalls = state.lastFrameCalls.load(std::memory_order_relaxed),
+            .isPpcSection = IsPpcSection(section),
         };
     }
 
@@ -315,6 +330,7 @@ private:
     };
 
     inline static std::atomic_bool s_enabled = false;
+    inline static std::atomic_bool s_hasPpcSamples = false;
     inline static std::atomic_uint32_t s_spanGeneration = 1;
     inline static std::array<SectionState, kSectionCount> s_states = {};
     inline static thread_local ThreadSpanState s_threadSpanState = {};

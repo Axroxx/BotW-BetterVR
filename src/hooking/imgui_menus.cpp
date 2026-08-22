@@ -86,6 +86,11 @@ static void DrawSetting(const char* label, const char* description, DrawWidget&&
     ImGui::PopID();
 }
 
+template <typename DrawWidget>
+static void DrawSetting(const char* label, DrawWidget&& drawWidget) {
+    DrawSetting(label, nullptr, std::forward<DrawWidget>(drawWidget));
+}
+
 struct MenuPageEntry {
     uint8_t page;
     const char* label;
@@ -225,8 +230,8 @@ static void DrawDetailedProfilerSummary() {
         return std::max(lhs.lastFrameMs, lhs.averageFrameMs) > std::max(rhs.lastFrameMs, rhs.averageFrameMs);
     });
 
-    ImGui::SeparatorText("BetterVR CPU Profiling");
-    if (ImGui::Button("Reset BetterVR Profiling")) {
+    DrawSectionCaption("Developer CPU Profiling");
+    if (ImGui::Button("Reset Profiling Times")) {
         BetterVRProfiler::Reset();
     }
 
@@ -244,7 +249,12 @@ static void DrawDetailedProfilerSummary() {
     ImGui::TableSetupColumn("Max Call");
     ImGui::TableHeadersRow();
 
+    const bool showPpcSections = BetterVRProfiler::HasPpcSamples();
     for (const auto& snapshot : snapshots) {
+        if (snapshot.isPpcSection && !showPpcSections) {
+            continue;
+        }
+
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
