@@ -3,18 +3,46 @@
   "defaults": {},
   "configurations": [
     {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BetterVR_Launcher.exe (Install)",
+      "name": "Debug BetterVR Launcher With Simulator",
+      "environment": [
+        {
+          "name": "XR_RUNTIME_JSON",
+          "value": "${workspaceRoot}/OpenXRSimulator/openxr_simulator.json"
+        },
+        {
+          "name": "VK_LOADER_DEBUG",
+          "value": "all"
+        }
+      ]
+    },
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BetterVR_Launcher.exe (Install)",
+      "name": "Debug BetterVR Launcher",
+      "environment": [
+        {
+          "name": "VK_LOADER_DEBUG",
+          "value": "all"
+        }
+      ]
+    },
+    {
       "type": "dll",
       "exe": "C:/Path/To/Cemu/Cemu.exe",
       "project": "CMakeLists.txt",
-      "projectTarget": "BetterVR_Layer.dll (bin\\BetterVR_Layer.dll)",
-      "name": "Debug BetterVR With Meta XR Simulator",
+      "projectTarget": "BetterVR_Layer.dll (Install)",
+      "name": "Debug BetterVR With Simulator",
       "args": [
         "--title-id 00050000101c9500"
       ],
       "environment": [
         {
           "name": "VK_ADD_LAYER_PATH",
-          "value": "C:/Path/To/Your/Build/bin;"
+          "value": "${workspaceRoot}/Cemu;"
         },
         {
           "name": "VK_INSTANCE_LAYERS",
@@ -22,7 +50,7 @@
         },
         {
           "name": "XR_RUNTIME_JSON",
-          "value": "${env.META_XR_SIMULATOR_PATH}/meta_openxr_simulator.json"
+          "value": "${workspaceRoot}/OpenXRSimulator/openxr_simulator.json"
         },
         {
           "name": "VK_LOADER_DEBUG",
@@ -34,7 +62,7 @@
       "type": "dll",
       "exe": "C:/Path/To/Cemu/Cemu.exe",
       "project": "CMakeLists.txt",
-      "projectTarget": "BetterVR_Layer.dll (bin\\BetterVR_Layer.dll)",
+      "projectTarget": "BetterVR_Layer.dll (Install)",
       "name": "Debug BetterVR With Default OpenXR Runtime",
       "args": [
         "--title-id 00050000101c9500"
@@ -42,7 +70,7 @@
       "environment": [
         {
           "name": "VK_ADD_LAYER_PATH",
-          "value": "C:/Path/To/Your/Build/bin;"
+          "value": "${workspaceRoot}/Cemu;"
         },
         {
           "name": "VK_INSTANCE_LAYERS",
@@ -51,6 +79,34 @@
         {
           "name": "VK_LOADER_DEBUG",
           "value": "all"
+        }
+      ]
+    },
+    {
+      "type": "dll",
+      "exe": "C:/Path/To/Cemu/Cemu.exe",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BetterVR_Layer.dll (Install)",
+      "name": "Debug BetterVR With RenderDoc",
+      "args": [
+        "--title-id 00050000101c9500"
+      ],
+      "environment": [
+        {
+          "name": "VK_ADD_LAYER_PATH",
+          "value": "${workspaceRoot}/Cemu;C:/Program Files/RenderDoc;"
+        },
+        {
+          "name": "VK_INSTANCE_LAYERS",
+          "value": "VK_LAYER_CREMENTIF_bettervr;VK_LAYER_RENDERDOC_Capture"
+        },
+        {
+          "name": "ENABLE_VULKAN_RENDERDOC_CAPTURE",
+          "value": "0"
+        },
+        {
+          "name": "VK_LOADER_DEBUG",
+          "value": "error"
         }
       ]
     }
