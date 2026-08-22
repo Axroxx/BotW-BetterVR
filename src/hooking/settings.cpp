@@ -26,6 +26,8 @@ static void* Settings_ReadOpen(ImGuiContext*, ImGuiSettingsHandler*, const char*
     return &GetSettings();
 }
 
+static constexpr std::array kRetiredOptionKeys = { "PlayMode" };
+
 static void Settings_ReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* line) {
     auto* s = (ModSettings*)entry;
     std::string_view lineView = line;
@@ -44,6 +46,12 @@ static void Settings_ReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
     if (nameView.empty()) {
         Log::print<ERROR>("Failed to parse option line \"{}\": missing option key", line);
         return;
+    }
+    for (const char* retiredKey : kRetiredOptionKeys) {
+        if (IEquals(retiredKey, nameView)) {
+            Log::print<INFO>("Ignoring retired option \"{}\", it will be removed from the settings file on the next save", nameView);
+            return;
+        }
     }
     auto options = s->GetOptions();
     for (ModSettingBase* option : options) {

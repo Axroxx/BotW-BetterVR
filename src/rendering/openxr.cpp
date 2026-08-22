@@ -200,6 +200,11 @@ OpenXR::~OpenXR() {
         xrDestroySpace(m_stageSpace);
     }
 
+    for (XrSpace retiredSpace : m_retiredStageSpaces) {
+        xrDestroySpace(retiredSpace);
+    }
+    m_retiredStageSpaces.clear();
+
     if (m_session != XR_NULL_HANDLE) {
         xrDestroySession(m_session);
     }
@@ -239,15 +244,89 @@ void OpenXR::CreateSession(const XrGraphicsBindingD3D12KHR& d3d12Binding) {
     checkXRResult(xrCreateSession(m_instance, &sessionCreateInfo, &m_session), "Failed to create Vulkan-based OpenXR session!");
 
     Log::print<INFO>("Creating the OpenXR spaces...");
-    XrReferenceSpaceCreateInfo stageSpaceCreateInfo = { XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
-    stageSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
-    stageSpaceCreateInfo.poseInReferenceSpace = s_xrIdentityPose;
-    checkXRResult(xrCreateReferenceSpace(m_session, &stageSpaceCreateInfo, &m_stageSpace), "Failed to create reference space for stage!");
+    m_hasSeatedHeightCalibration = false;
+    m_seenFirstLoadingScreen = false;
+    m_lastSeenPlayMode.reset();
+    ReplaceStageSpace(0.0f);
 
     XrReferenceSpaceCreateInfo headSpaceCreateInfo = { XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
     headSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
     headSpaceCreateInfo.poseInReferenceSpace = s_xrIdentityPose;
     checkXRResult(xrCreateReferenceSpace(m_session, &headSpaceCreateInfo, &m_headSpace), "Failed to create reference space for head!");
+}
+
+// floorOffset is where the space's origin sits above the runtime's floor, so every located pose shifts together
+void OpenXR::ReplaceStageSpace(float floorOffset) {
+    XrReferenceSpaceCreateInfo stageSpaceCreateInfo = { XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+    stageSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+    stageSpaceCreateInfo.poseInReferenceSpace = s_xrIdentityPose;
+    stageSpaceCreateInfo.poseInReferenceSpace.position.y = floorOffset;
+
+    XrSpace newStageSpace = XR_NULL_HANDLE;
+    checkXRResult(xrCreateReferenceSpace(m_session, &stageSpaceCreateInfo, &newStageSpace), "Failed to create reference space for stage!");
+
+    // other threads may still be locating against the old handle, so it is only released with the session
+    if (m_stageSpace != XR_NULL_HANDLE) {
+        m_retiredStageSpaces.push_back(m_stageSpace);
+    }
+    m_stageSpace = newStageSpace;
+    m_stageFloorOffset = floorOffset;
+}
+
+// Link's eye level above his feet while standing, tuned in-game (his bind pose puts them at 1.59m)
+static constexpr float kLinkEyeHeight = 1.65f;
+
+void OpenXR::RequestSeatedHeightCalibration(XrTime notBeforeTime) {
+    m_seatedHeightCalibrationNotBeforeTime.store(notBeforeTime, std::memory_order_relaxed);
+    m_seatedHeightCalibrationRequested.store(true, std::memory_order_release);
+}
+
+std::optional<float> OpenXR::GetCalibratedSeatedEyeHeight() const {
+    if (!m_hasSeatedHeightCalibration) {
+        return std::nullopt;
+    }
+    return kLinkEyeHeight + m_stageFloorOffset;
+}
+
+void OpenXR::UpdateSeatedHeightCalibration(XrTime predictedDisplayTime, const std::optional<XrSpaceLocation>& headLocation) {
+    const PlayMode playMode = GetSettings().GetPlayMode();
+    if (m_lastSeenPlayMode.has_value() && playMode != m_lastSeenPlayMode.value() && playMode == PlayMode::SEATED) {
+        RequestSeatedHeightCalibration();
+    }
+    m_lastSeenPlayMode = playMode;
+
+    if (!m_seenFirstLoadingScreen && CemuHooks::IsScreenVisible(ScreenId::LoadingWeapon_00)) {
+        m_seenFirstLoadingScreen = true;
+        if (playMode == PlayMode::SEATED) {
+            RequestSeatedHeightCalibration();
+        }
+    }
+
+    if (playMode != PlayMode::SEATED) {
+        m_seatedHeightCalibrationRequested.store(false, std::memory_order_relaxed);
+        if (m_stageFloorOffset != 0.0f) {
+            ReplaceStageSpace(0.0f);
+            Log::print<INFO>("Seated height calibration cleared, using the real height above the floor again");
+        }
+        m_hasSeatedHeightCalibration = false;
+        return;
+    }
+
+    if (!m_seatedHeightCalibrationRequested.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (predictedDisplayTime < m_seatedHeightCalibrationNotBeforeTime.load(std::memory_order_relaxed)) {
+        return;
+    }
+    if (!headLocation.has_value() || !std::isfinite(headLocation->pose.position.y)) {
+        return;
+    }
+
+    const float realEyeHeight = headLocation->pose.position.y + m_stageFloorOffset;
+    m_seatedHeightCalibrationRequested.store(false, std::memory_order_relaxed);
+    ReplaceStageSpace(realEyeHeight - kLinkEyeHeight);
+    m_hasSeatedHeightCalibration = true;
+    Log::print<INFO>("Seated height calibrated: eyes are {:.2f}m above the floor, stage origin moved by {:.2f}m", realEyeHeight, m_stageFloorOffset);
 }
 
 void OpenXR::CreateActions() {
@@ -768,9 +847,12 @@ void OpenXR::ProcessEvents() {
                 m_capabilities.activeControllerType = DetectActiveControllerType(m_instance, m_session);
                 break;
             }
-            case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
-                Log::print<WARNING>("OpenXR has indicated that the reference space has changed!");
+            case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
+                auto* spaceChangeEvent = (XrEventDataReferenceSpaceChangePending*)&eventData;
+                Log::print<WARNING>("OpenXR has indicated that reference space {} has changed (recenter), seated height will be recalibrated!", std::to_underlying(spaceChangeEvent->referenceSpaceType));
+                RequestSeatedHeightCalibration(spaceChangeEvent->changeTime);
                 break;
+            }
             default:
                 Log::print<WARNING>("OpenXR has indicated that an unknown event with type {} has occurred!", std::to_underlying(eventData.type));
                 break;

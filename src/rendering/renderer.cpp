@@ -196,7 +196,8 @@ void RND_Renderer::StartFrame() {
     checkXRResult(xrBeginFrame(m_session, &beginFrameInfo), "Couldn't begin OpenXR frame!");
 
     VRManager::instance().D3D12->StartFrame();
-    VRManager::instance().XR->UpdateSpaces(m_frameState.predictedDisplayTime);
+    const std::optional<XrSpaceLocation> headLocation = VRManager::instance().XR->UpdateSpaces(m_frameState.predictedDisplayTime);
+    VRManager::instance().XR->UpdateSeatedHeightCalibration(m_frameState.predictedDisplayTime, headLocation);
     m_frameViewsPending = true;
     m_frameViewLatchFailed = false;
     m_frameInputLatched = false;

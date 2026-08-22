@@ -543,7 +543,8 @@ struct ModSettings {
 
     // playing mode settings
     EnumSetting<CameraMode> cameraMode{ "CameraMode", CameraMode::FIRST_PERSON };
-    EnumSetting<PlayMode> playMode{ "PlayMode", PlayMode::STANDING };
+    // not keyed "PlayMode": that key is retired in settings.cpp, so a Seated choice saved by an older build stays unread
+    EnumSetting<PlayMode> playMode{ "PlayPosition", PlayMode::STANDING };
     FloatSetting thirdPlayerDistance{ "ThirdPlayerDistance", 0.5f, 0.0f };
     BoolSetting thirdPersonBowCameraAim{ "ThirdPersonBowCameraAim", true };
     EnumSetting<EventMode> cutsceneCameraMode{ "CutsceneCameraMode", EventMode::FOLLOW_DEFAULT_EVENT_SETTINGS };

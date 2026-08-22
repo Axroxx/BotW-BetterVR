@@ -979,11 +979,26 @@ void RND_Renderer::ImGuiOverlay::DrawPlaystylePage(bool* changed) {
         }
     }
     else {
-        if (BeginSettingsSection("##FirstPerson", "Body & Position")) {
-            DrawSetting("Play Position", "Standing lets your real-world steps move Link around the room. Pick Seated to keep Link's body planted while you sit.", [&]() {
+        if (BeginSettingsSection("##FirstPerson", "Player Height")) {
+            DrawSetting("Play Position", "Standing will use your real height. Seated will auto-calibrate Link's height when you load into the game.", [&]() {
                 settings.playMode.AddRadioToGUI(changed, true);
             });
-            DrawSetting("Height Offset", "Raises or lowers your eye height in the game.", [&]() {
+            if (settings.GetPlayMode() == PlayMode::SEATED) {
+                DrawSetting("Seated Height", "Sit how you want to play, then reset to measure again.", [&]() {
+                    if (ImGui::Button("Reset Seated Height", ImVec2(-FLT_MIN, 0.0f))) {
+                        VRManager::instance().XR->RequestSeatedHeightCalibration();
+                    }
+                    ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
+                    if (auto eyeHeight = VRManager::instance().XR->GetCalibratedSeatedEyeHeight()) {
+                        ImGui::Text("Measured eye height: %.2fm above the floor", eyeHeight.value());
+                    }
+                    else {
+                        ImGui::TextUnformatted("Not measured yet, using your real height");
+                    }
+                    ImGui::PopStyleColor();
+                });
+            }
+            DrawSetting("Height Adjustment", [&]() {
                 auto formatHeight = [&](float height) {
                     if (height < -.01f) {
                         float heightInches = height * -39.3700787f;

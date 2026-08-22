@@ -190,7 +190,10 @@ public:
     std::array<XrViewConfigurationView, 2> GetViewConfigurations();
     std::optional<XrSpaceLocation> UpdateSpaces(XrTime predictedDisplayTime);
     std::optional<InputState> UpdateActions(XrTime predictedFrameTime, glm::fquat controllerRotation, bool inMenu);
-   
+    void UpdateSeatedHeightCalibration(XrTime predictedDisplayTime, const std::optional<XrSpaceLocation>& headLocation);
+    void RequestSeatedHeightCalibration(XrTime notBeforeTime = 0);
+    std::optional<float> GetCalibratedSeatedEyeHeight() const;
+
     void ProcessEvents();
 
     XrSession GetSession() const { return m_session; }
@@ -203,12 +206,20 @@ private:
         checkXRResult(xrStringToPath(m_instance, str, &path), std::format("Failed to get path for {}", str).c_str());
         return path;
     };
+    void ReplaceStageSpace(float floorOffset);
 
     XrInstance m_instance = XR_NULL_HANDLE;
     XrSystemId m_systemId = XR_NULL_SYSTEM_ID;
     XrSession m_session = XR_NULL_HANDLE;
     XrSpace m_stageSpace = XR_NULL_HANDLE;
     XrSpace m_headSpace = XR_NULL_HANDLE;
+    std::vector<XrSpace> m_retiredStageSpaces;
+    float m_stageFloorOffset = 0.0f;
+    std::atomic_bool m_seatedHeightCalibrationRequested = false;
+    std::atomic<XrTime> m_seatedHeightCalibrationNotBeforeTime = 0;
+    bool m_hasSeatedHeightCalibration = false;
+    bool m_seenFirstLoadingScreen = false;
+    std::optional<PlayMode> m_lastSeenPlayMode;
     std::array<XrSpace, 2> m_inGameHandSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     std::array<XrSpace, 2> m_inGameAimSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     std::array<XrSpace, 2> m_inMenuHandSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };

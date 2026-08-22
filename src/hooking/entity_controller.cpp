@@ -81,7 +81,6 @@ struct RoomscaleState {
 enum class RoomscaleBodyDriveMode : uint8_t {
     DisabledNotFirstPerson,
     DisabledNotInGame,
-    DisabledNotStanding,
     DisabledNoRenderer,
     DisabledNoPositional,
     DisabledNoPlayer,
@@ -590,8 +589,6 @@ static const char* GetRoomscaleBodyDriveModeName(RoomscaleBodyDriveMode mode) {
             return "disabled (not first-person)";
         case RoomscaleBodyDriveMode::DisabledNotInGame:
             return "disabled (not in game)";
-        case RoomscaleBodyDriveMode::DisabledNotStanding:
-            return "disabled (play mode is not standing)";
         case RoomscaleBodyDriveMode::DisabledNoRenderer:
             return "disabled (renderer unavailable)";
         case RoomscaleBodyDriveMode::DisabledNoPositional:
@@ -638,12 +635,6 @@ static bool ShouldDrivePlayerBodyWithVR(const glm::fvec3& currentHeadPos, const 
 
     if (!CemuHooks::IsInGame()) {
         SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode::DisabledNotInGame);
-        PrimeRoomscaleBaseline(currentHeadPos);
-        return false;
-    }
-
-    if (GetSettings().GetPlayMode() != PlayMode::STANDING) {
-        SetRoomscaleBodyDriveMode(RoomscaleBodyDriveMode::DisabledNotStanding);
         PrimeRoomscaleBaseline(currentHeadPos);
         return false;
     }
