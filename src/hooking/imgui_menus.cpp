@@ -16,7 +16,19 @@ static constexpr ImVec4 kDescriptionColor = ImVec4(0.63f, 0.71f, 0.78f, 1.0f);
 static constexpr ImVec4 kSectionCaptionColor = ImVec4(0.40f, 0.66f, 1.0f, 1.0f);
 static constexpr ImVec4 kHintColor = ImVec4(0.35f, 0.95f, 0.45f, 1.0f);
 
+// text and read-only tables give the cursor nothing to land on, so pages that trail off into them need a weightless
+// focus stop to keep going: imgui scrolls whatever it focuses into view, which is the only scrolling this menu has.
+// they stay out of the default focus so that entering a page still lands on its first real widget
+static void DrawNavScrollStop(const char* id) {
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNavDefaultFocus, true);
+    ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, ImGui::GetContentRegionAvail().x), 1.0f), ImGuiButtonFlags_EnableNav);
+    ImGui::PopItemFlag();
+    ImGui::PopStyleColor();
+}
+
 static void DrawPageHeader(const char* icon, const char* title) {
+    DrawNavScrollStop("##PageTop");
     ImGui::Spacing();
     if (ImGuiMenus::g_titleFont != nullptr) {
         ImGui::PushFont(ImGuiMenus::g_titleFont);
@@ -116,6 +128,7 @@ struct SidebarNavTarget {
     ImGuiID itemId = 0;
     ImGuiID focusScopeId = 0;
     ImRect rectRel = {};
+    bool enterContentRequested = false;
 };
 
 static void DrawSidebarGroup(const char* caption, std::span<const MenuPageEntry> entries, std::atomic_uint8_t& selectedPage, SidebarNavTarget& navTarget) {
@@ -128,6 +141,8 @@ static void DrawSidebarGroup(const char* caption, std::span<const MenuPageEntry>
         }
         const bool isSelectedPage = selectedPage == entry.page;
         if (ImGui::Selectable(entry.label, isSelectedPage, ImGuiSelectableFlags_None, ImVec2(0.0f, 30.0f))) {
+            // confirming the page you are already on is the only way it can mean "take me into this page"
+            navTarget.enterContentRequested = isSelectedPage;
             selectedPage = entry.page;
         }
         if (isSelectedPage) {
@@ -152,24 +167,40 @@ static SidebarNavTarget DrawSidebar(std::atomic_uint8_t& selectedPage) {
 }
 
 // imgui only links items sideways when their vertical middles overlap, which the sidebar entries and the setting widgets
-// rarely do, so a left/right move between both panes finds no target at all and gets dropped
+// rarely do, so a right move out of the sidebar scores no candidate at all and would otherwise be dropped
+static bool WantsToEnterContentPane(ImGuiWindow* sidebarWindow, const SidebarNavTarget& sidebarNavTarget) {
+    if (sidebarWindow == nullptr) {
+        return false;
+    }
+    const ImGuiContext& g = *ImGui::GetCurrentContext();
+    if (g.NavWindow != sidebarWindow) {
+        return false;
+    }
+    return sidebarNavTarget.enterContentRequested || (g.NavMoveSubmitted && g.NavMoveDir == ImGuiDir_Right);
+}
+
+// a nav init request is only picked up by items submitted after it and is dropped again at the start of the next frame,
+// so this has to run inside the content child window, before its widgets are drawn
+static void EnterContentPane(ImGuiWindow* contentWindow, bool startAtFirstItem) {
+    ImGui::SetNavWindow(contentWindow); // also cancels the pending move request, so nothing else can claim it
+    ImGui::NavInitWindow(contentWindow, startAtFirstItem);
+    ImGui::SetNavCursorVisible(true);
+}
+
+// a left move out of the content pane has no target inside it, so imgui resolves it to nothing and the sidebar has to
+// claim it by hand
 static void ApplyPaneNavFallback(ImGuiWindow* sidebarWindow, ImGuiWindow* contentWindow, const SidebarNavTarget& sidebarNavTarget) {
     ImGuiContext& g = *ImGui::GetCurrentContext();
-    if (!g.NavMoveSubmitted || (g.NavMoveDir != ImGuiDir_Left && g.NavMoveDir != ImGuiDir_Right)) {
+    if (!g.NavMoveSubmitted || g.NavMoveDir != ImGuiDir_Left || contentWindow == nullptr || g.NavWindow != contentWindow) {
         return;
     }
     if (g.NavMoveResultLocal.ID != 0 || g.NavMoveResultOther.ID != 0) {
         return;
     }
 
-    if (g.NavMoveDir == ImGuiDir_Left && contentWindow != nullptr && g.NavWindow == contentWindow && sidebarWindow != nullptr && sidebarNavTarget.itemId != 0) {
+    if (sidebarWindow != nullptr && sidebarNavTarget.itemId != 0) {
         ImGui::SetNavWindow(sidebarWindow);
         ImGui::SetNavID(sidebarNavTarget.itemId, ImGuiNavLayer_Main, sidebarNavTarget.focusScopeId, sidebarNavTarget.rectRel);
-        ImGui::SetNavCursorVisible(true);
-    }
-    else if (g.NavMoveDir == ImGuiDir_Right && sidebarWindow != nullptr && g.NavWindow == sidebarWindow && contentWindow != nullptr && (contentWindow->DC.NavLayersActiveMask & (1 << ImGuiNavLayer_Main)) != 0) {
-        ImGui::SetNavWindow(contentWindow);
-        ImGui::NavInitWindow(contentWindow, false);
         ImGui::SetNavCursorVisible(true);
     }
 }
@@ -181,6 +212,7 @@ static void DrawSupporterWall() {
 
     ImGui::SeparatorText("Supporters");
     ImGui::TextWrapped("These people are funding the development of the mod. Thank you!");
+    DrawNavScrollStop("##SupportersTop");
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
     int columns = std::clamp((int)(ImGui::GetContentRegionAvail().x / 260.0f), 1, 4);
@@ -1090,13 +1122,16 @@ void RND_Renderer::ImGuiOverlay::DrawSystemPage(bool* changed) {
         EndSettingsSection();
     }
 
+    // the read-only diagnostics go last so that every widget on the page sits in one uninterrupted run for the cursor
     if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
         DrawSectionCaption("Live Frame Timings");
         DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true, OverlayProfilerMode::NONE);
+        DrawNavScrollStop("##AfterFrameTimings");
     }
 
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
     DrawBetterVRProfiler(true);
+    DrawNavScrollStop("##SystemBottom");
 }
 
 static void DrawLogToggle(const char* label, BoolSetting& setting, bool* changed) {
@@ -1196,8 +1231,10 @@ void RND_Renderer::ImGuiOverlay::DrawCreditsPage() {
     ImGui::TextLinkOpenURL("https://github.com/sponsors/Crementif/");
     ImGui::Text("");
     ImGui::Text("- Crementif");
+    DrawNavScrollStop("##AfterDonate");
 
     DrawSupporterWall();
+    DrawNavScrollStop("##AfterSupporters");
 
     ImGui::SeparatorText("Credits");
     ImGui::Text("Crementif: Main Developer");
@@ -1210,6 +1247,7 @@ void RND_Renderer::ImGuiOverlay::DrawCreditsPage() {
     ImGui::Text("");
 
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    DrawNavScrollStop("##CreditsBottom");
 }
 
 static const char* GetControllerModMenuPrompt() {
@@ -1287,6 +1325,9 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
 
     static bool wasMenuPrevOpened = false;
     static bool shouldLogSavedSettingsOnClose = false;
+    static ImVec2 lastMousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+    static double lastMouseActivityTime = -FLT_MAX;
+    static bool showTitleBar = false;
 
     if (!isMenuOpen && wasMenuPrevOpened) {
         wasMenuPrevOpened = false;
@@ -1304,6 +1345,9 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
         ImGui::SetNextWindowFocus();
         wasMenuPrevOpened = true;
         shouldLogSavedSettingsOnClose = false;
+        lastMousePos = ImGui::GetIO().MousePos;
+        lastMouseActivityTime = -FLT_MAX;
+        showTitleBar = false;
     }
 
     ImVec2 displaySize = ImVec2(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
@@ -1316,13 +1360,28 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
 
     bool shouldStayOpen = true;
 
+    // the title bar only exists to give mouse users a close button, so it stays hidden until the mouse is actually being moved
+    const ImGuiIO& io = ImGui::GetIO();
+    ImVec2 windowTopLeft = (displaySize - windowSize) * 0.5f;
+    bool isMouseOverTitleBar = showTitleBar && io.MousePos.x >= windowTopLeft.x && io.MousePos.x <= windowTopLeft.x + windowSize.x && io.MousePos.y >= windowTopLeft.y && io.MousePos.y <= windowTopLeft.y + ImGui::GetFrameHeight();
+    if (io.MousePos.x != lastMousePos.x || io.MousePos.y != lastMousePos.y || isMouseOverTitleBar) {
+        lastMousePos = io.MousePos;
+        lastMouseActivityTime = ImGui::GetTime();
+    }
+    showTitleBar = (ImGui::GetTime() - lastMouseActivityTime) < 2.5;
+
+    ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    if (!showTitleBar) {
+        windowFlags |= ImGuiWindowFlags_NoTitleBar;
+    }
+
     ImGui::SetNextWindowPos(displaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
-    if (ImGui::Begin("BetterVR Settings & Help##Settings", &shouldStayOpen, ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+    if (ImGui::Begin("BetterVR Settings & Help##Settings", &shouldStayOpen, windowFlags)) {
         bool changed = false;
         float footerHeight = ImGui::GetFrameHeight() * 1.5f;
         ImGuiWindow* sidebarWindow = nullptr;
@@ -1344,8 +1403,11 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 8.0f));
         ImGui::PushID(selectedPage);
-        if (ImGui::BeginChild("Content", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+        if (ImGui::BeginChild("Content", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding)) {
             contentWindow = ImGui::GetCurrentWindow();
+            if (WantsToEnterContentPane(sidebarWindow, sidebarNavTarget)) {
+                EnterContentPane(contentWindow, sidebarNavTarget.enterContentRequested);
+            }
             switch (selectedPage) {
                 case ImGuiMenus::PLAYSTYLE_PAGE: DrawPlaystylePage(&changed); break;
                 case ImGuiMenus::COMFORT_PAGE: DrawComfortPage(&changed); break;

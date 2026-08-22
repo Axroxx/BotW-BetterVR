@@ -386,6 +386,11 @@ public:
                 *this = entry.value;
                 *changed = true;
             }
+            if (ImGui::IsItemHovered()) {
+                const ImVec2 itemMin = ImGui::GetItemRectMin();
+                const ImVec2 itemMax = ImGui::GetItemRectMax();
+                ImGui::GetWindowDrawList()->AddRect(ImVec2(itemMin.x - 3.0f, itemMin.y - 2.0f), ImVec2(itemMax.x + 3.0f, itemMax.y + 2.0f), ImGui::GetColorU32(ImGuiCol_NavCursor), ImGui::GetStyle().FrameRounding, ImDrawFlags_None, 2.0f);
+            }
         }
         ImGui::PopID();
     }
