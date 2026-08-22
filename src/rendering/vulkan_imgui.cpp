@@ -24,7 +24,7 @@ struct ExtraMenuGlyph {
 };
 
 static const ExtraMenuGlyph kExtraMenuGlyphs[] = {
-    { (ImWchar)ICON_KI_BOOT_CODEPOINT, boot_glyph_body, boot_glyph_title },
+    { (ImWchar)ICON_KI_FEATHER_CODEPOINT, feather_glyph_body, feather_glyph_title },
     { (ImWchar)ICON_KI_UI_CODEPOINT, ui_glyph_body, ui_glyph_title },
     { (ImWchar)ICON_KI_GAUGE_CODEPOINT, gauge_glyph_body, gauge_glyph_title },
     { (ImWchar)ICON_KI_HELP_CODEPOINT, help_glyph_body, help_glyph_title },
@@ -266,14 +266,13 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     }
 
     // create VulkanTexture
-    auto createHelpImage = [&](const char* title, stbi_uc const* imageData, int imageSize) {
+    auto createHelpImage = [&](stbi_uc const* imageData, int imageSize) {
         // load png image using stb_image
         int width, height, channels;
         unsigned char* img = stbi_load_from_memory(imageData, imageSize, &width, &height, &channels, STBI_rgb_alpha);
 
         // create VulkanTexture from image data
         HelpImage image;
-        image.m_title = title;
         image.m_image = new VulkanTexture{ (uint32_t)width, (uint32_t)height, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT };
         image.m_image->vkTransitionLayout(cb, VK_IMAGE_LAYOUT_GENERAL);
         image.m_image->vkUpload(cb, img, width * height * 4);
@@ -285,10 +284,11 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
         return image;
     };
 
-    m_helpImages.emplace_back(createHelpImage("Buttons & Inputs", (stbi_uc const*)controls, sizeof(controls)));
-    m_helpImages.push_back(createHelpImage("Equipment", (stbi_uc const*)equip, sizeof(equip)));
-    m_helpImages.push_back(createHelpImage("Swinging", (stbi_uc const*)swing, sizeof(swing)));
-    m_helpImages.push_back(createHelpImage("Whistle & Magnesis", (stbi_uc const*)whistle_and_magnesis, sizeof(whistle_and_magnesis)));
+    // order matches the How To Play pages in the mod menu's sidebar
+    m_helpImages.emplace_back(createHelpImage((stbi_uc const*)controls, sizeof(controls)));
+    m_helpImages.push_back(createHelpImage((stbi_uc const*)equip, sizeof(equip)));
+    m_helpImages.push_back(createHelpImage((stbi_uc const*)swing, sizeof(swing)));
+    m_helpImages.push_back(createHelpImage((stbi_uc const*)whistle_and_magnesis, sizeof(whistle_and_magnesis)));
 
     VulkanUtils::DebugPipelineBarrier(cb);
 

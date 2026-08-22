@@ -316,21 +316,18 @@ public:
         void DrawCombatPage(bool* changed);
         void DrawControlsPage(bool* changed);
         void DrawInterfacePage(bool* changed);
-        void DrawPerformancePage(bool* changed);
         void DrawSystemPage(bool* changed);
-        void DrawGuidePage();
+        void DrawGuidePage(const char* icon, const char* title, size_t helpImageIndex);
         void DrawCreditsPage();
         void DrawDebugPage(bool* changed);
 
         VkDescriptorPool m_descriptorPool;
         VkRenderPass m_renderPass;
         struct HelpImage {
-            const char* m_title = nullptr;
             VulkanTexture* m_image;
             VkDescriptorSet m_imageDS = VK_NULL_HANDLE;
         };
         std::vector<HelpImage> m_helpImages;
-        uint32_t m_currentHelpImage = 0;
 
         VkSampler m_sampler = VK_NULL_HANDLE;
         VkExtent2D m_outputRes = {};

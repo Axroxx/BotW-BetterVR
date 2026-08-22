@@ -16,7 +16,7 @@ static constexpr ImVec4 kDescriptionColor = ImVec4(0.63f, 0.71f, 0.78f, 1.0f);
 static constexpr ImVec4 kSectionCaptionColor = ImVec4(0.40f, 0.66f, 1.0f, 1.0f);
 static constexpr ImVec4 kHintColor = ImVec4(0.35f, 0.95f, 0.45f, 1.0f);
 
-static void DrawPageHeader(const char* icon, const char* title, const char* subtitle) {
+static void DrawPageHeader(const char* icon, const char* title) {
     ImGui::Spacing();
     if (ImGuiMenus::g_titleFont != nullptr) {
         ImGui::PushFont(ImGuiMenus::g_titleFont);
@@ -25,11 +25,6 @@ static void DrawPageHeader(const char* icon, const char* title, const char* subt
     }
     else {
         ImGui::Text("%s  %s", icon, title);
-    }
-    if (subtitle != nullptr && subtitle[0] != '\0') {
-        ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
-        ImGui::TextWrapped("%s", subtitle);
-        ImGui::PopStyleColor();
     }
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
 }
@@ -53,7 +48,7 @@ static bool BeginSettingsSection(const char* id, const char* caption = nullptr) 
         DrawSectionCaption(caption);
     }
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(10.0f, 9.0f));
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_NoSavedSettings)) {
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) {
         ImGui::PopStyleVar();
         return false;
     }
@@ -98,16 +93,21 @@ struct MenuPageEntry {
 
 static constexpr MenuPageEntry kSettingsPages[] = {
     { ImGuiMenus::PLAYSTYLE_PAGE, ICON_KI_PLAYER "  Playstyle" },
-    { ImGuiMenus::COMFORT_PAGE, ICON_KI_BOOT "  Comfort" },
+    { ImGuiMenus::COMFORT_PAGE, ICON_KI_FEATHER "  Comfort" },
     { ImGuiMenus::COMBAT_PAGE, ICON_KI_SWORD "  Combat" },
     { ImGuiMenus::CONTROLS_PAGE, ICON_KI_GAMEPAD "  Controls" },
     { ImGuiMenus::INTERFACE_PAGE, ICON_KI_UI "  Interface" },
-    { ImGuiMenus::PERFORMANCE_PAGE, ICON_KI_GAUGE "  Performance" },
     { ImGuiMenus::SYSTEM_PAGE, ICON_KI_COG "  System" },
 };
 
+static constexpr MenuPageEntry kHowToPlayPages[] = {
+    { ImGuiMenus::GUIDE_CONTROLS_PAGE, ICON_KI_QUESTION_CIRCLE "  The Controls" },
+    { ImGuiMenus::GUIDE_EQUIPMENT_PAGE, ICON_KI_QUESTION_CIRCLE "  Weapons & Runes" },
+    { ImGuiMenus::GUIDE_SWING_PAGE, ICON_KI_QUESTION_CIRCLE "  Swinging & Blocking" },
+    { ImGuiMenus::GUIDE_WHISTLE_PAGE, ICON_KI_QUESTION_CIRCLE "  Whistle & Magnesis" },
+};
+
 static constexpr MenuPageEntry kMorePages[] = {
-    { ImGuiMenus::GUIDE_PAGE, ICON_KI_HELP "  Controller Guide" },
     { ImGuiMenus::CREDITS_PAGE, ICON_KI_HEART "  Credits" },
     { ImGuiMenus::DEBUG_PAGE, ICON_KI_WRENCH "  Debug" },
 };
@@ -143,6 +143,8 @@ static SidebarNavTarget DrawSidebar(std::atomic_uint8_t& selectedPage) {
     SidebarNavTarget navTarget;
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
     DrawSidebarGroup("SETTINGS", kSettingsPages, selectedPage, navTarget);
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    DrawSidebarGroup("HOW TO PLAY", kHowToPlayPages, selectedPage, navTarget);
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
     DrawSidebarGroup("MORE", kMorePages, selectedPage, navTarget);
     ImGui::PopStyleVar();
@@ -848,10 +850,10 @@ void RND_Renderer::ImGuiOverlay::DrawPlaystylePage(bool* changed) {
     auto& settings = GetSettings();
     const CameraMode cameraMode = settings.cameraMode;
 
-    DrawPageHeader(ICON_KI_PLAYER, "Playstyle", "How you want to inhabit Hyrule.");
+    DrawPageHeader(ICON_KI_PLAYER, "Playstyle");
 
     if (BeginSettingsSection("##CameraMode")) {
-        DrawSetting("Camera Mode", "First person puts you inside Link's body with motion controls. Third person keeps the original camera and plays with a regular controller.", [&]() {
+        DrawSetting("Camera Mode", "First person uses motion controls. Third person uses a controller.", [&]() {
             settings.cameraMode.AddRadioToGUI(changed, true);
         });
         EndSettingsSection();
@@ -864,10 +866,10 @@ void RND_Renderer::ImGuiOverlay::DrawPlaystylePage(bool* changed) {
         ImGui::PopStyleColor();
 
         if (BeginSettingsSection("##ThirdPerson", "Third-Person Camera")) {
-            DrawSetting("Camera Distance", "How far the camera floats behind Link.", [&]() {
+            DrawSetting("Camera Distance", [&]() {
                 settings.thirdPlayerDistance.AddSliderToGUI(changed, 0.5f, 0.65f);
             });
-            DrawSetting("Shoot Arrows From Camera", "Aims the bow from the camera's point of view instead of from Link's hands.", [&]() {
+            DrawSetting("Shoot Arrows From Camera", "Aims the bow from the camera instead of from Link's hands.", [&]() {
                 settings.thirdPersonBowCameraAim.AddToGUI(changed);
             });
             EndSettingsSection();
@@ -905,12 +907,15 @@ void RND_Renderer::ImGuiOverlay::DrawComfortPage(bool* changed) {
     auto& settings = GetSettings();
     const CameraMode cameraMode = settings.cameraMode;
 
-    DrawPageHeader(ICON_KI_BOOT, "Comfort", "Options that keep the camera predictable and motion sickness away.");
+    DrawPageHeader(ICON_KI_FEATHER, "Comfort");
 
     if (cameraMode == CameraMode::FIRST_PERSON) {
-        if (BeginSettingsSection("##Turning", "Turning")) {
-            DrawSetting("Turn Mode", "Snap turning rotates you in fixed steps, which most players find more comfortable than smooth turning.", [&]() {
+        if (BeginSettingsSection("##General")) {
+            DrawSetting("Turn Mode", "Snap turning can help if you get motion sick while rotating the camera.", [&]() {
                 settings.turnMode.AddComboToGUI(changed);
+            });
+            DrawSetting("Prevent Falling Over", "Stops Link from ragdolling, which sends the camera tumbling.", [&]() {
+                settings.preventFirstPersonRagdoll.AddToGUI(changed);
             });
             EndSettingsSection();
         }
@@ -918,30 +923,22 @@ void RND_Renderer::ImGuiOverlay::DrawComfortPage(bool* changed) {
 
     if (BeginSettingsSection("##Cutscenes", "Cutscenes")) {
         if (cameraMode == CameraMode::FIRST_PERSON) {
-            DrawSetting("Camera In Cutscenes", "Whether story cutscenes play out through Link's eyes or through the game's original third-person camera.", [&]() {
+            DrawSetting("Camera In Cutscenes", [&]() {
                 settings.cutsceneCameraMode.AddComboToGUI(changed);
             });
         }
-        DrawSetting("Black Bars In Third-Person Cutscenes", "Frames third-person cutscenes with cinematic black bars.", [&]() {
+        DrawSetting("Show All Cutscenes In 2D Theatre Mode", "First person cutscenes still play in 3D.", [&]() {
             settings.useBlackBarsForCutscenes.AddToGUI(changed);
         });
         if (cameraMode == CameraMode::FIRST_PERSON) {
-            DrawSetting("Keep First-Person Cutscenes Still", "Never lets a cutscene move the first-person camera for you.", [&]() {
+            DrawSetting("Keep The Camera Still In Cutscenes", [&]() {
                 settings.alwaysPreventFirstPersonCutsceneCameraMovement.AddToGUI(changed);
             });
         }
         EndSettingsSection();
     }
 
-    if (cameraMode == CameraMode::FIRST_PERSON) {
-        if (BeginSettingsSection("##Body", "Body")) {
-            DrawSetting("Prevent Ragdolling", "Stops Link from being knocked down and dragged around, which can be disorienting in first person.", [&]() {
-                settings.preventFirstPersonRagdoll.AddToGUI(changed);
-            });
-            EndSettingsSection();
-        }
-    }
-    else {
+    if (cameraMode != CameraMode::FIRST_PERSON) {
         DrawPageNote("More comfort options become available in First Person mode.");
     }
 }
@@ -949,16 +946,23 @@ void RND_Renderer::ImGuiOverlay::DrawComfortPage(bool* changed) {
 void RND_Renderer::ImGuiOverlay::DrawCombatPage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_SWORD, "Combat", "How your swings and stabs register.");
+    DrawPageHeader(ICON_KI_SWORD, "Combat");
 
-    if (settings.cameraMode != CameraMode::FIRST_PERSON) {
-        DrawPageNote("Motion-based combat is only used in First Person mode. Switch the Camera Mode on the Playstyle page to use these options.");
-        return;
+    if (settings.cameraMode == CameraMode::FIRST_PERSON) {
+        if (BeginSettingsSection("##Attacks", "Melee Attacks")) {
+            DrawSetting("Attack Sensitivity", "Relaxed picks up lighter swings than normal does.", [&]() {
+                settings.swingSensitivity.AddRadioToGUI(changed);
+            });
+            EndSettingsSection();
+        }
+    }
+    else {
+        DrawPageNote("Motion controls for melee attacks only work in First Person mode.");
     }
 
-    if (BeginSettingsSection("##Attacks", "Melee Attacks")) {
-        DrawSetting("Attack Sensitivity", "How decisive a motion needs to be before it counts as an attack. Relaxed lets light swings land, while Normal asks for a more deliberate motion.", [&]() {
-            settings.swingSensitivity.AddRadioToGUI(changed);
+    if (BeginSettingsSection("##Aiming", "Bow Aiming")) {
+        DrawSetting("Bow Aiming Arc Visibility", "The arc shows where your arrow will land while you aim.", [&]() {
+            settings.bowArcOpacity.AddPercentToGUI(changed, 0.0f, 100.0f);
         });
         EndSettingsSection();
     }
@@ -967,18 +971,22 @@ void RND_Renderer::ImGuiOverlay::DrawCombatPage(bool* changed) {
 void RND_Renderer::ImGuiOverlay::DrawControlsPage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_GAMEPAD, "Controls", "How your VR controllers translate into game input.");
+    DrawPageHeader(ICON_KI_GAMEPAD, "Controls");
+
+    if (settings.cameraMode == CameraMode::THIRD_PERSON) {
+        DrawPageNote("Third person is played with a regular controller, which you set up in Cemu's toolbar under Options > Input Settings.");
+    }
 
     if (BeginSettingsSection("##Sticks", "Thumbsticks")) {
         if (settings.cameraMode == CameraMode::FIRST_PERSON) {
-            DrawSetting("Walking Direction", "Walk in the direction you are looking, or in the direction your controller points.", [&]() {
+            DrawSetting("Walking Direction", "Walk where you're looking, or where your controller points.", [&]() {
                 settings.walkingDirection.AddComboToGUI(changed);
             });
         }
-        DrawSetting("Thumbstick Deadzone", "Ignores small stick movements, preventing drift when the stick rests slightly off-center.", [&]() {
+        DrawSetting("Thumbstick Deadzone", "Fixes Link walking on his own when the stick rests off-center.", [&]() {
             settings.stickDeadzone.AddPercentToGUI(changed, 0.0f, 50.0f);
         });
-        DrawSetting("Stick Direction Threshold", "How far the stick must be pushed before it counts as a direction press in menus.", [&]() {
+        DrawSetting("Stick Direction Threshold", "How far you push the stick before it counts as a direction.", [&]() {
             settings.axisThreshold.AddPercentToGUI(changed, 10.0f, 90.0f);
         });
         EndSettingsSection();
@@ -986,7 +994,7 @@ void RND_Renderer::ImGuiOverlay::DrawControlsPage(bool* changed) {
 
     if (VRManager::instance().XR->m_capabilities.isOculusLinkRuntime) {
         if (BeginSettingsSection("##Fixes", "Controller Fixes")) {
-            DrawSetting("Angular Velocity Fixer", "Works around Oculus Link reporting controller rotation speeds incorrectly, which breaks swing detection. Leave this on Auto unless swings feel wrong.", [&]() {
+            DrawSetting("Fix Controller Rotation", "Leave this on Auto unless your sword swings don't come out.", [&]() {
                 settings.buggyAngularVelocity.AddComboToGUI(changed);
             });
             EndSettingsSection();
@@ -1000,13 +1008,13 @@ void RND_Renderer::ImGuiOverlay::DrawControlsPage(bool* changed) {
 void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_UI, "Interface", "Where the game's menus, HUD and aiming aids appear in your view.");
+    DrawPageHeader(ICON_KI_UI, "Interface");
 
     if (BeginSettingsSection("##Hud", "HUD & Menus")) {
-        DrawSetting("UI Follows Where You Look", "Gently re-centers the HUD and menus as you look around.", [&]() {
+        DrawSetting("UI Follows Where You Look", "When off, the HUD stays in one place instead of following your head.", [&]() {
             settings.uiFollowsGaze.AddToGUI(changed);
         });
-        DrawSetting("Menu & HUD Placement", "How far away and how large the game's menus and HUD appear.", [&]() {
+        DrawSetting("Menu/HUD Distance & Size", [&]() {
             float distance = settings.hudDistance;
             if (ImGui::SliderFloat("##hudDistance", &distance, settings.hudDistance.min, settings.hudDistance.max, FormatDistance(distance).c_str())) {
                 settings.hudDistance = std::clamp(distance, settings.hudDistance.min, settings.hudDistance.max);
@@ -1028,36 +1036,46 @@ void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
         });
         EndSettingsSection();
     }
-
-    if (BeginSettingsSection("##Aiming", "Aiming")) {
-        DrawSetting("Bow Arc Opacity", "Visibility of the predicted arrow arc while aiming your bow.", [&]() {
-            settings.bowArcOpacity.AddPercentToGUI(changed, 0.0f, 100.0f);
-        });
-        EndSettingsSection();
-    }
 }
 
 void RND_Renderer::ImGuiOverlay::DrawSystemPage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_COG, "System", "Startup behavior and maintenance.");
+    DrawPageHeader(ICON_KI_COG, "System");
 
-    if (BeginSettingsSection("##Startup", "Startup")) {
-        DrawSetting("Boot Directly Into BotW", "Skips Cemu's game list and launches straight into Breath of the Wild.", [&]() {
+    if (BeginSettingsSection("##General")) {
+        DrawSetting("Boot Directly Into BotW", "Skips Cemu's game list on startup.", [&]() {
             settings.bootDirectlyIntoGame.AddToGUI(changed);
         });
+        DrawSetting("Show FPS Overlay", [&]() {
+            settings.performanceOverlay.AddComboToGUI(changed);
+        });
+        if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
+            static const uint32_t freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
+            uint32_t currentFreq = settings.performanceOverlayFrequency;
+            int freqIdx = 5;
+            for (int i = 0; i < std::size(freqOptions); i++) {
+                if (freqOptions[i] == currentFreq) {
+                    freqIdx = i;
+                    break;
+                }
+            }
+
+            DrawSetting("Headset Refresh Rate", "The graph's target line is drawn at this refresh rate.", [&]() {
+                if (ImGui::SliderInt("##RefreshRate", &freqIdx, 0, (int)std::size(freqOptions) - 1, std::format("{} Hz", freqOptions[freqIdx]).c_str())) {
+                    settings.performanceOverlayFrequency = freqOptions[freqIdx];
+                    *changed = true;
+                }
+            });
+        }
         EndSettingsSection();
     }
 
-    if (BeginSettingsSection("##Developer", "Developer")) {
-        DrawSetting("Enable Debugger Tools", "Unlocks the Debug page with entity inspection and logging options. Reduces performance while enabled.", [&]() {
+    if (BeginSettingsSection("##Troubleshooting", "Troubleshooting")) {
+        DrawSetting("Enable Debugger Tools", "Lowers performance and can cause crashes.", [&]() {
             settings.enableDebuggerTools.AddToGUI(changed);
         });
-        EndSettingsSection();
-    }
-
-    if (BeginSettingsSection("##Maintenance", "Maintenance")) {
-        DrawSetting("Reset All Settings", "Puts every BetterVR setting back to its default value.", [&]() {
+        DrawSetting("Reset All Settings", [&]() {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.18f, 0.18f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.22f, 0.22f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.45f, 0.12f, 0.12f, 1.0f));
@@ -1071,6 +1089,14 @@ void RND_Renderer::ImGuiOverlay::DrawSystemPage(bool* changed) {
         });
         EndSettingsSection();
     }
+
+    if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
+        DrawSectionCaption("Live Frame Timings");
+        DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true, OverlayProfilerMode::NONE);
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    DrawBetterVRProfiler(true);
 }
 
 static void DrawLogToggle(const char* label, BoolSetting& setting, bool* changed) {
@@ -1082,7 +1108,7 @@ static void DrawLogToggle(const char* label, BoolSetting& setting, bool* changed
 }
 
 void RND_Renderer::ImGuiOverlay::DrawDebugPage(bool* changed) {
-    DrawPageHeader(ICON_KI_WRENCH, "Debug", "Inspection and logging tools for mod development.");
+    DrawPageHeader(ICON_KI_WRENCH, "Debug");
 
     auto* entityDebugger = VRManager::instance().Hooks->m_entityDebugger.get();
     if (entityDebugger != nullptr) {
@@ -1127,60 +1153,15 @@ void RND_Renderer::ImGuiOverlay::DrawDebugPage(bool* changed) {
     DrawLogToggle("Process & Thread IDs", settings.logThreadIds, changed);
 }
 
-void RND_Renderer::ImGuiOverlay::DrawGuidePage() {
-    if (m_helpImages.empty()) {
+void RND_Renderer::ImGuiOverlay::DrawGuidePage(const char* icon, const char* title, size_t helpImageIndex) {
+    DrawPageHeader(icon, title);
+
+    if (helpImageIndex >= m_helpImages.size()) {
         return;
     }
+    const auto& image = m_helpImages[helpImageIndex];
 
-    auto moveHelpImage = [&](int direction) {
-        const int helpImageCount = (int)m_helpImages.size();
-        m_currentHelpImage = (uint32_t)((m_currentHelpImage + helpImageCount + direction) % helpImageCount);
-    };
-
-    const bool hasMultipleHelpImages = m_helpImages.size() > 1;
-    m_currentHelpImage = std::min<uint32_t>(m_currentHelpImage, (uint32_t)m_helpImages.size() - 1);
-    const auto& image = m_helpImages[m_currentHelpImage];
-
-    std::string slideText = std::format("{} ({}/{})", image.m_title, m_currentHelpImage + 1, m_helpImages.size());
-    float availableWidth = ImGui::GetContentRegionAvail().x;
-    float sideWidth = availableWidth * 0.4f;
-    float centerWidth = availableWidth * 0.2f;
-    float rowStartX = ImGui::GetCursorPosX();
-    float buttonWidth = ImGui::CalcTextSize(ICON_KI_ARROW_RIGHT).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float leftButtonX = rowStartX + std::max((sideWidth - buttonWidth) * 0.5f, 0.0f);
-    float textWidth = ImGui::CalcTextSize(slideText.c_str()).x;
-    float textX = rowStartX + sideWidth + std::max((centerWidth - textWidth) * 0.5f, 0.0f);
-    float rightButtonX = rowStartX + sideWidth + centerWidth + std::max((sideWidth - buttonWidth) * 0.5f, 0.0f);
-
-    ImGui::SetCursorPosX(leftButtonX);
-    if (!hasMultipleHelpImages) {
-        ImGui::BeginDisabled();
-    }
-    if (ImGui::Button(ICON_KI_ARROW_LEFT "##PrevHelpImage")) {
-        moveHelpImage(-1);
-    }
-    if (!hasMultipleHelpImages) {
-        ImGui::EndDisabled();
-    }
-
-    ImGui::SameLine(textX);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(slideText.c_str());
-
-    ImGui::SameLine(rightButtonX);
-    if (!hasMultipleHelpImages) {
-        ImGui::BeginDisabled();
-    }
-    if (ImGui::Button(ICON_KI_ARROW_RIGHT "##NextHelpImage")) {
-        moveHelpImage(1);
-    }
-    if (!hasMultipleHelpImages) {
-        ImGui::EndDisabled();
-    }
-
-    ImGui::Separator();
-
-    if (ImGui::BeginChild("HelpImageCarousel", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground)) {
+    if (ImGui::BeginChild("HelpImage", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground)) {
         ImVec2 availableSize = ImGui::GetContentRegionAvail();
         float widthScale = availableSize.x / (float)image.m_image->GetWidth();
         float heightScale = availableSize.y / (float)image.m_image->GetHeight();
@@ -1200,47 +1181,8 @@ void RND_Renderer::ImGuiOverlay::DrawGuidePage() {
     ImGui::EndChild();
 }
 
-void RND_Renderer::ImGuiOverlay::DrawPerformancePage(bool* changed) {
-    auto& settings = GetSettings();
-
-    DrawPageHeader(ICON_KI_GAUGE, "Performance", "Check how smoothly the mod is running and configure the FPS overlay.");
-
-    if (BeginSettingsSection("##Overlay", "FPS Overlay")) {
-        DrawSetting("Show FPS Overlay", "Draws a live FPS graph in the corner while you play.", [&]() {
-            settings.performanceOverlay.AddComboToGUI(changed);
-        });
-        if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
-            static const uint32_t freqOptions[] = { 30, 60, 72, 80, 90, 120, 144 };
-            uint32_t currentFreq = settings.performanceOverlayFrequency;
-            int freqIdx = 5;
-            for (int i = 0; i < std::size(freqOptions); i++) {
-                if (freqOptions[i] == currentFreq) {
-                    freqIdx = i;
-                    break;
-                }
-            }
-
-            DrawSetting("Headset Refresh Rate", "The refresh rate your headset runs at, used to draw the graph's target lines.", [&]() {
-                if (ImGui::SliderInt("##RefreshRate", &freqIdx, 0, (int)std::size(freqOptions) - 1, std::format("{} Hz", freqOptions[freqIdx]).c_str())) {
-                    settings.performanceOverlayFrequency = freqOptions[freqIdx];
-                    *changed = true;
-                }
-            });
-        }
-        EndSettingsSection();
-    }
-
-    if (settings.performanceOverlay != PerformanceOverlayMode::DISABLE) {
-        DrawSectionCaption("Live Frame Timings");
-        DrawFPSOverlayContent(VRManager::instance().XR->GetRenderer(), true, OverlayProfilerMode::NONE);
-    }
-
-    ImGui::Dummy(ImVec2(0.0f, 10.0f));
-    DrawBetterVRProfiler(true);
-}
-
 void RND_Renderer::ImGuiOverlay::DrawCreditsPage() {
-    DrawPageHeader(ICON_KI_HEART, "Credits", "The people who make BetterVR possible.");
+    DrawPageHeader(ICON_KI_HEART, "Credits");
 
     ImGui::SeparatorText("Project Links");
     ImGui::TextLinkOpenURL(ICON_KI_GITHUB " https://github.com/Crementif/BotW-BetterVR");
@@ -1410,9 +1352,11 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
                 case ImGuiMenus::COMBAT_PAGE: DrawCombatPage(&changed); break;
                 case ImGuiMenus::CONTROLS_PAGE: DrawControlsPage(&changed); break;
                 case ImGuiMenus::INTERFACE_PAGE: DrawInterfacePage(&changed); break;
-                case ImGuiMenus::PERFORMANCE_PAGE: DrawPerformancePage(&changed); break;
                 case ImGuiMenus::SYSTEM_PAGE: DrawSystemPage(&changed); break;
-                case ImGuiMenus::GUIDE_PAGE: DrawGuidePage(); break;
+                case ImGuiMenus::GUIDE_CONTROLS_PAGE: DrawGuidePage(ICON_KI_QUESTION_CIRCLE, "The Controls", 0); break;
+                case ImGuiMenus::GUIDE_EQUIPMENT_PAGE: DrawGuidePage(ICON_KI_QUESTION_CIRCLE, "Weapons & Runes", 1); break;
+                case ImGuiMenus::GUIDE_SWING_PAGE: DrawGuidePage(ICON_KI_QUESTION_CIRCLE, "Swinging & Blocking", 2); break;
+                case ImGuiMenus::GUIDE_WHISTLE_PAGE: DrawGuidePage(ICON_KI_QUESTION_CIRCLE, "Whistle & Magnesis", 3); break;
                 case ImGuiMenus::CREDITS_PAGE: DrawCreditsPage(); break;
                 case ImGuiMenus::DEBUG_PAGE: DrawDebugPage(&changed); break;
                 default: break;

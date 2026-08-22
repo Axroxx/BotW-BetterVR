@@ -11,12 +11,14 @@ namespace ImGuiMenus {
     inline constexpr uint8_t COMBAT_PAGE = 2;
     inline constexpr uint8_t CONTROLS_PAGE = 3;
     inline constexpr uint8_t INTERFACE_PAGE = 4;
-    inline constexpr uint8_t PERFORMANCE_PAGE = 5;
-    inline constexpr uint8_t SYSTEM_PAGE = 6;
-    inline constexpr uint8_t GUIDE_PAGE = 7;
-    inline constexpr uint8_t CREDITS_PAGE = 8;
-    inline constexpr uint8_t DEBUG_PAGE = 9;
-    inline constexpr uint8_t PAGE_COUNT = 10;
+    inline constexpr uint8_t SYSTEM_PAGE = 5;
+    inline constexpr uint8_t GUIDE_CONTROLS_PAGE = 6;
+    inline constexpr uint8_t GUIDE_EQUIPMENT_PAGE = 7;
+    inline constexpr uint8_t GUIDE_SWING_PAGE = 8;
+    inline constexpr uint8_t GUIDE_WHISTLE_PAGE = 9;
+    inline constexpr uint8_t CREDITS_PAGE = 10;
+    inline constexpr uint8_t DEBUG_PAGE = 11;
+    inline constexpr uint8_t PAGE_COUNT = 12;
 
     bool IsPageAvailable(uint8_t page);
 
