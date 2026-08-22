@@ -17,6 +17,40 @@
 #include "font_roboto.h"
 
 
+struct ExtraMenuGlyph {
+    ImWchar codepoint;
+    const unsigned char* bodyPixels;
+    const unsigned char* titlePixels;
+};
+
+static const ExtraMenuGlyph kExtraMenuGlyphs[] = {
+    { (ImWchar)ICON_KI_BOOT_CODEPOINT, boot_glyph_body, boot_glyph_title },
+    { (ImWchar)ICON_KI_UI_CODEPOINT, ui_glyph_body, ui_glyph_title },
+    { (ImWchar)ICON_KI_GAUGE_CODEPOINT, gauge_glyph_body, gauge_glyph_title },
+    { (ImWchar)ICON_KI_HELP_CODEPOINT, help_glyph_body, help_glyph_title },
+    { (ImWchar)ICON_KI_PLAYER_CODEPOINT, player_glyph_body, player_glyph_title },
+    { (ImWchar)ICON_KI_SWORD_CODEPOINT, sword_glyph_body, sword_glyph_title },
+};
+
+static void FillCustomGlyphRect(ImFontAtlas* atlas, int rectIndex, const unsigned char* alphaPixels) {
+    if (rectIndex < 0) {
+        return;
+    }
+
+    unsigned char* atlasPixels = nullptr;
+    int atlasWidth = 0;
+    int atlasHeight = 0;
+    atlas->GetTexDataAsRGBA32(&atlasPixels, &atlasWidth, &atlasHeight);
+
+    const ImFontAtlasCustomRect* rect = atlas->GetCustomRectByIndex(rectIndex);
+    for (int y = 0; y < rect->Height; y++) {
+        ImU32* atlasRow = (ImU32*)atlasPixels + (rect->Y + y) * atlasWidth + rect->X;
+        for (int x = 0; x < rect->Width; x++) {
+            atlasRow[x] = IM_COL32(255, 255, 255, alphaPixels[y * rect->Width + x]);
+        }
+    }
+}
+
 RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, VkFormat fbFormat): m_outputRes(fbRes) {
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = "BetterVR_settings.ini";
@@ -52,7 +86,22 @@ RND_Renderer::ImGuiOverlay::ImGuiOverlay(VkCommandBuffer cb, VkExtent2D fbRes, V
     }
     else {
         ImGuiMenus::g_titleFont = titleFont;
-        ImGui::GetIO().Fonts->Build();
+
+        // the icon font has no glyph for these, so they are baked into the atlas as custom rects
+        ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+        int bodyRects[std::size(kExtraMenuGlyphs)] = {};
+        int titleRects[std::size(kExtraMenuGlyphs)] = {};
+        for (size_t i = 0; i < std::size(kExtraMenuGlyphs); i++) {
+            bodyRects[i] = atlas->AddCustomRectFontGlyph(textFont, kExtraMenuGlyphs[i].codepoint, extra_glyph_body_size, extra_glyph_body_size, 16.0f, ImVec2(0.0f, 1.0f));
+            titleRects[i] = atlas->AddCustomRectFontGlyph(titleFont, kExtraMenuGlyphs[i].codepoint, extra_glyph_title_size, extra_glyph_title_size, 22.0f, ImVec2(0.0f, 1.0f));
+        }
+
+        atlas->Build();
+
+        for (size_t i = 0; i < std::size(kExtraMenuGlyphs); i++) {
+            FillCustomGlyphRect(atlas, bodyRects[i], kExtraMenuGlyphs[i].bodyPixels);
+            FillCustomGlyphRect(atlas, titleRects[i], kExtraMenuGlyphs[i].titlePixels);
+        }
     }
 
     SetupImGuiStyle();
@@ -508,15 +557,20 @@ void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const
     static double lastRefireTime[8] = { 0.0 }; // 0-3 Dpad, 4 B, 5 A, 6 LB, 7 RB
     double currentTime = ImGui::GetTime();
 
-    auto updateDpadState = [&](int idx, float val, bool positive) {
+    // a diagonal stick push would otherwise press both axes at once, and imgui only keeps the vertical one of those
+    const float stickX = stick.currentState.x;
+    const float stickY = stick.currentState.y;
+    const bool horizontalDominates = std::abs(stickX) >= std::abs(stickY);
+
+    auto updateDpadState = [&](int idx, float val, bool isDominantAxis, bool positive) {
         bool isPressed = dpadState[idx];
         if (positive) {
-            if (!isPressed && val >= THRESHOLD_PRESS) isPressed = true;
+            if (!isPressed && isDominantAxis && val >= THRESHOLD_PRESS) isPressed = true;
             else if (isPressed && val <= THRESHOLD_RELEASE)
                 isPressed = false;
         }
         else {
-            if (!isPressed && val <= -THRESHOLD_PRESS) isPressed = true;
+            if (!isPressed && isDominantAxis && val <= -THRESHOLD_PRESS) isPressed = true;
             else if (isPressed && val >= -THRESHOLD_RELEASE)
                 isPressed = false;
         }
@@ -543,10 +597,10 @@ void RND_Renderer::ImGuiOverlay::ProcessInputs(OpenXR::InputState& inputs, const
         }
     };
 
-    applyInput(ImGuiKey_GamepadDpadUp, updateDpadState(0, stick.currentState.y, true) || ((hold & VPAD_BUTTON_UP) != 0), VERTICAL_REFIRE_DELAY, 0);
-    applyInput(ImGuiKey_GamepadDpadDown, updateDpadState(1, stick.currentState.y, false) || ((hold & VPAD_BUTTON_DOWN) != 0), VERTICAL_REFIRE_DELAY, 1);
-    applyInput(ImGuiKey_GamepadDpadLeft, updateDpadState(2, stick.currentState.x, false) || ((hold & VPAD_BUTTON_LEFT) != 0), HORIZONTAL_REFIRE_DELAY, 2);
-    applyInput(ImGuiKey_GamepadDpadRight, updateDpadState(3, stick.currentState.x, true) || ((hold & VPAD_BUTTON_RIGHT) != 0), HORIZONTAL_REFIRE_DELAY, 3);
+    applyInput(ImGuiKey_GamepadDpadUp, updateDpadState(0, stickY, !horizontalDominates, true) || ((hold & VPAD_BUTTON_UP) != 0), VERTICAL_REFIRE_DELAY, 0);
+    applyInput(ImGuiKey_GamepadDpadDown, updateDpadState(1, stickY, !horizontalDominates, false) || ((hold & VPAD_BUTTON_DOWN) != 0), VERTICAL_REFIRE_DELAY, 1);
+    applyInput(ImGuiKey_GamepadDpadLeft, updateDpadState(2, stickX, horizontalDominates, false) || ((hold & VPAD_BUTTON_LEFT) != 0), HORIZONTAL_REFIRE_DELAY, 2);
+    applyInput(ImGuiKey_GamepadDpadRight, updateDpadState(3, stickX, horizontalDominates, true) || ((hold & VPAD_BUTTON_RIGHT) != 0), HORIZONTAL_REFIRE_DELAY, 3);
 
     // convert B/A to ImGui gamepad face buttons
     applyInput(ImGuiKey_GamepadFaceRight, backDown, VERTICAL_REFIRE_DELAY, 4);

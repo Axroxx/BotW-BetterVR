@@ -3,6 +3,7 @@
 #include "imgui_menus.h"
 
 #include "cemu_hooks.h"
+#include "imgui_internal.h"
 #include "instance.h"
 #include "rendering/renderer.h"
 #include "rendering/openxr.h"
@@ -11,7 +12,8 @@
 #include "weapon.h"
 #include "supporters_generated.h"
 
-static constexpr ImVec4 kDescriptionColor = ImVec4(0.52f, 0.60f, 0.67f, 1.0f);
+static constexpr ImVec4 kDescriptionColor = ImVec4(0.63f, 0.71f, 0.78f, 1.0f);
+static constexpr ImVec4 kSectionCaptionColor = ImVec4(0.40f, 0.66f, 1.0f, 1.0f);
 static constexpr ImVec4 kHintColor = ImVec4(0.35f, 0.95f, 0.45f, 1.0f);
 
 static void DrawPageHeader(const char* icon, const char* title, const char* subtitle) {
@@ -34,7 +36,7 @@ static void DrawPageHeader(const char* icon, const char* title, const char* subt
 
 static void DrawSectionCaption(const char* label) {
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+    ImGui::PushStyleColor(ImGuiCol_Text, kSectionCaptionColor);
     ImGui::TextUnformatted(label);
     ImGui::PopStyleColor();
 }
@@ -90,22 +92,28 @@ struct MenuPageEntry {
 };
 
 static constexpr MenuPageEntry kSettingsPages[] = {
-    { ImGuiMenus::PLAYSTYLE_PAGE, ICON_KI_FIGURE "  Playstyle" },
-    { ImGuiMenus::COMFORT_PAGE, ICON_KI_ADJUST "  Comfort" },
-    { ImGuiMenus::COMBAT_PAGE, ICON_KI_FIST "  Combat" },
+    { ImGuiMenus::PLAYSTYLE_PAGE, ICON_KI_PLAYER "  Playstyle" },
+    { ImGuiMenus::COMFORT_PAGE, ICON_KI_BOOT "  Comfort" },
+    { ImGuiMenus::COMBAT_PAGE, ICON_KI_SWORD "  Combat" },
     { ImGuiMenus::CONTROLS_PAGE, ICON_KI_GAMEPAD "  Controls" },
-    { ImGuiMenus::INTERFACE_PAGE, ICON_KI_GRID "  Interface" },
-    { ImGuiMenus::PERFORMANCE_PAGE, ICON_KI_PODIUM "  Performance" },
+    { ImGuiMenus::INTERFACE_PAGE, ICON_KI_UI "  Interface" },
+    { ImGuiMenus::PERFORMANCE_PAGE, ICON_KI_GAUGE "  Performance" },
     { ImGuiMenus::SYSTEM_PAGE, ICON_KI_COG "  System" },
 };
 
 static constexpr MenuPageEntry kMorePages[] = {
-    { ImGuiMenus::GUIDE_PAGE, ICON_KI_INFO_CIRCLE "  Controller Guide" },
+    { ImGuiMenus::GUIDE_PAGE, ICON_KI_HELP "  Controller Guide" },
     { ImGuiMenus::CREDITS_PAGE, ICON_KI_HEART "  Credits" },
     { ImGuiMenus::DEBUG_PAGE, ICON_KI_WRENCH "  Debug" },
 };
 
-static void DrawSidebarGroup(const char* caption, std::span<const MenuPageEntry> entries, std::atomic_uint8_t& selectedPage) {
+struct SidebarNavTarget {
+    ImGuiID itemId = 0;
+    ImGuiID focusScopeId = 0;
+    ImRect rectRel = {};
+};
+
+static void DrawSidebarGroup(const char* caption, std::span<const MenuPageEntry> entries, std::atomic_uint8_t& selectedPage, SidebarNavTarget& navTarget) {
     ImGui::PushStyleColor(ImGuiCol_Text, kDescriptionColor);
     ImGui::TextUnformatted(caption);
     ImGui::PopStyleColor();
@@ -113,18 +121,50 @@ static void DrawSidebarGroup(const char* caption, std::span<const MenuPageEntry>
         if (!ImGuiMenus::IsPageAvailable(entry.page)) {
             continue;
         }
-        if (ImGui::Selectable(entry.label, selectedPage == entry.page, ImGuiSelectableFlags_None, ImVec2(0.0f, 30.0f))) {
+        const bool isSelectedPage = selectedPage == entry.page;
+        if (ImGui::Selectable(entry.label, isSelectedPage, ImGuiSelectableFlags_None, ImVec2(0.0f, 30.0f))) {
             selectedPage = entry.page;
+        }
+        if (isSelectedPage) {
+            const ImGuiContext& g = *ImGui::GetCurrentContext();
+            navTarget.itemId = g.LastItemData.ID;
+            navTarget.focusScopeId = g.CurrentFocusScopeId;
+            navTarget.rectRel = ImGui::WindowRectAbsToRel(ImGui::GetCurrentWindow(), g.LastItemData.NavRect);
         }
     }
 }
 
-static void DrawSidebar(std::atomic_uint8_t& selectedPage) {
+static SidebarNavTarget DrawSidebar(std::atomic_uint8_t& selectedPage) {
+    SidebarNavTarget navTarget;
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
-    DrawSidebarGroup("SETTINGS", kSettingsPages, selectedPage);
+    DrawSidebarGroup("SETTINGS", kSettingsPages, selectedPage, navTarget);
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
-    DrawSidebarGroup("MORE", kMorePages, selectedPage);
+    DrawSidebarGroup("MORE", kMorePages, selectedPage, navTarget);
     ImGui::PopStyleVar();
+    return navTarget;
+}
+
+// imgui only links items sideways when their vertical middles overlap, which the sidebar entries and the setting widgets
+// rarely do, so a left/right move between both panes finds no target at all and gets dropped
+static void ApplyPaneNavFallback(ImGuiWindow* sidebarWindow, ImGuiWindow* contentWindow, const SidebarNavTarget& sidebarNavTarget) {
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    if (!g.NavMoveSubmitted || (g.NavMoveDir != ImGuiDir_Left && g.NavMoveDir != ImGuiDir_Right)) {
+        return;
+    }
+    if (g.NavMoveResultLocal.ID != 0 || g.NavMoveResultOther.ID != 0) {
+        return;
+    }
+
+    if (g.NavMoveDir == ImGuiDir_Left && contentWindow != nullptr && g.NavWindow == contentWindow && sidebarWindow != nullptr && sidebarNavTarget.itemId != 0) {
+        ImGui::SetNavWindow(sidebarWindow);
+        ImGui::SetNavID(sidebarNavTarget.itemId, ImGuiNavLayer_Main, sidebarNavTarget.focusScopeId, sidebarNavTarget.rectRel);
+        ImGui::SetNavCursorVisible(true);
+    }
+    else if (g.NavMoveDir == ImGuiDir_Right && sidebarWindow != nullptr && g.NavWindow == sidebarWindow && contentWindow != nullptr && (contentWindow->DC.NavLayersActiveMask & (1 << ImGuiNavLayer_Main)) != 0) {
+        ImGui::SetNavWindow(contentWindow);
+        ImGui::NavInitWindow(contentWindow, false);
+        ImGui::SetNavCursorVisible(true);
+    }
 }
 
 static void DrawSupporterWall() {
@@ -798,7 +838,7 @@ void RND_Renderer::ImGuiOverlay::DrawPlaystylePage(bool* changed) {
     auto& settings = GetSettings();
     const CameraMode cameraMode = settings.cameraMode;
 
-    DrawPageHeader(ICON_KI_FIGURE, "Playstyle", "How you want to inhabit Hyrule.");
+    DrawPageHeader(ICON_KI_PLAYER, "Playstyle", "How you want to inhabit Hyrule.");
 
     if (BeginSettingsSection("##CameraMode")) {
         DrawSetting("Camera Mode", "First person puts you inside Link's body with motion controls. Third person keeps the original camera and plays with a regular controller.", [&]() {
@@ -855,7 +895,7 @@ void RND_Renderer::ImGuiOverlay::DrawComfortPage(bool* changed) {
     auto& settings = GetSettings();
     const CameraMode cameraMode = settings.cameraMode;
 
-    DrawPageHeader(ICON_KI_ADJUST, "Comfort", "Options that keep the camera predictable and motion sickness away.");
+    DrawPageHeader(ICON_KI_BOOT, "Comfort", "Options that keep the camera predictable and motion sickness away.");
 
     if (cameraMode == CameraMode::FIRST_PERSON) {
         if (BeginSettingsSection("##Turning", "Turning")) {
@@ -899,7 +939,7 @@ void RND_Renderer::ImGuiOverlay::DrawComfortPage(bool* changed) {
 void RND_Renderer::ImGuiOverlay::DrawCombatPage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_FIST, "Combat", "How your swings and stabs register.");
+    DrawPageHeader(ICON_KI_SWORD, "Combat", "How your swings and stabs register.");
 
     if (settings.cameraMode != CameraMode::FIRST_PERSON) {
         DrawPageNote("Motion-based combat is only used in First Person mode. Switch the Camera Mode on the Playstyle page to use these options.");
@@ -950,7 +990,7 @@ void RND_Renderer::ImGuiOverlay::DrawControlsPage(bool* changed) {
 void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_GRID, "Interface", "Where the game's menus, HUD and aiming aids appear in your view.");
+    DrawPageHeader(ICON_KI_UI, "Interface", "Where the game's menus, HUD and aiming aids appear in your view.");
 
     if (BeginSettingsSection("##Hud", "HUD & Menus")) {
         DrawSetting("UI Follows Where You Look", "Gently re-centers the HUD and menus as you look around.", [&]() {
@@ -1153,7 +1193,7 @@ void RND_Renderer::ImGuiOverlay::DrawGuidePage() {
 void RND_Renderer::ImGuiOverlay::DrawPerformancePage(bool* changed) {
     auto& settings = GetSettings();
 
-    DrawPageHeader(ICON_KI_PODIUM, "Performance", "Check how smoothly the mod is running and configure the FPS overlay.");
+    DrawPageHeader(ICON_KI_GAUGE, "Performance", "Check how smoothly the mod is running and configure the FPS overlay.");
 
     if (BeginSettingsSection("##Overlay", "FPS Overlay")) {
         DrawSetting("Show FPS Overlay", "Draws a live FPS graph in the corner while you play.", [&]() {
@@ -1333,12 +1373,16 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
     if (ImGui::Begin("BetterVR Settings & Help##Settings", &shouldStayOpen, ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
         bool changed = false;
         float footerHeight = ImGui::GetFrameHeight() * 1.5f;
+        ImGuiWindow* sidebarWindow = nullptr;
+        ImGuiWindow* contentWindow = nullptr;
+        SidebarNavTarget sidebarNavTarget;
 
         float sidebarWidth = std::min(215.0f, windowSize.x * 0.3f);
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08627451f, 0.11764706f, 0.13725491f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05490196f, 0.07843138f, 0.09411765f, 1.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 12.0f));
         if (ImGui::BeginChild("Sidebar", ImVec2(sidebarWidth, -footerHeight), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding)) {
-            DrawSidebar(selectedPage);
+            sidebarWindow = ImGui::GetCurrentWindow();
+            sidebarNavTarget = DrawSidebar(selectedPage);
         }
         ImGui::EndChild();
         ImGui::PopStyleVar();
@@ -1349,6 +1393,7 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 8.0f));
         ImGui::PushID(selectedPage);
         if (ImGui::BeginChild("Content", ImVec2(0.0f, -footerHeight), ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+            contentWindow = ImGui::GetCurrentWindow();
             switch (selectedPage) {
                 case ImGuiMenus::PLAYSTYLE_PAGE: DrawPlaystylePage(&changed); break;
                 case ImGuiMenus::COMFORT_PAGE: DrawComfortPage(&changed); break;
@@ -1395,6 +1440,8 @@ void RND_Renderer::ImGuiOverlay::DrawHelpMenu() {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availW - textWidth) * 0.5f);
         }
         ImGui::TextUnformatted(navText);
+
+        ApplyPaneNavFallback(sidebarWindow, contentWindow, sidebarNavTarget);
     }
 
     ImGui::End();

@@ -88,6 +88,7 @@ using Microsoft::WRL::ComPtr;
 #define ENABLE_VK_DEVICE_FAULT 1
 
 #include "font_kenney.h"
+#include "icons_extra.h"
 
 
 inline glm::fvec2 ToGLM(const XrVector2f& vec) {
