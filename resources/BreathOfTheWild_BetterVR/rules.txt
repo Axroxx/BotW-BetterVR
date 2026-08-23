@@ -43,4 +43,4 @@ $accessibilityUIColor_w = 1.000
 
 # Overwrite FPS++'s FPS limit
 [Control]
-vsyncFrequency = 500
+vsyncFrequency = 180
