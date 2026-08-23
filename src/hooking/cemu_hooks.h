@@ -104,6 +104,7 @@ public:
         osLib_registerHLEFunction("coreinit", "hook_OverrideArrowShotTransform", &hook_OverrideArrowShotTransform);
         osLib_registerHLEFunction("coreinit", "hook_CaptureArrowShootDecision", &hook_CaptureArrowShootDecision);
         osLib_registerHLEFunction("coreinit", "hook_ArrowFpsScale", &hook_ArrowFpsScale);
+        osLib_registerHLEFunction("coreinit", "hook_GetFrameThrottleTicks", &hook_GetFrameThrottleTicks);
         osLib_registerHLEFunction("coreinit", "hook_VisualizeRayCastHits", &hook_VisualizeRayCastHits);
     };
     ~CemuHooks() {
@@ -202,6 +203,8 @@ public:
     static bool IsScreenOpen(ScreenId screen);
     static bool IsScreenVisible(ScreenId screen);
     static bool IsAnyFadeScreenVisible();
+    static bool IsLoadingScreenVisible();
+    static bool IsTitleScreenVisible();
     static glm::fvec3 GetAppliedRoomscaleHeadPosition();
     static float GetRoomscaleFadeAmount();
     static void UpdateFloatParamOverrides();
@@ -315,6 +318,7 @@ private:
     static void hook_OverrideArrowShotTransform(PPCInterpreter_t* hCPU);
     static void hook_CaptureArrowShootDecision(PPCInterpreter_t* hCPU);
     static void hook_ArrowFpsScale(PPCInterpreter_t* hCPU);
+    static void hook_GetFrameThrottleTicks(PPCInterpreter_t* hCPU);
 
 public:
     template <typename T>

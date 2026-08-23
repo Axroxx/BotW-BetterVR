@@ -160,6 +160,36 @@ bool CemuHooks::IsAnyFadeScreenVisible() {
     return IsScreenVisible(ScreenId::FadeDemo_00) || IsScreenVisible(ScreenId::Fade) || IsScreenVisible(ScreenId::FadeStatus_00);
 }
 
+bool CemuHooks::IsLoadingScreenVisible() {
+    // not the fade screens, plenty of those sit open during normal gameplay
+    return IsScreenVisible(ScreenId::LoadingWeapon_00);
+}
+
+bool CemuHooks::IsTitleScreenVisible() {
+    return IsScreenVisible(ScreenId::Title_00);
+}
+
+// the Wii U timebase that OSSleepTicks counts in
+constexpr double WiiUTimerTicksPerSecond = 62156250.0;
+constexpr std::chrono::nanoseconds ThrottledFramePeriod = std::chrono::nanoseconds(1'000'000'000 / 60);
+
+void CemuHooks::hook_GetFrameThrottleTicks(PPCInterpreter_t* hCPU) {
+    hCPU->instructionPointer = hCPU->sprNew.LR;
+
+    static std::chrono::steady_clock::time_point s_nextFrameDeadline = {};
+
+    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    if ((!IsLoadingScreenVisible() && !IsTitleScreenVisible()) || now >= s_nextFrameDeadline) {
+        s_nextFrameDeadline = now + ThrottledFramePeriod;
+        hCPU->gpr[3] = 0;
+        return;
+    }
+
+    const std::chrono::steady_clock::duration remaining = s_nextFrameDeadline - now;
+    s_nextFrameDeadline += ThrottledFramePeriod;
+    hCPU->gpr[3] = (uint32_t)(std::chrono::duration<double>(remaining).count() * WiiUTimerTicksPerSecond);
+}
+
 void CemuHooks::initCutsceneDefaultSettings(uint32_t ppc_TableOfCutsceneEventsSettingsOffset) {
     if (!s_eventSettings.empty()) {
         return;
