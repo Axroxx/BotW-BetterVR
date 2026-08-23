@@ -270,6 +270,8 @@ static constexpr uint32_t ModelUnitArrayOffset = 0x24;
 static constexpr uint32_t ModelUnitMaterialCountOffset = 0x9A;
 static constexpr uint32_t ModelUnitMaterialArrayOffset = 0xA4;
 static constexpr uint32_t ModelUnitMaterialStride = 0x40;
+static constexpr uint32_t ModelUnitVtableOffset = 0x74;
+static constexpr uint32_t ModelUnitSetMaterialVisibleVtableOffset = 0x1B4;
 static constexpr uint32_t MaterialNameRelativeOffset = 0x04;
 static constexpr uint32_t ModelUnitCountSanityMax = 256;
 static constexpr int32_t MaterialNameMaxRelativeOffset = 0x04000000; // 64MB
@@ -360,6 +362,16 @@ static void RefreshPlayerHeadMaterials() {
     CollectHeadMaterialsFromActor(headArmorActorPtr);
 }
 
+static uint32_t GetModelUnitSetMaterialVisible(uint32_t unitPtr) {
+    uint32_t vtablePtr = 0;
+    CemuHooks::readMemoryBE(unitPtr + ModelUnitVtableOffset, &vtablePtr);
+    if (vtablePtr == 0) return 0;
+
+    uint32_t setMaterialVisiblePtr = 0;
+    CemuHooks::readMemoryBE(vtablePtr + ModelUnitSetMaterialVisibleVtableOffset, &setMaterialVisiblePtr);
+    return setMaterialVisiblePtr;
+}
+
 static void SubmitHeadMaterialVisibility(PPCInterpreter_t* hCPU, bool hideHead) {
     if (!s_playerHeadMaterialsRefreshedThisFrame) {
         RefreshPlayerHeadMaterials();
@@ -368,6 +380,11 @@ static void SubmitHeadMaterialVisibility(PPCInterpreter_t* hCPU, bool hideHead) 
     if (s_playerHeadMaterialCount == 0) return;
 
     const HeadMaterialRef& headMaterial = s_playerHeadMaterials[s_playerHeadMaterialCursor++ % s_playerHeadMaterialCount];
+    if (GetModelUnitSetMaterialVisible(headMaterial.unitPtr) == 0) {
+        s_playerHeadMaterialCount = 0;
+        return;
+    }
+
     hCPU->gpr[9] = headMaterial.unitPtr;
     hCPU->gpr[10] = headMaterial.materialIdx;
     hCPU->gpr[11] = hideHead ? 0 : 1;
