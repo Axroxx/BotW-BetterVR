@@ -25,11 +25,12 @@ namespace Supporters {
         Tier tier;
     };
 
-    inline constexpr const char* LastUpdated = "2026-08-22";
+    inline constexpr const char* LastUpdated = "2026-08-23";
 
-    inline constexpr std::size_t HighTierCount = 6;
+    inline constexpr std::size_t HighTierCount = 7;
 
-    inline constexpr std::array<Supporter, 28> List = {{
+    inline constexpr std::array<Supporter, 30> List = {{
+        { "GohTea", Platform::GITHUB, Tier::HIGH },
         { "Alex Paton", Platform::GITHUB, Tier::HIGH },
         { "Braxus", Platform::PATREON, Tier::HIGH },
         { "Dash Schlotterbeck", Platform::GITHUB, Tier::HIGH },
@@ -45,6 +46,7 @@ namespace Supporters {
         { "Slimmoo", Platform::PATREON, Tier::STANDARD },
         { "Team Cemu", Platform::PATREON, Tier::STANDARD },
         { "theLemonadeHeadStand", Platform::PATREON, Tier::STANDARD },
+        { "Zach Rak", Platform::PATREON, Tier::STANDARD },
         { "Zerovolt0V", Platform::PATREON, Tier::STANDARD },
         { "beepsandblips", Platform::GITHUB, Tier::STANDARD },
         { "Carlos4321", Platform::GITHUB, Tier::STANDARD },
