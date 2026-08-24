@@ -60,6 +60,7 @@ static bool IsSwingableWeaponType(WeaponType weaponType) {
 
 static constexpr float SINGLE_HAND_DAMAGE_MULTIPLIER = 0.85f;
 static constexpr float TWO_HAND_GRIP_DAMAGE_MULTIPLIER = 1.20f;
+static constexpr float MULTI_HIT_DAMAGE_MULTIPLIER = 0.50f;
 
 bool CemuHooks::IsTwoHandGripEngaged() {
     if (!s_twoHandGripEnabled)
@@ -467,17 +468,29 @@ void CemuHooks::hook_EnableWeaponAttackSensor(PPCInterpreter_t* hCPU) {
 
     // Use the analysed motion to determine whether the weapon is swinging or stabbing
     if (canUseWeaponMotion && motionAnalyser.IsAttacking()) {
+        // Re-arming bumps the attack id in AttackSensor+0x3C, which wipes the game's per-attack hit list.
+        const bool oneHitPerSwing = GetSettings().UseOneHitPerSwing();
+        const bool armSensor = !oneHitPerSwing || !motionAnalyser.IsHitboxEnabled();
+
         motionAnalyser.SetHitboxEnabled(true);
-        weapon.setupAttackSensor.resetAttack = 1;
         weapon.setupAttackSensor.mode = 2;
-        weapon.setupAttackSensor.isContactLayerInitialized = 0;
         weapon.setupAttackSensor.shieldBreakPower = 2; // damageType 2 required for chopping trees
+        if (armSensor) {
+            weapon.setupAttackSensor.resetAttack = 1;
+            weapon.setupAttackSensor.isContactLayerInitialized = 0;
+        }
 
         // Weak motions stay light; proper swings ramp up closer to full damage.
         const float power = motionAnalyser.GetSwingPower();
         const bool isDualGrippableWeapon = weaponType == WeaponType::LargeSword || weaponType == WeaponType::Spear;
         const float gripDamageMultiplier = isTwoHandGrip ? TWO_HAND_GRIP_DAMAGE_MULTIPLIER : (isDualGrippableWeapon ? SINGLE_HAND_DAMAGE_MULTIPLIER : 1.0f);
-        weapon.setupAttackSensor.multiplier = ComputeAttackDamageMultiplier(power) * gripDamageMultiplier;
+        // A multi-hit swing lands on several frames, so each hit is worth less.
+        const float repeatDamageMultiplier = oneHitPerSwing ? 1.0f : MULTI_HIT_DAMAGE_MULTIPLIER;
+        const float damageMultiplier = ComputeAttackDamageMultiplier(power) * gripDamageMultiplier * repeatDamageMultiplier;
+
+        // Only the arming frame copies setupAttackSensor into the finalized block.
+        weapon.setupAttackSensor.multiplier = damageMultiplier;
+        weapon.finalizedAttackSensor.multiplier = damageMultiplier;
 
         writeMemory(weaponPtr, &weapon);
     }

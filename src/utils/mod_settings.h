@@ -589,6 +589,7 @@ struct ModSettings {
     EnumSetting<WalkingDirection> walkingDirection{ "WalkingDirection", WalkingDirection::CAMERA };
     EnumSetting<TurnMode> turnMode{ "TurnMode", TurnMode::SMOOTH_NORMAL };
     EnumSetting<SwingSensitivity> swingSensitivity{ "SwingSensitivity", SwingSensitivity::SWING_NORMAL };
+    BoolSetting oneHitPerSwing{ "OneHitPerSwing", true };
 
     static std::span<ModSettingBase* const> GetOptions() {
         return SettingRegistry();
@@ -613,6 +614,7 @@ struct ModSettings {
     bool ShouldAimThirdPersonBowFromCamera() const { return thirdPersonBowCameraAim; }
     bool AlwaysPreventFirstPersonCutsceneCameraMovement() const { return alwaysPreventFirstPersonCutsceneCameraMovement; }
     bool ShouldPreventFirstPersonRagdoll() const { return preventFirstPersonRagdoll; }
+    bool UseOneHitPerSwing() const { return oneHitPerSwing; }
     bool ShouldBootDirectlyIntoGame() const { return bootDirectlyIntoGame; }
     AngularVelocityFixerMode AngularVelocityFixer_GetMode() const { return buggyAngularVelocity; }
     SwingSensitivity GetSwingSensitivity() const { return swingSensitivity; }

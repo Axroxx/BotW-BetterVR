@@ -1071,6 +1071,9 @@ void RND_Renderer::ImGuiOverlay::DrawCombatPage(bool* changed) {
             DrawSetting("Attack Sensitivity", "Relaxed picks up lighter swings than normal does.", [&]() {
                 settings.swingSensitivity.AddRadioToGUI(changed);
             });
+            DrawSetting("One Hit Per Swing", "A swing damages each enemy once. Turn it off to hit repeatedly instead, for less damage per hit.", [&]() {
+                settings.oneHitPerSwing.AddToGUI(changed);
+            });
             EndSettingsSection();
         }
     }
