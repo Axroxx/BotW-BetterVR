@@ -569,6 +569,7 @@ struct ModSettings {
     FloatSetting playerHeightOffset{ "PlayerHeightOffset", 0.0f };
     BoolSetting leftHanded{ "LeftHanded", false };
     EnumSetting<UiTrackingMode> uiTrackingMode{ "UiTrackingMode", UiTrackingMode::FOLLOW_GAZE };
+    BoolSetting lockModMenuAndShops{ "LockModMenuAndShops", true };
     BoolSetting curvedHud{ "CurvedHud", false };
     FloatSetting hudDistance{ "HudDistance", 1.85f, 0.5f, 2.5f };
     FloatSetting hudSize{ "HudSize", 0.85f, 0.4f, 1.75f };
@@ -617,6 +618,7 @@ struct ModSettings {
     PlayMode GetPlayMode() const { return playMode; }
     UiTrackingMode GetUiTrackingMode() const { return uiTrackingMode; }
     bool DoesUIFollowGaze() const { return uiTrackingMode != UiTrackingMode::FIXED; }
+    bool ShouldLockModMenuAndShops() const { return lockModMenuAndShops; }
     bool IsCurvedHud() const { return curvedHud; }
     bool IsLeftHanded() const { return leftHanded; }
     float GetPlayerHeightOffset() const {

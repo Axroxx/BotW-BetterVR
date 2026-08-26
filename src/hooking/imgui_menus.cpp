@@ -1135,6 +1135,9 @@ void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
         DrawSetting("UI Tracking", "Fixed keeps the HUD in one place. Follow rotates it to always face you, including tilt. Vertical Lock follows where you turn but keeps the HUD upright.", [&]() {
             settings.uiTrackingMode.AddComboToGUI(changed);
         });
+        DrawSetting("Lock Mod Menu & Shops", "Keeps this settings menu and shop menus fixed in place instead of following the UI Tracking setting above, same as the inventory menu.", [&]() {
+            settings.lockModMenuAndShops.AddToGUI(changed);
+        });
         DrawSetting("Curved HUD", "Curves the HUD panel around you instead of a flat rectangle.", [&]() {
             settings.curvedHud.AddToGUI(changed);
         });
