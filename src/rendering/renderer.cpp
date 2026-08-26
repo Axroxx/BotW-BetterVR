@@ -905,7 +905,10 @@ RND_Renderer::Layer2D::HudPresentation RND_Renderer::Layer2D::FinishRendering(Xr
 
     // the pause menu blanks briefly between tabs, so only unlock after it stays closed
     constexpr uint32_t GAZE_UNLOCK_FRAMES = 5;
-    if (CemuHooks::IsScreenOpen(ScreenId::PauseMenuInfo_00)) {
+    const bool isAnyMenuOpen = CemuHooks::IsScreenOpen(ScreenId::PauseMenuInfo_00)
+        || CemuHooks::IsScreenOpen(ScreenId::ShopBG_00)
+        || VRManager::instance().XR->m_isMenuOpen.load(std::memory_order_relaxed);
+    if (isAnyMenuOpen) {
         m_gazeUnlockCounter = 0;
         if (!m_isGazeLocked) {
             m_isGazeLocked = true;
