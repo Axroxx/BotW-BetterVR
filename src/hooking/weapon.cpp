@@ -36,11 +36,16 @@ void CemuHooks::UpdateHeldWeaponStaleness() {
     if (m_heldWeaponsLastUpdate[0] >= HeldWeaponStaleFrames) {
         m_heldWeapons[0] = 0;
         s_handWeaponTypes[0] = WeaponType::UnknownWeapon;
+        // hook_ChangeWeaponMtx only calls this when the left hand still holds a bow/slate, so
+        // clear it here once that hand goes stale, otherwise it stays stuck on after unequipping
+        RND_Renderer::Layer2D::SetBowAimingActive(false);
     }
     if (m_heldWeaponsLastUpdate[1] >= HeldWeaponStaleFrames) {
         m_heldWeapons[1] = 0;
         s_handWeaponTypes[1] = WeaponType::UnknownWeapon;
         s_arrowNockedInRightHand = false;
+        // same staleness hazard as the left hand, but for the magnet glove case
+        RND_Renderer::Layer2D::SetBowAimingActive(false);
     }
 }
 

@@ -273,7 +273,7 @@ void RND_Renderer::EndFrame() {
 
     XrCompositionLayerProjection layer3D = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
     std::array<XrCompositionLayerProjectionView, 2> layer3DViews = {};
-    std::vector<XrCompositionLayerQuad> layer2DQuads;
+    Layer2D::HudPresentation layer2DPresentation;
 
     const long hudFrameIdx = SelectNewestHudReadyFrame();
 
@@ -352,8 +352,8 @@ void RND_Renderer::EndFrame() {
         }
 
         if (shouldRender2D) {
-            layer2DQuads = m_layer2D->FinishRendering(m_frameState.predictedDisplayTime, hudFrameIdx);
-            m_presented2DLastFrame = !layer2DQuads.empty();
+            layer2DPresentation = m_layer2D->FinishRendering(m_frameState.predictedDisplayTime, hudFrameIdx);
+            m_presented2DLastFrame = !layer2DPresentation.IsEmpty();
         }
 
         if (shouldRender3D) {
@@ -378,7 +378,7 @@ void RND_Renderer::EndFrame() {
         }
 
         // add 2D layer after 3D layer so that it appears on top
-        for (auto& layer : layer2DQuads) {
+        for (auto& layer : layer2DPresentation.quads) {
             compositionLayers.emplace_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
         }
 
@@ -867,7 +867,7 @@ static glm::fvec3 GetHorizontalGazeDirection(const glm::quat& headOrientation) {
     return glm::normalize(yawOnly) * glm::fvec3(0.0f, 0.0f, -1.0f);
 }
 
-std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTime predictedDisplayTime, long frameIdx) {
+RND_Renderer::Layer2D::HudPresentation RND_Renderer::Layer2D::FinishRendering(XrTime predictedDisplayTime, long frameIdx) {
     this->m_swapchain->FinishRendering();
 
     auto poses = VRManager::instance().XR->GetRenderer()->GetPoses(frameIdx);
@@ -905,7 +905,17 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
 
     if (GetSettings().DoesUIFollowGaze() || isBowAiming) {
         m_currentOrientation = glm::slerp(m_currentOrientation, headOrientation, LERP_SPEED);
-        glm::vec3 forwardDirection = m_isGazeLocked ? m_lockedGazeForward : headOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+        const bool lockVertical = !isBowAiming && GetSettings().GetUiTrackingMode() == UiTrackingMode::FOLLOW_GAZE_LOCKED_VERTICAL;
+        glm::vec3 forwardDirection;
+        if (m_isGazeLocked) {
+            forwardDirection = m_lockedGazeForward;
+        }
+        else if (lockVertical) {
+            forwardDirection = GetHorizontalGazeDirection(headOrientation);
+        }
+        else {
+            forwardDirection = headOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+        }
 
         // calculate new position forwards
         glm::vec3 targetPosition = headPosition + (DISTANCE * forwardDirection);
@@ -926,6 +936,11 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
         layerPose.orientation = { 0.0f, 0.0f, 0.0f, 1.0f };
     }
 
+    layerPose.position.y += GetSettings().hudVerticalOffset;
+
+    const glm::vec3 panelCenter = ToGLM(layerPose.position);
+    const glm::quat panelOrientation = ToGLM(layerPose.orientation);
+
     //const float aspectRatio = (float)this->m_textures[frameIdx]->d3d12GetTexture()->GetDesc().Width / (float)this->m_textures[frameIdx]->d3d12GetTexture()->GetDesc().Height;
     const float aspectRatio = 16.0f / 9.0f;
 
@@ -935,36 +950,73 @@ std::vector<XrCompositionLayerQuad> RND_Renderer::Layer2D::FinishRendering(XrTim
 
     // todo: change space to head space if we want to follow the head
     const float LAYER_SIZE = GetSettings().hudSize;
+    const float panelWidth = width * LAYER_SIZE;
+    const float panelHeight = height * LAYER_SIZE;
 
-    std::vector<XrCompositionLayerQuad> layers;
+    HudPresentation presentation;
 
-    // clang-format off
-    layers.push_back({
-        .type = XR_TYPE_COMPOSITION_LAYER_QUAD,
-        .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
-        .space = VRManager::instance().XR->m_stageSpace,
-        .eyeVisibility = XR_EYE_VISIBILITY_BOTH,
-        .subImage = {
-            .swapchain = this->m_swapchain->GetHandle(),
-            .imageRect = {
-                .offset = { 0, 0 },
-                .extent = {
-                    .width = (int32_t)this->m_swapchain->GetWidth(),
-                    .height = (int32_t)this->m_swapchain->GetHeight()
+    const uint32_t swapchainWidth = this->m_swapchain->GetWidth();
+    const uint32_t swapchainHeight = this->m_swapchain->GetHeight();
+
+    // Approximates a cylindrical curve without needing XR_KHR_composition_layer_cylinder (not
+    // widely supported): several narrow quads are fanned out around the player at a fixed radius,
+    // each sampling its own vertical slice of the HUD texture.
+    constexpr uint32_t CURVED_SEGMENT_COUNT = 9;
+    const bool useCurve = GetSettings().IsCurvedHud();
+    const uint32_t segmentCount = useCurve ? CURVED_SEGMENT_COUNT : 1;
+
+    const glm::vec3 panelForward = panelOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+    const glm::vec3 panelUp = panelOrientation * glm::vec3(0.0f, 1.0f, 0.0f);
+    // the panel's pose sits at the surface facing the player, so recover the arc's center (roughly
+    // headPosition/eye level) to fan segments around, instead of around the surface point itself
+    const glm::vec3 arcCenter = panelCenter - panelForward * DISTANCE;
+
+    const float segmentWidth = panelWidth / (float)segmentCount;
+    const float segmentAngle = useCurve ? (segmentWidth / DISTANCE) : 0.0f;
+
+    // widen each segment's physical quad a hair beyond its exact texture slice (without sampling
+    // extra texture data) so neighboring quads overlap in world space instead of touching exactly
+    // edge-to-edge, hiding the seam from float-precision gaps between angled flat quads. Widening
+    // the sampled texture region instead (i.e. reaching into the neighbor's pixels) would double
+    // up the neighbor's alpha where both quads overlap, showing as a darker seam on translucent
+    // HUD content like the dpad menu's backdrop.
+    constexpr float SEGMENT_EDGE_PADDING = 0.0006f;
+
+    presentation.quads.reserve(segmentCount);
+    for (uint32_t segmentIdx = 0; segmentIdx < segmentCount; ++segmentIdx) {
+        // negated: a positive rotation around panelUp turns the forward vector toward -X (left),
+        // but increasing segmentIdx should sweep left-to-right to match the texture slice order
+        const float segmentOffset = -((float)segmentIdx - ((float)segmentCount - 1.0f) * 0.5f) * segmentAngle;
+        const glm::quat segmentOrientation = glm::angleAxis(segmentOffset, panelUp) * panelOrientation;
+        const glm::vec3 segmentPosition = arcCenter + (segmentOrientation * glm::vec3(0.0f, 0.0f, -1.0f)) * DISTANCE;
+
+        XrPosef segmentPose = { ToXR(segmentOrientation), ToXR(segmentPosition) };
+
+        const int32_t sliceStart = (int32_t)(((float)segmentIdx / (float)segmentCount) * (float)swapchainWidth);
+        const int32_t sliceEnd = (int32_t)(((float)(segmentIdx + 1) / (float)segmentCount) * (float)swapchainWidth);
+        const float edgePadding = useCurve ? SEGMENT_EDGE_PADDING : 0.0f;
+
+        // clang-format off
+        presentation.quads.push_back({
+            .type = XR_TYPE_COMPOSITION_LAYER_QUAD,
+            .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+            .space = VRManager::instance().XR->m_stageSpace,
+            .eyeVisibility = XR_EYE_VISIBILITY_BOTH,
+            .subImage = {
+                .swapchain = this->m_swapchain->GetHandle(),
+                .imageRect = {
+                    .offset = { sliceStart, 0 },
+                    .extent = {
+                        .width = sliceEnd - sliceStart,
+                        .height = (int32_t)swapchainHeight
+                    }
                 }
-            }
-        },
-        .pose = layerPose,
-        .size = { width * LAYER_SIZE, height * LAYER_SIZE }
-    });
-    // clang-format on
-
-    // render layer twice to visualize the controller positions in debug mode
-    auto inputs = VRManager::instance().XR->m_input.load();
-
-    if (!(inputs.shared.in_game && inputs.shared.pose[OpenXR::EyeSide::LEFT].isActive && inputs.shared.pose[OpenXR::EyeSide::RIGHT].isActive)) {
-        return layers;
+            },
+            .pose = segmentPose,
+            .size = { segmentWidth + edgePadding, panelHeight }
+        });
+        // clang-format on
     }
 
-    return layers;
+    return presentation;
 }
