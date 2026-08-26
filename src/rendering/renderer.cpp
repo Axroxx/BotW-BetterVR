@@ -300,7 +300,6 @@ void RND_Renderer::EndFrame() {
     bool reusedStable3D = false;
     long presented3DFrameIdx = -1;
     const std::array<XrView, 2>* presented3DViews = nullptr;
-    std::array<XrView, 2> reusedStable3DViewsWithLivePose = {};
 
     if (hudFrameIdx != -1) {
         RenderFrame& hudFrame = m_renderFrames[hudFrameIdx];
@@ -325,17 +324,6 @@ void RND_Renderer::EndFrame() {
                 presented3DFrameIdx = m_stable3D.frameIdx;
                 presented3DViews = &m_stable3D.views;
                 reusedStable3D = true;
-
-                // the reused frame's color/depth images are frozen from whenever they were captured,
-                // but its pose/fov aren't - keep those live so the frozen background stays correctly
-                // reprojected as the headset moves, instead of drifting apart from the head-tracked
-                // HUD layer and eventually reading as double vision
-                if (auto liveViews = UpdateViews(m_frameState.predictedDisplayTime); liveViews.has_value()) {
-                    reusedStable3DViewsWithLivePose = liveViews.value();
-                    reusedStable3DViewsWithLivePose[OpenXR::EyeSide::LEFT].fov = m_stable3D.views[OpenXR::EyeSide::LEFT].fov;
-                    reusedStable3DViewsWithLivePose[OpenXR::EyeSide::RIGHT].fov = m_stable3D.views[OpenXR::EyeSide::RIGHT].fov;
-                    presented3DViews = &reusedStable3DViewsWithLivePose;
-                }
             }
         }
 

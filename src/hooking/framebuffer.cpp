@@ -190,6 +190,16 @@ void VkDeviceOverrides::CmdClearColorImage(const vkroots::VkCommandBufferDispatc
                 clearFramebuffer(disableAlpha);
             };
 
+            // while in mono mode (menus, pictures) the game still submits per-eye clears, but there's
+            // no real stereo pair to capture here - copying them into m_textures[side][frameIdx] would
+            // overwrite whatever frame is currently frozen and reused as the stable 3D background,
+            // and since the two eyes don't land at exactly the same time, one eye's texture could get
+            // overwritten before the other, leaving the two eyes showing different frames
+            if (useMonoCapture) {
+                returnToLayout();
+                return;
+            }
+
             // check if the color texture has the appropriate texture format
             if (s_curr3DColorImage == VK_NULL_HANDLE) {
                 lockImageResolutions.lock();
@@ -360,6 +370,13 @@ void VkDeviceOverrides::CmdClearDepthStencilImage(const vkroots::VkCommandBuffer
         RND_Renderer::RenderFrame& frame = renderer->GetFrame(frameCounter);
 
         if (side == OpenXR::EyeSide::LEFT || side == OpenXR::EyeSide::RIGHT) {
+            // see the matching guard in CmdClearColorImage: during mono capture (menus, pictures)
+            // this slot may still be the frozen stable 3D frame's, so it must not be overwritten
+            if (CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures()) {
+                returnToLayout();
+                return;
+            }
+
             // 3D layer - depth texture for 3D rendering
             if (s_curr3DDepthImage == VK_NULL_HANDLE) {
                 lockImageResolutions.lock();
