@@ -57,7 +57,8 @@ bool RND_Renderer::IsStable3DReuseAllowed(const RenderFrame& frame) const {
     }
     const bool isMonoFallbackFrame = (frame.issueFlags & CaptureIssue_MonoCapture) != 0;
     const bool isDpadMenuOpen = VRManager::instance().XR->m_gameState.load().dpad_menu_open_requested;
-    if (!isMonoFallbackFrame && !CemuHooks::IsInGame() && !isDpadMenuOpen) {
+    const bool isInventoryMenuOpen = CemuHooks::IsScreenOpen(ScreenId::PauseMenuInfo_00);
+    if (!isMonoFallbackFrame && !CemuHooks::IsInGame() && !isDpadMenuOpen && !isInventoryMenuOpen) {
         return false;
     }
     if (CemuHooks::UseBlackBarsDuringEvents()) {
@@ -288,15 +289,18 @@ void RND_Renderer::EndFrame() {
     SetCustomFadeColor(glm::fvec3(0.0f));
     SetCustomFadeAmount(std::max(roomscaleFade, snapTurnFade));
 
-    // the dpad quick-menu's darkening backdrop is baked into the HUD capture as opaque black
-    // (correct in flatscreen where it draws into the same buffer as the 3D scene, but it would
-    // fully occlude our separately-composited HUD layer), so cap its alpha instead of letting it through
+    // the dpad quick-menu's and inventory (pause) menu's darkening backdrops are baked into the HUD
+    // capture as opaque black (correct in flatscreen where they draw into the same buffer as the 3D
+    // scene, but it would fully occlude our separately-composited HUD layer), so cap the alpha instead
+    // of letting it through
     const bool isDpadMenuOpenForHud = VRManager::instance().XR->m_gameState.load().dpad_menu_open_requested;
-    SetHudMaxAlpha(isDpadMenuOpenForHud ? 0.55f : 1.0f);
+    const bool isInventoryMenuOpenForHud = CemuHooks::IsScreenOpen(ScreenId::PauseMenuInfo_00);
+    SetHudMaxAlpha((isDpadMenuOpenForHud || isInventoryMenuOpenForHud) ? 0.55f : 1.0f);
 
     bool reusedStable3D = false;
     long presented3DFrameIdx = -1;
     const std::array<XrView, 2>* presented3DViews = nullptr;
+    std::array<XrView, 2> reusedStable3DViewsWithLivePose = {};
 
     if (hudFrameIdx != -1) {
         RenderFrame& hudFrame = m_renderFrames[hudFrameIdx];
@@ -321,6 +325,17 @@ void RND_Renderer::EndFrame() {
                 presented3DFrameIdx = m_stable3D.frameIdx;
                 presented3DViews = &m_stable3D.views;
                 reusedStable3D = true;
+
+                // the reused frame's color/depth images are frozen from whenever they were captured,
+                // but its pose/fov aren't - keep those live so the frozen background stays correctly
+                // reprojected as the headset moves, instead of drifting apart from the head-tracked
+                // HUD layer and eventually reading as double vision
+                if (auto liveViews = UpdateViews(m_frameState.predictedDisplayTime); liveViews.has_value()) {
+                    reusedStable3DViewsWithLivePose = liveViews.value();
+                    reusedStable3DViewsWithLivePose[OpenXR::EyeSide::LEFT].fov = m_stable3D.views[OpenXR::EyeSide::LEFT].fov;
+                    reusedStable3DViewsWithLivePose[OpenXR::EyeSide::RIGHT].fov = m_stable3D.views[OpenXR::EyeSide::RIGHT].fov;
+                    presented3DViews = &reusedStable3DViewsWithLivePose;
+                }
             }
         }
 
@@ -515,13 +530,17 @@ bool RND_Renderer::EnsureFrameInputLatched() {
 
 void RND_Renderer::BeginStereoCaptureGeneration(long frameIdx) {
     checkAssert(frameIdx >= 0 && frameIdx < (long)m_renderFrames.size(), "Stereo capture frame index is out of range!");
-    const bool preserveMonoCapture = (m_renderFrames[frameIdx].issueFlags & CaptureIssue_MonoCapture) != 0;
-    if (!preserveMonoCapture) {
+    // mono captures (menus, pictures) never get promoted to stable (IsCurrent3DPresentationAllowed
+    // rejects them), so invalidating the last real stable frame here would leave nothing to reuse
+    // for the whole time the menu stays open. issueFlags is reset every capture generation, so that
+    // can't be used to remember "still in mono mode" across frames - ask the current game state instead.
+    const bool isMonoCapture = CemuHooks::UseMonoFrameBufferTemporarilyDuringMenusOrPictures();
+    if (!isMonoCapture) {
         InvalidateStable3DForFrame(frameIdx);
     }
     RenderFrame& frame = m_renderFrames[frameIdx];
     frame.BeginStereoCapture(m_nextStereoGeneration++);
-    if (preserveMonoCapture) {
+    if (isMonoCapture) {
         frame.AddIssue(CaptureIssue_MonoCapture);
     }
     frame.lastActivityOrdinal = NextCaptureActivityOrdinal();
