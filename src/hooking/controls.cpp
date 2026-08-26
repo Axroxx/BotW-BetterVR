@@ -197,9 +197,13 @@ HandGestureState calculateHandGesture(
             gesture.magnesisForwardAmount = gesture.magnesisVerticalAmount = 0.0f;
         }
         else {
-            const glm::vec3 headsetUp(0.0f, 1.0f, 0.0f);
-            auto forwardAmount = glm::dot(delta, headsetForward);
-            auto verticalAmount = glm::dot(delta, headsetUp);
+            // Magnesis push/pull and raise/lower should follow where the headset is actually
+            // pointed, tilt included, so use the unflattened orientation instead of headsetForward
+            // (which is flattened to the horizontal plane for the shoulder/waist slot gestures above)
+            const glm::vec3 headsetTiltedForward = -glm::normalize(glm::vec3(headsetMatrix[2]));
+            const glm::vec3 headsetTiltedUp = glm::normalize(glm::vec3(headsetMatrix[1]));
+            auto forwardAmount = glm::dot(delta, headsetTiltedForward);
+            auto verticalAmount = glm::dot(delta, headsetTiltedUp);
 
             auto remapSigned = [&](float value) {
                 float sign = glm::sign(value);

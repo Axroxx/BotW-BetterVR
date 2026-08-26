@@ -1132,8 +1132,11 @@ void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
     DrawPageHeader(ICON_KI_UI, "Interface");
 
     if (BeginSettingsSection("##Hud", "HUD & Menus")) {
-        DrawSetting("UI Follows Where You Look", "When off, the HUD stays in one place instead of following your head.", [&]() {
-            settings.uiFollowsGaze.AddToGUI(changed);
+        DrawSetting("UI Tracking", "Fixed keeps the HUD in one place. Follow rotates it to always face you, including tilt. Vertical Lock follows where you turn but keeps the HUD upright.", [&]() {
+            settings.uiTrackingMode.AddComboToGUI(changed);
+        });
+        DrawSetting("Curved HUD", "Curves the HUD panel around you instead of a flat rectangle.", [&]() {
+            settings.curvedHud.AddToGUI(changed);
         });
         DrawSetting("Menu/HUD Distance & Size", [&]() {
             float distance = settings.hudDistance;
@@ -1152,6 +1155,18 @@ void RND_Renderer::ImGuiOverlay::DrawInterfacePage(bool* changed) {
             if (ImGui::Button("Reset")) {
                 settings.hudDistance.Reset();
                 settings.hudSize.Reset();
+                *changed = true;
+            }
+        });
+        DrawSetting("HUD Vertical Position", "Shifts the HUD up or down.", [&]() {
+            float verticalOffset = settings.hudVerticalOffset;
+            if (ImGui::SliderFloat("##hudVerticalOffset", &verticalOffset, settings.hudVerticalOffset.min, settings.hudVerticalOffset.max, "%.2fm")) {
+                settings.hudVerticalOffset = std::clamp(verticalOffset, settings.hudVerticalOffset.min, settings.hudVerticalOffset.max);
+                *changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset##hudVerticalOffset")) {
+                settings.hudVerticalOffset.Reset();
                 *changed = true;
             }
         });

@@ -269,10 +269,16 @@ public:
             uint64_t lastSignal = m_textures[frameIdx]->GetLastSignalledValue();
             return lastSignal > 0 && (lastSignal % 2 == 1);
         };
+        struct HudPresentation {
+            std::vector<XrCompositionLayerQuad> quads;
+
+            bool IsEmpty() const { return quads.empty(); }
+        };
+
         void PrepareRendering() const;
         void StartRendering() const;
         void RecordRender(RND_D3D12::CommandContext<false>* context, long frameIdx);
-        std::vector<XrCompositionLayerQuad> FinishRendering(XrTime predictedDisplayTime, long frameIdx);
+        HudPresentation FinishRendering(XrTime predictedDisplayTime, long frameIdx);
         long GetCurrentFrameIdx() const { return m_currentFrameIdx; }
         auto& GetSharedTextures() { return m_textures; }
 

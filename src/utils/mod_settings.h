@@ -516,6 +516,21 @@ struct EnumTable<SwingSensitivity> {
     });
 };
 
+enum class UiTrackingMode : int32_t {
+    FIXED = 0,
+    FOLLOW_GAZE = 1,
+    FOLLOW_GAZE_LOCKED_VERTICAL = 2,
+};
+
+template <>
+struct EnumTable<UiTrackingMode> {
+    static constexpr auto entries = std::to_array<EnumEntry<UiTrackingMode>>({
+        { UiTrackingMode::FIXED, "FIXED", "Fixed In Place" },
+        { UiTrackingMode::FOLLOW_GAZE, "FOLLOW_GAZE", "Follow Where You Look" },
+        { UiTrackingMode::FOLLOW_GAZE_LOCKED_VERTICAL, "FOLLOW_GAZE_LOCKED_VERTICAL", "Follow Where You Look (Vertical Lock)" }
+    });
+};
+
 enum class TurnMode : int32_t {
     SMOOTH_SLOW = 0,
     SMOOTH_NORMAL = 1,
@@ -553,9 +568,11 @@ struct ModSettings {
     // first-person settings
     FloatSetting playerHeightOffset{ "PlayerHeightOffset", 0.0f };
     BoolSetting leftHanded{ "LeftHanded", false };
-    BoolSetting uiFollowsGaze{ "UiFollowsGaze", true };
+    EnumSetting<UiTrackingMode> uiTrackingMode{ "UiTrackingMode", UiTrackingMode::FOLLOW_GAZE };
+    BoolSetting curvedHud{ "CurvedHud", false };
     FloatSetting hudDistance{ "HudDistance", 1.85f, 0.5f, 2.5f };
     FloatSetting hudSize{ "HudSize", 0.85f, 0.4f, 1.75f };
+    FloatSetting hudVerticalOffset{ "HudVerticalOffset", 0.0f, -0.5f, 0.5f };
     FloatSetting bowArcOpacity{ "BowArcTransparency", 0.7f, 0.0f, 1.0f };
 
     // advanced settings
@@ -598,7 +615,9 @@ struct ModSettings {
     CameraMode GetCameraMode() const { return cameraMode; }
 
     PlayMode GetPlayMode() const { return playMode; }
-    bool DoesUIFollowGaze() const { return uiFollowsGaze; }
+    UiTrackingMode GetUiTrackingMode() const { return uiTrackingMode; }
+    bool DoesUIFollowGaze() const { return uiTrackingMode != UiTrackingMode::FIXED; }
+    bool IsCurvedHud() const { return curvedHud; }
     bool IsLeftHanded() const { return leftHanded; }
     float GetPlayerHeightOffset() const {
         // disable height offset in third-person mode
