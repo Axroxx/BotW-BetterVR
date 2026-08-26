@@ -452,7 +452,13 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
         };
 
         // insert (possible) pipeline barriers for any active copy operations
-        std::vector<std::vector<PendingCopyOperation>> matchedOperations(submitCount);
+        // reused across calls to avoid heap-allocating these on every submit that has a pending
+        // copy (which happens at least once per captured surface per frame) - QueueSubmit on a
+        // given VkQueue can't run concurrently on the same thread per the Vulkan spec, so a
+        // thread_local scratch buffer is safe here
+        thread_local std::vector<std::vector<PendingCopyOperation>> matchedOperations;
+        matchedOperations.clear();
+        matchedOperations.resize(submitCount);
         {
             std::lock_guard lk(s_pendingCopyMutex);
 
@@ -479,8 +485,12 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
             }
         }
 
-        std::vector<ModifiedSubmitInfo_t> modifiedSubmitInfos{ submitCount };
-        std::vector<VkSubmitInfo> shadowSubmits{ submitCount };
+        thread_local std::vector<ModifiedSubmitInfo_t> modifiedSubmitInfos;
+        modifiedSubmitInfos.clear();
+        modifiedSubmitInfos.resize(submitCount);
+        thread_local std::vector<VkSubmitInfo> shadowSubmits;
+        shadowSubmits.clear();
+        shadowSubmits.resize(submitCount);
 
         for (uint32_t i = 0; i < submitCount; i++) {
             const VkSubmitInfo& submitInfo = pSubmits[i];
@@ -488,6 +498,12 @@ VkResult VkDeviceOverrides::QueueSubmit(const vkroots::VkQueueDispatch& pDispatc
 
             // AMD GPU FIX: Create shadow copy of original VkSubmitInfo
             modifiedSubmitInfo.submitInfoCopy = submitInfo;
+
+            // these vectors are reused across calls (see thread_local above), so clear any leftover
+            // content from a previous submit before conditionally repopulating them below
+            modifiedSubmitInfo.waitSemaphores.clear();
+            modifiedSubmitInfo.waitDstStageMasks.clear();
+            modifiedSubmitInfo.signalSemaphores.clear();
 
             // copy old semaphores into new vectors
             if (submitInfo.waitSemaphoreCount > 0 && submitInfo.pWaitSemaphores != nullptr) {

@@ -267,39 +267,62 @@ RND_D3D12::PresentPipeline<depth>::PresentPipeline(RND_Renderer* pRenderer): m_r
 // These change the CPU handles that'll later be used for binding the actual assets
 template <bool depth>
 void RND_D3D12::PresentPipeline<depth>::BindAttachment(uint32_t attachmentIdx, ID3D12Resource* srcTexture, DXGI_FORMAT overwriteFormat) {
+    const DXGI_FORMAT format = overwriteFormat != DXGI_FORMAT_UNKNOWN ? overwriteFormat : srcTexture->GetDesc().Format;
+    if (m_boundAttachmentResources[attachmentIdx] == srcTexture && m_boundAttachmentFormats[attachmentIdx] == format) {
+        return;
+    }
+
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = overwriteFormat != DXGI_FORMAT_UNKNOWN ? overwriteFormat : srcTexture->GetDesc().Format;
+    srvDesc.Format = format;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Texture2D.MipLevels = 1;
     VRManager::instance().D3D12->GetDevice()->CreateShaderResourceView(srcTexture, &srvDesc, m_attachmentHandles[attachmentIdx]);
+    m_boundAttachmentResources[attachmentIdx] = srcTexture;
+    m_boundAttachmentFormats[attachmentIdx] = format;
 }
 
 template <bool depth>
 void RND_D3D12::PresentPipeline<depth>::BindTarget(uint32_t targetIdx, ID3D12Resource* dstTexture, DXGI_FORMAT overwriteFormat) {
+    const DXGI_FORMAT format = overwriteFormat != DXGI_FORMAT_UNKNOWN ? overwriteFormat : dstTexture->GetDesc().Format;
+
+    if (format != m_targetFormats[targetIdx]) {
+        m_targetFormats[targetIdx] = format;
+        RecreatePipeline();
+        m_boundTargetResources[targetIdx] = nullptr; // format changed, so the view descriptor needs rewriting
+    }
+
+    if (m_boundTargetResources[targetIdx] == dstTexture) {
+        return;
+    }
+
     D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-    rtvDesc.Format = overwriteFormat != DXGI_FORMAT_UNKNOWN ? overwriteFormat : dstTexture->GetDesc().Format;
+    rtvDesc.Format = format;
     rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     VRManager::instance().D3D12->GetDevice()->CreateRenderTargetView(dstTexture, &rtvDesc, m_targetHandles[targetIdx]);
-
-    if (rtvDesc.Format != m_targetFormats[targetIdx]) {
-        m_targetFormats[targetIdx] = rtvDesc.Format;
-        RecreatePipeline();
-    }
+    m_boundTargetResources[targetIdx] = dstTexture;
 }
 
 template <bool depth>
 void RND_D3D12::PresentPipeline<depth>::BindDepthTarget(ID3D12Resource* dstTexture, DXGI_FORMAT overwriteFormat) {
+    const DXGI_FORMAT format = overwriteFormat != DXGI_FORMAT_UNKNOWN ? overwriteFormat : dstTexture->GetDesc().Format;
+
+    if (format != m_targetFormats.back()) {
+        m_targetFormats.back() = format;
+        RecreatePipeline();
+        m_boundDepthTargetResources[0] = nullptr; // format changed, so the view descriptor needs rewriting
+    }
+
+    if (m_boundDepthTargetResources[0] == dstTexture) {
+        return;
+    }
+
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format = overwriteFormat != DXGI_FORMAT_UNKNOWN ? overwriteFormat : dstTexture->GetDesc().Format;
+    dsvDesc.Format = format;
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
     VRManager::instance().D3D12->GetDevice()->CreateDepthStencilView(dstTexture, &dsvDesc, m_depthTargetHandles[0]);
-
-    if (dsvDesc.Format != m_targetFormats.back()) {
-        m_targetFormats.back() = dsvDesc.Format;
-        RecreatePipeline();
-    }
+    m_boundDepthTargetResources[0] = dstTexture;
 }
 
 template <bool depth>

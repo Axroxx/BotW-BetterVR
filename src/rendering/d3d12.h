@@ -64,6 +64,14 @@ public:
         ComPtr<ID3D12DescriptorHeap> m_targetHeap;
         ComPtr<ID3D12DescriptorHeap> m_depthHeap;
         std::array<DXGI_FORMAT, 2> m_targetFormats = { DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_D32_FLOAT };
+
+        // BindAttachment/BindTarget/BindDepthTarget are called every frame with resources that only
+        // ever cycle through a small fixed set (2 eyes x 2 frame slots), so the CPU descriptor handle
+        // already holds the right view most frames - skip the CreateXView call when nothing changed
+        std::array<ID3D12Resource*, depth ? 3 : 1> m_boundAttachmentResources = {};
+        std::array<DXGI_FORMAT, depth ? 3 : 1> m_boundAttachmentFormats = {};
+        std::array<ID3D12Resource*, 1> m_boundTargetResources = {};
+        std::array<ID3D12Resource*, depth ? 1 : 0> m_boundDepthTargetResources = {};
     };
 
     template <bool blockTillExecuted>
