@@ -117,8 +117,6 @@ public:
     std::atomic<glm::fquat> m_inputCameraRotation = glm::identity<glm::fquat>();
     std::atomic_int32_t m_pendingSnapTurnDirection = 0;
     std::atomic_uint64_t m_pendingSnapTurnRequestUntilNs = 0;
-    std::atomic_uint64_t m_snapTurnFadeStartNs = 0;
-    std::atomic_uint64_t m_snapTurnFadeUntilNs = 0;
     std::atomic<float> m_smoothTurnStickDeflection = 0.0f;
     std::atomic_bool m_isSnapTurnCameraActive = false;
 

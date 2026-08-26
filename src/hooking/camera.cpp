@@ -158,18 +158,6 @@ static glm::fvec3 SphericalToCameraTargetVector(const glm::fvec3& sphericalDegre
     };
 }
 
-static void SignalSnapTurnFade() {
-    auto* xr = VRManager::instance().XR.get();
-    if (xr == nullptr) {
-        return;
-    }
-
-    constexpr auto kSnapTurnFadeDuration = std::chrono::milliseconds(110);
-    const uint64_t startNs = GetTimeStamp();
-    xr->m_snapTurnFadeStartNs.store(startNs, std::memory_order_relaxed);
-    xr->m_snapTurnFadeUntilNs.store(startNs + (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(kSnapTurnFadeDuration).count(), std::memory_order_relaxed);
-}
-
 static float YawDegreesFromRotation(const glm::fquat& rot) {
     const glm::fquat twist = RenderUtils::swingTwistY(rot).second;
     return NormalizeDegrees(glm::degrees(2.0f * std::atan2(twist.y, twist.w)));
@@ -190,7 +178,6 @@ static float ConsumePendingCameraYawDelta() {
         return 0.0f;
     }
 
-    SignalSnapTurnFade();
     return (float)direction * (float)snapAngle;
 }
 
